@@ -1,0 +1,29 @@
+# Виртуальное окружение (обязательно исключить, весит несколько гигабайт!)
+.venv/
+venv/
+env/
+ENV/
+
+# Байткод Python и кэш
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Кэш скачанных моделей PaddleOCR / PaddleX
+.paddlex/
+*.onnx
+
+# Временные файлы загрузок и результатов
+*.tmp
+temp_*
+
+# Конфигурации редакторов и ОС
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
