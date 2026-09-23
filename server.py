@@ -33,10 +33,15 @@ def index():
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    .font-mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 </head>
 <body class="bg-slate-50/70 text-slate-800 min-h-screen antialiased selection:bg-emerald-100 selection:text-emerald-800">
@@ -157,13 +162,13 @@ def index():
             <div class="flex items-center justify-between pb-4 mb-5 border-b border-slate-100">
               <div class="flex items-center gap-2.5">
                 <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Результат анализа</h2>
-                <span id="itemsBadge" class="hidden text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
+                <span id="itemsBadge" class="hidden text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700">
                   0 поз.
                 </span>
               </div>
               <div id="headerTotal" class="hidden text-right">
-                <span class="text-xs text-slate-400 font-mono">Сумма:</span>
-                <span id="headerTotalVal" class="text-sm font-bold text-emerald-600 font-mono ml-1">0.00 ₸</span>
+                <span class="text-xs text-slate-500">Сумма:</span>
+                <span id="headerTotalVal" class="text-sm font-bold text-emerald-600 ml-1">0.00 ₸</span>
               </div>
             </div>
 
@@ -188,25 +193,25 @@ def index():
                   <p id="resStore" class="text-sm font-bold text-slate-900 truncate mt-0.5">--</p>
                 </div>
                 <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5">
-                  <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Дата покупки</p>
-                  <p id="resDate" class="text-sm font-bold font-mono text-slate-900 mt-0.5">--</p>
+                  <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Дата покупки</p>
+                  <p id="resDate" class="text-sm font-semibold text-slate-900 mt-0.5">--</p>
                 </div>
                 <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 col-span-2 sm:col-span-1">
-                  <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Время</p>
-                  <p id="resTime" class="text-sm font-bold font-mono text-slate-900 mt-0.5">--</p>
+                  <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Время</p>
+                  <p id="resTime" class="text-sm font-semibold text-slate-900 mt-0.5">--</p>
                 </div>
               </div>
 
               <!-- Таблица позиций -->
               <div class="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
                 <div class="max-h-64 overflow-y-auto">
-                  <table class="w-full text-left text-xs">
-                    <thead class="bg-slate-50 text-slate-500 uppercase text-[10px] font-semibold tracking-wider border-b border-slate-200 sticky top-0">
+                  <table class="w-full text-left">
+                    <thead class="bg-slate-50 text-slate-600 uppercase text-xs font-semibold tracking-wider border-b border-slate-200 sticky top-0">
                       <tr>
-                        <th class="py-2.5 px-3.5">Наименование</th>
-                        <th class="py-2.5 px-2 text-center">Кол-во</th>
-                        <th class="py-2.5 px-3 text-right">Цена</th>
-                        <th class="py-2.5 px-3.5 text-right">Сумма</th>
+                        <th class="py-3 px-3.5">Наименование</th>
+                        <th class="py-3 px-2 text-center">Кол-во</th>
+                        <th class="py-3 px-3 text-right">Цена</th>
+                        <th class="py-3 px-3.5 text-right">Сумма</th>
                       </tr>
                     </thead>
                     <tbody id="itemsTableBody" class="divide-y divide-slate-100 text-slate-700">
@@ -218,11 +223,11 @@ def index():
               <!-- Итоговая плашка -->
               <div class="p-4 rounded-xl bg-slate-900 text-white flex items-center justify-between shadow-sm">
                 <div>
-                  <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Итого к оплате</p>
-                  <p id="resTotal" class="text-2xl font-black font-mono text-white mt-0.5">0.00 ₸</p>
+                  <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Итого к оплате</p>
+                  <p id="resTotal" class="text-2xl font-bold tracking-tight text-white mt-0.5">0.00 ₸</p>
                 </div>
                 <div class="text-right">
-                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                     Успешно
                   </span>
                 </div>
@@ -435,15 +440,15 @@ def index():
           const p = item.price_per_unit != null ? Number(item.price_per_unit).toFixed(2) : '--';
           const t = item.total_price != null ? Number(item.total_price).toFixed(2) : '--';
           tr.innerHTML = `
-            <td class="py-2.5 px-3.5 font-semibold text-slate-800">${item.name}</td>
-            <td class="py-2.5 px-2 text-center font-mono text-slate-500">${item.quantity}</td>
-            <td class="py-2.5 px-3 text-right font-mono text-slate-500">${p}</td>
-            <td class="py-2.5 px-3.5 text-right font-mono font-bold text-slate-900">${t} ₸</td>
+            <td class="py-3 px-3.5 text-sm font-medium text-slate-900">${item.name}</td>
+            <td class="py-3 px-2 text-center text-sm font-medium tabular-nums text-slate-600">${item.quantity}</td>
+            <td class="py-3 px-3 text-right text-sm font-medium tabular-nums text-slate-600">${p}</td>
+            <td class="py-3 px-3.5 text-right text-sm font-bold tabular-nums text-slate-900">${t} ₸</td>
           `;
           itemsTableBody.appendChild(tr);
         });
       } else {
-        itemsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-slate-400 font-mono">Товары не найдены</td></tr>';
+        itemsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-sm text-slate-400">Товары не найдены</td></tr>';
       }
 
       resultContent.classList.remove('hidden');
