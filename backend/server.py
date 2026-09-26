@@ -1,11 +1,11 @@
 import os
-import shutil
 import uuid
+import shutil
 import traceback
+import httpx
 from typing import List
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException
-from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -15,47 +15,21 @@ from app import database
 from app import models
 from app import schemas
 from app import crud
-from app.ocr import init_ocr, analyze_receipt
 
 # Создаём таблицы БД
 models.Base.metadata.create_all(bind=database.engine)
 
-app = FastAPI(title="CheckAI — Анализ кассовых чеков", version="2.0.0")
+app = FastAPI(title="CheckAI — Backend API", version="2.0.0")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+# Используем data из корня проекта
+DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
 UPLOADS_DIR = os.path.join(DATA_DIR, "receipts")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-# Папка templates
-os.makedirs(os.path.join(BASE_DIR, "templates"), exist_ok=True)
-
 app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-ocr_model = None
-def get_ocr():
-    global ocr_model
-    if ocr_model is None:
-        ocr_model = init_ocr()
-    return ocr_model
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html")
-
-@app.post("/api/analyze-test")
-async def analyze_test_receipt():
-    test_path = "images.jpeg"
-    if not os.path.exists(test_path):
-        raise HTTPException(status_code=404, detail="Файл images.jpeg не найден")
-    try:
-        ocr = get_ocr()
-        data = analyze_receipt(test_path, ocr=ocr)
-        return {"success": True, "data": data}
-    except Exception as e:
-        traceback.print_exc()
-        return {"success": False, "error": str(e)}
+ML_SERVICE_URL = "http://127.0.0.1:8001"
 
 @app.post("/api/analyze")
 async def analyze_receipt_endpoint(file: UploadFile = File(...)):
@@ -68,8 +42,22 @@ async def analyze_receipt_endpoint(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        ocr = get_ocr()
-        data = analyze_receipt(file_path, ocr=ocr)
+        # Отправляем файл в ML сервис
+        async with httpx.AsyncClient() as client:
+            with open(file_path, "rb") as f:
+                response = await client.post(
+                    f"{ML_SERVICE_URL}/analyze", 
+                    files={"file": (file.filename, f, file.content_type)}
+                )
+        
+        if response.status_code != 200:
+            raise Exception(f"Ошибка ML сервиса: {response.text}")
+            
+        ml_result = response.json()
+        if not ml_result.get("success"):
+            raise Exception(ml_result.get("error"))
+            
+        data = ml_result["data"]
         
         # Добавляем путь к картинке в данные
         data["image_path"] = f"/data/receipts/{filename}"

@@ -1,0 +1,10 @@
+# Основные зависимости проекта CheckAI
+paddleocr>=3.0.0
+paddlepaddle>=3.0.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.12
+opencv-python>=4.10.0
+numpy>=1.26.0
+
+httpx
