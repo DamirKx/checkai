@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased p-4 sm:p-6 min-h-screen">
+  <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-[var(--border)]">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-xl shadow-md">C</div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-xl font-bold tracking-tight text-[var(--foreground)]">CheckAI</h1>
+          <span class="text-xs px-2 py-0.5 rounded-full font-mono font-semibold bg-emerald-500/10 text-emerald-600">MVP Prototype</span>
+        </div>
+        <p class="text-xs text-[var(--muted-foreground)]">Интеллектуальный анализ чеков и расходов</p>
+      </div>
+    </div>
+    <div class="flex items-center bg-[var(--card)] p-1 rounded-xl border border-[var(--border)] text-xs font-semibold">
+      <button id="tabBtnScan" onclick="showTab('scan')" class="px-3.5 py-2 rounded-lg bg-emerald-600 text-white font-bold transition shadow-sm">📷 Сканирование</button>
+      <button id="tabBtnHistory" onclick="showTab('history')" class="px-3.5 py-2 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition">📜 История</button>
+      <button id="tabBtnAnalytics" onclick="showTab('analytics')" class="px-3.5 py-2 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition">📊 Аналитика</button>
+    </div>
+  </header>
+
+  <!-- ВКЛАДКА 1: СКАНИРОВАНИЕ -->
+  <div id="viewScan" class="space-y-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div class="lg:col-span-5 bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-xs space-y-4">
+        
+        <!-- Зона загрузки файлов -->
+        <label for="fileUpload" class="cursor-pointer block border-2 border-dashed border-[var(--border)] hover:border-emerald-500 rounded-xl p-8 text-center bg-[var(--background)] hover:bg-emerald-500/5 transition">
+          <input type="file" id="fileUpload" class="hidden" accept="image/*" onchange="uploadScan(event)">
+          <div class="w-10 h-10 mx-auto rounded-full bg-[var(--card)] border border-[var(--border)] flex items-center justify-center text-emerald-600 mb-2">
+            📥
+          </div>
+          <p class="text-xs font-bold text-[var(--foreground)]">Перетащите фото чека сюда</p>
+          <p class="text-xs text-[var(--muted-foreground)] mt-0.5">или нажмите для выбора файла</p>
+        </label>
+
+        <div id="scanStatus" class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>PaddleOCR готов к распознаванию</span>
+        </div>
+      </div>
+
+      <div class="lg:col-span-7 bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 shadow-xs space-y-4" id="resultPanel" style="display: none;">
+        <div class="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+          <div>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Распознанные данные</h3>
+            <p id="receiptStore" class="text-sm font-bold text-[var(--foreground)] mt-0.5">Магазин</p>
+          </div>
+          <div class="text-right">
+            <span class="text-xs text-[var(--muted-foreground)] block">Дата и время</span>
+            <span id="receiptDate" class="text-xs font-semibold text-[var(--foreground)]"></span>
+          </div>
+        </div>
+
+        <div class="border border-[var(--border)] rounded-xl overflow-hidden">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-[var(--background)] text-[var(--muted-foreground)] uppercase font-semibold border-b border-[var(--border)]">
+              <tr>
+                <th class="py-2.5 px-3">Товар</th>
+                <th class="py-2.5 px-2 text-center">Кол</th>
+                <th class="py-2.5 px-3 text-right">Цена</th>
+                <th class="py-2.5 px-3 text-right">Сумма</th>
+              </tr>
+            </thead>
+            <tbody id="receiptTableBody" class="divide-y divide-[var(--border)]"></tbody>
+          </table>
+        </div>
+
+        <div class="p-4 rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <span class="text-xs text-[var(--muted-foreground)] uppercase font-semibold">Итого к оплате:</span>
+            <p id="receiptTotal" class="text-2xl font-bold text-emerald-600 mt-0.5">0.00 ₸</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="actionReject()" class="px-3 py-2 rounded-xl border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 text-xs font-bold transition">✕ Отклонить</button>
+            <button id="btnAccept" onclick="actionAccept()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm">✓ Подтвердить в базу</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ВКЛАДКА 2: ИСТОРИЯ -->
+  <div id="viewHistory" class="hidden space-y-5">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4">
+      <h3 class="text-sm font-bold text-[var(--foreground)]">Сохранённые чеки (Архив)</h3>
+    </div>
+    <div id="historyGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+
+  <!-- ВКЛАДКА 3: АНАЛИТИКА -->
+  <div id="viewAnalytics" class="hidden space-y-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-xs">
+        <span class="text-xs text-[var(--muted-foreground)] uppercase font-semibold">Всего потрачено</span>
+        <p id="statTotalSpent" class="text-xl font-bold mt-1">0 ₸</p>
+      </div>
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-xs">
+        <span class="text-xs text-[var(--muted-foreground)] uppercase font-semibold">Чеков в базе</span>
+        <p id="statCount" class="text-xl font-bold mt-1">0 шт.</p>
+      </div>
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-xs">
+        <span class="text-xs text-[var(--muted-foreground)] uppercase font-semibold">Средний чек</span>
+        <p id="statAvg" class="text-xl font-bold mt-1">0 ₸</p>
+      </div>
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 shadow-xs">
+        <span class="text-xs text-[var(--muted-foreground)] uppercase font-semibold">Топ магазин</span>
+        <p id="statTopStore" class="text-lg font-bold text-emerald-600 mt-1 truncate">-</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentReceipt = null;
+
+    function showTab(tab) {
+      document.getElementById('viewScan').classList.add('hidden');
+      document.getElementById('viewHistory').classList.add('hidden');
+      document.getElementById('viewAnalytics').classList.add('hidden');
+      
+      const tabs = ['Scan', 'History', 'Analytics'];
+      tabs.forEach(t => {
+        document.getElementById(`tabBtn${t}`).className = 'px-3.5 py-2 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition';
+      });
+
+      if (tab === 'scan') {
+        document.getElementById('viewScan').classList.remove('hidden');
+        document.getElementById('tabBtnScan').className = 'px-3.5 py-2 rounded-lg bg-emerald-600 text-white font-bold transition shadow-sm';
+      } else if (tab === 'history') {
+        document.getElementById('viewHistory').classList.remove('hidden');
+        document.getElementById('tabBtnHistory').className = 'px-3.5 py-2 rounded-lg bg-emerald-600 text-white font-bold transition shadow-sm';
+        loadHistory();
+      } else if (tab === 'analytics') {
+        document.getElementById('viewAnalytics').classList.remove('hidden');
+        document.getElementById('tabBtnAnalytics').className = 'px-3.5 py-2 rounded-lg bg-emerald-600 text-white font-bold transition shadow-sm';
+        loadAnalytics();
+      }
+    }
+
+    async function uploadScan(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const st = document.getElementById('scanStatus');
+      st.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-spin"></span> <span>Распознаю фото чека (это займет пару секунд)...</span>';
+      
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          body: formData
+        });
+        const json = await res.json();
+        
+        if (json.success) {
+          st.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span>Чек успешно распознан!</span>';
+          currentReceipt = json.data;
+          renderReceipt(currentReceipt);
+        } else {
+          st.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500"></span> <span class="text-rose-500">Ошибка: ' + json.error + '</span>';
+        }
+      } catch (e) {
+        st.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500"></span> <span class="text-rose-500">Ошибка связи с сервером</span>';
+      }
+    }
+
+    function renderReceipt(data) {
+      document.getElementById('resultPanel').style.display = 'block';
+      document.getElementById('receiptStore').textContent = data.store || 'Неизвестно';
+      document.getElementById('receiptDate').textContent = `${data.date || ''} • ${data.time || ''}`;
+      document.getElementById('receiptTotal').textContent = `${data.total} ₸`;
+      document.getElementById('btnAccept').innerText = '✓ Подтвердить в базу';
+      document.getElementById('btnAccept').disabled = false;
+      document.getElementById('btnAccept').className = 'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm';
+
+      const tbody = document.getElementById('receiptTableBody');
+      tbody.innerHTML = '';
+      data.items.forEach(item => {
+        tbody.innerHTML += `
+          <tr>
+            <td class="py-2 px-3 font-medium">${item.name}</td>
+            <td class="py-2 px-2 text-center text-[var(--muted-foreground)]">${item.quantity}</td>
+            <td class="py-2 px-3 text-right">${item.price_per_unit}</td>
+            <td class="py-2 px-3 text-right font-bold">${item.total_price}</td>
+          </tr>
+        `;
+      });
+    }
+
+    async function actionAccept() {
+      if (!currentReceipt) return;
+      const btn = document.getElementById('btnAccept');
+      btn.innerText = 'Сохранение...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/receipts/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(currentReceipt)
+        });
+        if (res.ok) {
+          btn.innerText = '✓ Успешно сохранено!';
+          btn.className = 'px-4 py-2 rounded-xl bg-slate-800 text-emerald-400 text-xs font-bold transition';
+        } else {
+          btn.innerText = 'Ошибка сохранения';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        btn.innerText = 'Ошибка сети';
+        btn.disabled = false;
+      }
+    }
+
+    function actionReject() {
+      document.getElementById('resultPanel').style.display = 'none';
+      currentReceipt = null;
+      document.getElementById('fileUpload').value = ""; // Сбрасываем выбранный файл
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/api/receipts');
+      const data = await res.json();
+      const grid = document.getElementById('historyGrid');
+      grid.innerHTML = '';
+      
+      data.forEach(r => {
+        grid.innerHTML += `
+          <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-4 flex flex-col justify-between shadow-xs">
+            <div>
+              <div class="flex items-center justify-between text-xs mb-2">
+                <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-semibold text-[11px]">${r.category}</span>
+                <span class="text-[var(--muted-foreground)] font-mono">${r.date || ''}</span>
+              </div>
+              <h4 class="text-sm font-bold text-[var(--foreground)]">${r.store || 'Неизвестно'}</h4>
+              <p class="text-xs text-[var(--muted-foreground)] mt-0.5">${r.items.length} товаров</p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-[var(--border)] flex items-center justify-between">
+              <span class="text-sm font-bold text-[var(--foreground)]">${r.total} ₸</span>
+              <button onclick="deleteReceipt(${r.id})" class="text-xs text-rose-500 hover:underline">Удалить</button>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    async function deleteReceipt(id) {
+      if(confirm('Удалить чек?')) {
+        await fetch(`/api/receipts/${id}`, {method: 'DELETE'});
+        loadHistory();
+      }
+    }
+
+    async function loadAnalytics() {
+      const res = await fetch('/api/analytics');
+      const data = await res.json();
+      document.getElementById('statTotalSpent').innerText = `${data.total_spent} ₸`;
+      document.getElementById('statCount').innerText = `${data.receipts_count} шт.`;
+      document.getElementById('statAvg').innerText = `${data.avg_receipt} ₸`;
+      document.getElementById('statTopStore').innerText = data.top_store || '-';
+    }
+  </script>
+</body>
+</html>

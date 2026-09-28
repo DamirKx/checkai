@@ -5,7 +5,7 @@ import tempfile
 from typing import List, Dict, Any
 
 from paddleocr import PaddleOCR
-from parser import parse_receipt
+from app.parser import parse_receipt
 
 
 def init_ocr() -> PaddleOCR:
