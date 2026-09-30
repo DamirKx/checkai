@@ -9,3 +9,4 @@ numpy>=1.26.0
 httpx
 sqlalchemy
 jinja2
+ollama
