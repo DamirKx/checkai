@@ -119,10 +119,60 @@
     .overlay.show { visibility: visible; opacity: 1; }
     .toast { position: fixed; z-index: 20; bottom: 24px; left: 50%; padding: 11px 17px; border-radius: 7px; background: var(--cream); color: var(--bg); font-weight: 700; opacity: 0; pointer-events: none; transform: translate(-50%, 18px); transition: .22s; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .auth-btn { padding: 9px 14px; font-size: 14px; }
+    .user-chip { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .user-meta { display: grid; min-width: 0; max-width: 220px; line-height: 1.25; }
+    .user-meta b, .user-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .user-meta b { font-size: 14px; font-weight: 600; }
+    .user-meta small { color: var(--muted); font-size: 12px; }
+    .modal-backdrop { position: fixed; z-index: 15; inset: 0; display: grid; place-items: center; padding: 16px; background: #050a18b8; }
+    .modal { position: relative; width: min(400px, 100%); padding: 26px; animation: rise .22s ease both; }
+    .modal-close { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; }
+    .tabs { display: flex; gap: 6px; margin: 16px 0 18px; padding: 4px; border-radius: 9px; background: #111d39; }
+    .tab { flex: 1; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 14px; transition: .18s; }
+    .tab.active { background: #233453; color: var(--cream); }
+    .auth-form { display: grid; gap: 13px; }
+    .auth-form label { display: grid; gap: 5px; color: var(--muted); font-size: 14px; }
+    .auth-form input { padding: 10px 12px; border: 1px solid #3b4c6a; border-radius: 7px; background: #111d39; color: var(--cream); }
+    .auth-form input:focus { border-color: var(--aqua); outline: none; }
+    .auth-error { padding: 10px 12px; border: 1px solid #7a3b46; border-radius: 7px; background: #3a1f2a; color: #f3c7cd; font-size: 14px; }
+    .user-chip { position: relative; }
+    .user-btn { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 6px; border: 1px solid transparent; border-radius: 9px; background: none; text-align: left; transition: .18s; }
+    .user-btn:hover, .user-btn[aria-expanded="true"] { border-color: #3a4968; background: var(--surface); }
+    .account-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 12; width: min(290px, calc(100vw - 32px)); padding: 8px; border: 1px solid var(--border); border-radius: 11px; background: #111d39; box-shadow: var(--shadow); }
+    .menu-label { padding: 8px 10px 4px; color: var(--muted); font-size: 12px; }
+    .menu-item { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 7px; background: none; color: #e2e5e9; font-size: 14px; text-align: left; }
+    .menu-item:hover { background: #233453; color: var(--cream); }
+    .menu-item .avatar { width: 28px; height: 28px; flex: none; font-size: 12px; }
+    .menu-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu-sep { height: 1px; margin: 6px 4px; background: var(--border); }
+    .danger-text { color: #f3c7cd; }
+    .profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
+    .profile-card { display: grid; align-content: start; gap: 14px; padding: 25px; }
+    .profile-card p { color: var(--muted); font-size: 14px; }
+    .profile-head { display: flex; align-items: center; gap: 14px; }
+    .profile-head .avatar { width: 54px; height: 54px; font-size: 22px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; overflow-wrap: anywhere; }
+    .account-row { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .account-row:last-child { border-bottom: 0; }
+    .account-row .avatar { flex: none; }
+    .account-row div { min-width: 0; flex: 1; }
+    .account-row small { display: block; overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .danger-card { border-color: #5a2f3a; }
+    .btn.danger { background: #c8707e; color: #1a0d12; }
+    .btn.danger:hover { background: #d98794; }
+    .receipt-row[data-open] { cursor: pointer; }
+    .receipt-row[data-open]:focus-visible { border-color: var(--aqua); outline: none; }
+    .modal.wide { width: min(620px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+    .receipt-photo { display: block; max-width: 100%; max-height: 320px; margin: 4px auto 0; border-radius: 9px; object-fit: contain; }
+    .item-cat { display: inline-block; margin-top: 4px; padding: 2px 7px; border-radius: 4px; background: #243451; color: #e2e5e9; font-size: 12px; }
     @media (max-width: 850px) {
       .upload-grid, .analysis-grid { grid-template-columns: 1fr; }
       .page-head { align-items: start; flex-direction: column; }
       .category-grid { grid-template-columns: 1fr 1fr; }
+      .profile-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
       .topbar { height: 64px; }
@@ -137,6 +187,10 @@
       .category-grid { grid-template-columns: 1fr; }
       .filterbar > * { flex: 1; }
       .dropzone { min-height: 255px; }
+      .user-meta, .hide-sm { display: none; }
+      .profile-grid { grid-template-columns: 1fr; }
+      .profile-card { padding: 17px; }
+      .auth-btn { padding: 8px 11px; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -144,8 +198,8 @@
   </style>
 </head>
 <body><div class="app">
-  <header class="topbar"><button class="icon-btn" id="menuBtn" aria-label="Открыть меню"><span class="hamb"><i></i><i></i><i></i></span></button><div class="brand-mark">C</div><div class="brand">CheckAI</div><div class="top-spacer"></div><div class="avatar">Я</div></header>
-  <div class="overlay" id="overlay"></div><aside class="drawer" id="drawer" aria-label="Главное меню"><div class="drawer-head"><div class="brand-mark">C</div><div class="brand">CheckAI</div></div><nav class="drawer-nav"><button class="nav-link active" data-page="upload"><span>＋</span><span>Добавить чек</span></button><button class="nav-link" data-page="history"><span>▤</span><span>История и расходы</span></button><button class="nav-link" data-page="categories"><span>◈</span><span>Категории</span></button><button class="nav-link" data-page="analysis"><span>◔</span><span>Анализ расходов</span></button></nav><div class="drawer-foot">Чеки сохраняются в этом браузере</div></aside>
+  <header class="topbar"><button class="icon-btn" id="menuBtn" aria-label="Открыть меню"><span class="hamb"><i></i><i></i><i></i></span></button><div class="brand-mark">C</div><div class="brand">CheckAI</div><div class="top-spacer"></div><button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button><div class="user-chip" id="userChip" hidden><button class="user-btn" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu"><div class="avatar" id="userAvatar">Я</div><div class="user-meta"><b id="userName"></b><small id="userEmail"></small></div></button><div class="account-menu" id="accountMenu" role="menu" hidden><button class="menu-item" data-menu="profile" type="button" role="menuitem"><span>⚙</span><span>Профиль и настройки</span></button><div class="menu-sep"></div><div class="menu-label">Сменить аккаунт</div><div id="menuAccounts"></div><button class="menu-item" data-menu="add" type="button" role="menuitem"><span>＋</span><span>Добавить аккаунт</span></button><div class="menu-sep"></div><button class="menu-item" data-menu="logout" type="button" role="menuitem"><span>⏻</span><span>Выйти</span></button></div></div></header>
+  <div class="overlay" id="overlay"></div><aside class="drawer" id="drawer" aria-label="Главное меню"><div class="drawer-head"><div class="brand-mark">C</div><div class="brand">CheckAI</div></div><nav class="drawer-nav"><button class="nav-link active" data-page="upload"><span>＋</span><span>Добавить чек</span></button><button class="nav-link" data-page="history"><span>▤</span><span>История и расходы</span></button><button class="nav-link" data-page="categories"><span>◈</span><span>Категории</span></button><button class="nav-link" data-page="analysis"><span>◔</span><span>Анализ расходов</span></button><button class="nav-link" data-page="profile" id="navProfile" hidden><span>⚙</span><span>Профиль</span></button></nav><div class="drawer-foot" id="drawerFoot">Войдите, чтобы сохранять чеки</div></aside>
   <main class="layout">
     <section class="page active" id="page-upload"><div class="page-head"><div><h1>Добавить чек</h1></div></div>
       <div class="upload-grid"><div class="card upload-card"><div id="dropzone" class="dropzone"><input id="fileInput" type="file" accept="image/*" hidden><div id="dropPrompt"><div class="upload-icon">↥</div><h3>Перетащите фото чека сюда</h3><p>Подойдут JPG, PNG или WEBP</p><button class="btn soft" id="chooseBtn" type="button">Выбрать изображение</button></div><div id="previewBox" hidden><img id="imagePreview" class="preview" alt="Предпросмотр чека"><p id="fileName"></p><div class="button-row" style="justify-content:center"><button class="btn" id="analyzeBtn" type="button">Распознать чек</button><button class="btn soft" id="removeBtn" type="button">Убрать</button></div></div></div><div class="button-row" style="margin-top:15px;justify-content:space-between;align-items:center"><span style="color:var(--muted);font-size:14px">Можно загрузить фото из галереи</span><button class="text-btn" id="testBtn" type="button">Попробовать на демо-чеке →</button></div><div id="uploadMessage" class="notice" hidden></div></div>
@@ -154,49 +208,215 @@
     <section class="page" id="page-history"><div class="page-head"><div><div class="eyebrow">Все чеки в одном месте</div><h1>История покупок</h1><p>Сводка обновляется после каждого сохранённого чека.</p></div><div class="filterbar"><select id="historyPeriod"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select></div></div><div class="summary-grid"><div class="card stat"><span>Всего потрачено</span><strong id="historyTotal">0 ₸</strong></div><div class="card stat"><span>Чеков</span><strong id="historyCount">0</strong></div><div class="card stat"><span>Средний чек</span><strong id="historyAverage">0 ₸</strong></div></div><div class="history-list" id="historyList"></div></section>
     <section class="page" id="page-categories"><div class="page-head"><div><h1>Категории</h1></div><div class="filterbar"><select class="periodFilter"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select></div></div><div class="category-grid" id="categoryGrid"></div><div class="notice">Категория определяется по названию товара. Проверьте её при необходимости.</div></section>
     <section class="page" id="page-analysis"><div class="page-head"><div><div class="eyebrow">Картина расходов</div><h1>Анализ расходов</h1><p>Сравните траты по периодам и категориям.</p></div><div class="filterbar"><select id="analysisPeriod"><option value="month">Этот месяц</option><option value="week">Эта неделя</option><option value="year">Этот год</option><option value="all">За всё время</option></select><select id="analysisCategory"><option value="all">Все категории</option></select></div></div><div class="summary-grid"><div class="card stat"><span>Расходы за период</span><strong id="analysisTotal">0 ₸</strong></div><div class="card stat"><span>Самая крупная категория</span><strong id="analysisTop">—</strong></div><div class="card stat"><span>Позиций учтено</span><strong id="analysisItems">0</strong></div></div><div class="analysis-grid"><div class="card chart-card"><h3 id="chartTitle">Динамика расходов</h3><div class="chart" id="chart"></div></div><div class="card breakdown-card"><h3>Расходы по категориям</h3><div id="breakdown" class="legend"></div></div></div></section>
-  </main><div class="toast" id="toast"></div></div>
+    <section class="page" id="page-profile"><div class="page-head"><div><div class="eyebrow">Ваш аккаунт</div><h1>Профиль</h1><p>Данные аккаунта, смена аккаунта и удаление.</p></div></div>
+      <div class="profile-grid">
+        <div class="card profile-card"><div class="profile-head"><div class="avatar" id="profileAvatar">Я</div><div><h3 id="profileName"></h3><p id="profileEmail"></p></div></div><dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0 ₸</dd></dl></div>
+        <div class="card profile-card"><h3>Аккаунты на этом устройстве</h3><p>Переключайтесь между аккаунтами без повторного ввода пароля.</p><div id="profileAccounts"></div><div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">Добавить аккаунт</button><button class="btn soft" id="logoutBtn" type="button">Выйти из этого аккаунта</button></div></div>
+        <div class="card profile-card"><h3>Редактировать аккаунт</h3><form class="auth-form" id="profileForm"><label>Имя<input id="editName" autocomplete="name"></label><label>Email<input id="editEmail" type="email" required autocomplete="email"></label><label>Новый пароль<input id="editPassword" type="password" minlength="4" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять"></label><label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Нужен для смены email или пароля"></label><div class="auth-error" id="profileError" role="alert" hidden></div><div class="button-row"><button class="btn" id="profileSave" type="submit">Сохранить изменения</button><button class="btn soft" id="profileReset" type="button">Отменить</button></div></form></div>
+        <div class="card profile-card danger-card"><h3 class="danger-text">Удалить аккаунт</h3><p>Аккаунт и все сохранённые чеки будут удалены без возможности восстановления.</p><form class="auth-form" id="deleteForm"><label>Пароль для подтверждения<input id="deletePassword" type="password" required autocomplete="current-password"></label><div class="auth-error" id="deleteError" role="alert" hidden></div><button class="btn danger" id="deleteSubmit" type="submit">Удалить аккаунт навсегда</button></form></div>
+      </div>
+    </section>
+  </main><div class="toast" id="toast"></div>
+  <div class="modal-backdrop" id="receiptModal" hidden><div class="card modal wide" role="dialog" aria-modal="true" aria-labelledby="rmStore"><button class="icon-btn modal-close" id="receiptClose" type="button" aria-label="Закрыть">✕</button><div class="eyebrow">Подробности покупки</div><h2 id="rmStore"></h2><div class="store" id="rmDate"></div><div class="total" id="rmTotal"></div><div class="meta" id="rmMeta"></div><img class="receipt-photo" id="rmPhoto" alt="Фото чека" hidden><div class="item-list" id="rmItems"></div><div class="notice" id="rmWarn" hidden></div><div class="button-row" style="margin-top:18px"><button class="btn soft" id="rmDownload" type="button">Скачать JSON</button><button class="btn danger" id="rmDelete" type="button">Удалить чек</button></div></div></div>
+  <div class="modal-backdrop" id="authModal" hidden><div class="card modal" role="dialog" aria-modal="true" aria-labelledby="authTitle"><button class="icon-btn modal-close" id="authClose" type="button" aria-label="Закрыть">✕</button><h2 id="authTitle">Вход</h2><div class="tabs"><button class="tab active" data-tab="login" type="button">Вход</button><button class="tab" data-tab="register" type="button">Регистрация</button></div><form class="auth-form" id="authForm"><label id="nameField" hidden>Имя (необязательно)<input id="authName" autocomplete="name"></label><label>Email<input id="authEmail" type="email" required autocomplete="email"></label><label>Пароль<input id="authPassword" type="password" required minlength="4" autocomplete="current-password"></label><div class="auth-error" id="authError" role="alert" hidden></div><button class="btn" id="authSubmit" type="submit">Войти</button></form></div></div>
+</div>
 <script>
   const CATEGORIES=[['Продукты','🥕'],['Одежда','🧥'],['Дом и быт','🏠'],['Транспорт','🚌'],['Кафе','☕'],['Здоровье','✚'],['Развлечения','🎟'],['Другое','◌']];
   const keys={'Продукты':['картоф','молок','хлеб','яйц','сыр','мяс','рыб','куриц','овощ','фрукт','масло','рис','греч','сахар','мук','сок','вода','чай','кофе','макарон','йогурт','колбас','кефир','печен','шоколад','помидор','огур','яблок','банан','лук','закусоч'],'Одежда':['кофт','футбол','брюк','джинс','куртк','пальто','плать','юбк','обув','ботин','кроссов','носк','шапк','одеж','рубаш','бель'],'Дом и быт':['моющ','порош','шампун','мыло','бумаг','пакет','посуда','лампоч','бытов','губк','салфет'],'Транспорт':['бензин','дизел','такси','проезд','метро','автобус','парков','топлив'],'Кафе':['ресторан','кафе','обед','ужин','ланч','доставка еды','американо','капучино','эспрессо','бургер','пицца'],'Здоровье':['аптек','лекар','витамин','таблет','медицин','клиник','бинт'],'Развлечения':['кино','театр','музей','игра','подписк','концерт','билет']};
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Number(n)||0)+' ₸';
-  const parseDate=s=>{if(!s)return null;const m=String(s).match(/(\d{2})[./-](\d{2})[./-](\d{4})/);return m?new Date(+m[3],+m[2]-1,+m[1]):null};
+  // Дата чека: YYYY-MM-DD или ДД.ММ.ГГГГ / ДД.ММ.ГГ
+  const parseDate=s=>{if(!s)return null;s=String(s);let m=s.match(/(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);m=s.match(/(\d{2})[./-](\d{2})[./-](\d{4}|\d{2})(?!\d)/);if(!m)return null;const y=+m[3]<100?2000+ +m[3]:+m[3];return new Date(y,+m[2]-1,+m[1])};
+  // Для фильтров по периодам берём дату покупки, а если её нет — дату сохранения
+  const receiptIso=r=>{const d=parseDate(r.date);return d&&!Number.isNaN(+d)?d.toISOString():r.created_at};
   const guessCategory=name=>{const n=String(name||'').toLowerCase();for(const [cat,words] of Object.entries(keys))if(words.some(w=>n.includes(w)))return cat;return 'Другое'};
-  let receipts=[],lastResult=null,selectedFile=null;
+  let receipts=[],lastResult=null,selectedFile=null,currentUser=null,pendingSave=false,authMode='login';
   const $=id=>document.getElementById(id);
-  async function loadReceipts() {
-    try {
-      const res = await fetch('/api/receipts');
-      if(res.ok) {
-        const data = await res.json();
-        receipts = data.map(r => ({...r, iso: r.created_at}));
-        renderHistory();
-      }
-    } catch(e) {}
+
+  // --- API и токен (см. FRONTEND_API_GUIDE.md) ---
+  const TOKEN_KEY='checkai_token';
+  const getToken=()=>{try{return localStorage.getItem(TOKEN_KEY)}catch(e){return null}};
+  const setToken=t=>{try{localStorage.setItem(TOKEN_KEY,t)}catch(e){}};
+  const removeToken=()=>{try{localStorage.removeItem(TOKEN_KEY)}catch(e){}};
+  // Сохранённые на устройстве аккаунты для быстрого переключения: [{token,user}]
+  const ACCOUNTS_KEY='checkai_accounts';
+  const getAccounts=()=>{try{const list=JSON.parse(localStorage.getItem(ACCOUNTS_KEY));return Array.isArray(list)?list.filter(a=>a&&a.token&&a.user):[]}catch(e){return []}};
+  const saveAccounts=list=>{try{localStorage.setItem(ACCOUNTS_KEY,JSON.stringify(list.slice(0,5)))}catch(e){}};
+  const rememberAccount=(token,user)=>{if(token&&user)saveAccounts([{token,user},...getAccounts().filter(a=>a.user.id!==user.id)])};
+  const forgetAccount=id=>saveAccounts(getAccounts().filter(a=>a.user.id!==id));
+  const forgetToken=token=>saveAccounts(getAccounts().filter(a=>a.token!==token));
+  // У ошибки есть поле status, чтобы отличать «нет такого эндпоинта» (404/405) от остальных
+  const notSupported=e=>e.status===404||e.status===405;
+  async function apiRequest(url,options={}){
+    const token=getToken();
+    options.headers=options.headers||{};
+    if(token)options.headers['Authorization']=`Bearer ${token}`;
+    if(options.body&&!(options.body instanceof FormData)&&!options.headers['Content-Type'])options.headers['Content-Type']='application/json';
+    const response=await fetch(url,options);
+    const data=await response.json().catch(()=>({}));
+    // Токен истёк или недействителен — переходим в гостевой режим
+    if(response.status===401&&token){forgetToken(token);removeToken();setGuest()}
+    if(!response.ok){const detail=Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail;const err=new Error(detail||`Ошибка сервера (${response.status})`);err.status=response.status;throw err}
+    return data;
   }
-  loadReceipts();
-  function showPage(name){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav-link').forEach(b=>b.classList.toggle('active',b.dataset.page===name));closeMenu();if(name==='history')renderHistory();if(name==='categories')renderCategories();if(name==='analysis')renderAnalysis()}
+
+  // --- Сессия пользователя ---
+  const initial=u=>String(u?.full_name||u?.email||'?').trim().charAt(0).toUpperCase()||'?';
+  // created_at приходит без часового пояса (UTC) — добавляем Z, чтобы показать местное время
+  const fmtDateTime=s=>{if(!s)return '—';const d=new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)?s:s+'Z');return Number.isNaN(+d)?String(s):d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})};
+  const showFormError=(id,msg)=>{$(id).textContent=msg;$(id).hidden=false};
+  function downloadJson(obj,filename){const {iso,...clean}=obj;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:'application/json'}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+  function setUser(user){currentUser=user;rememberAccount(getToken(),user);const name=user.full_name||user.email;$('userAvatar').textContent=initial(user);$('userName').textContent=name;$('userEmail').textContent=user.email;$('userEmail').hidden=!user.full_name;$('loginBtn').hidden=true;$('userChip').hidden=false;$('navProfile').hidden=false;$('drawerFoot').textContent='Чеки сохраняются в вашем аккаунте';renderAccountMenu();renderProfile();fillProfileForm()}
+  function setGuest(){currentUser=null;receipts=[];closeAccountMenu();closeReceipt();$('loginBtn').hidden=false;$('userChip').hidden=true;$('navProfile').hidden=true;$('drawerFoot').textContent='Войдите, чтобы сохранять чеки';if($('page-profile').classList.contains('active'))showPage('upload');rerender()}
+  function rerender(){renderHistory();renderCategories();renderAnalysis();renderProfile()}
+  function logout(){if(currentUser)forgetAccount(currentUser.id);removeToken();setGuest();toast('Вы вышли из аккаунта')}
+
+  // --- Смена аккаунта ---
+  async function switchAccount(id){
+    const acc=getAccounts().find(a=>a.user.id===id),prev=getToken();
+    if(!acc||acc.token===prev)return;
+    closeAccountMenu();closeReceipt();setToken(acc.token);
+    try{const user=await apiRequest('/api/auth/me');setUser(user);await loadReceipts();toast('Вы вошли как '+(user.full_name||user.email))}
+    catch(e){
+      if(getToken()){setToken(prev);toast('Не удалось переключиться: '+e.message);return}
+      // Токен сохранённого аккаунта истёк: возвращаем прежний аккаунт и просим войти заново
+      if(prev){setToken(prev);await checkAuthOnStartup()}
+      openAuth('login');$('authEmail').value=acc.user.email;$('authPassword').focus();toast('Сессия истекла, войдите снова')
+    }
+  }
+  function renderAccountMenu(){const others=getAccounts().filter(a=>!currentUser||a.user.id!==currentUser.id);$('menuAccounts').innerHTML=others.length?others.map(a=>`<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem"><div class="avatar">${esc(initial(a.user))}</div><span>${esc(a.user.full_name||a.user.email)}</span></button>`).join(''):'<div class="menu-label">Других аккаунтов на устройстве нет</div>';$('menuAccounts').querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>switchAccount(+b.dataset.switch))}
+  function openAccountMenu(){renderAccountMenu();$('accountMenu').hidden=false;$('userMenuBtn').setAttribute('aria-expanded','true')}
+  function closeAccountMenu(){$('accountMenu').hidden=true;$('userMenuBtn').setAttribute('aria-expanded','false')}
+  $('userMenuBtn').onclick=e=>{e.stopPropagation();$('accountMenu').hidden?openAccountMenu():closeAccountMenu()};
+  document.addEventListener('click',e=>{if(!$('accountMenu').hidden&&!e.target.closest('#userChip'))closeAccountMenu()});
+  $('accountMenu').querySelectorAll('[data-menu]').forEach(b=>b.onclick=()=>{closeAccountMenu();const action=b.dataset.menu;if(action==='profile')showPage('profile');else if(action==='add')openAuth('login');else if(action==='logout')logout()});
+
+  // --- Профиль: просмотр, редактирование, удаление ---
+  function renderProfile(){
+    if(!currentUser)return;const u=currentUser;
+    $('profileAvatar').textContent=initial(u);$('profileName').textContent=u.full_name||'Без имени';$('profileEmail').textContent=u.email;
+    $('profileCreated').textContent=fmtDateTime(u.created_at);$('profileReceipts').textContent=receipts.length;$('profileSpent').textContent=money(receipts.reduce((s,r)=>s+(Number(r.total)||0),0));
+    $('profileAccounts').innerHTML=getAccounts().map(a=>`<div class="account-row"><div class="avatar">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name||a.user.email)}</b><small>${esc(a.user.email)}</small></div>${a.user.id===u.id?'<span class="pill">Текущий</span>':`<button class="text-btn" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="text-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт с этого устройства">✕</button>`}</div>`).join('');
+    $('profileAccounts').querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>switchAccount(+b.dataset.switch));
+    $('profileAccounts').querySelectorAll('[data-forget]').forEach(b=>b.onclick=()=>{forgetAccount(+b.dataset.forget);renderProfile();renderAccountMenu()});
+  }
+  function fillProfileForm(){if(!currentUser)return;$('profileForm').reset();$('editName').value=currentUser.full_name||'';$('editEmail').value=currentUser.email;$('profileError').hidden=true;$('deleteForm').reset();$('deleteError').hidden=true}
+  $('profileReset').onclick=fillProfileForm;
+  $('addAccountBtn').onclick=()=>openAuth('login');
+  $('profileForm').onsubmit=async e=>{
+    e.preventDefault();const u=currentUser;if(!u)return;$('profileError').hidden=true;
+    const name=$('editName').value.trim(),email=$('editEmail').value.trim().toLowerCase(),password=$('editPassword').value,current=$('editCurrentPassword').value,body={};
+    if(name!==(u.full_name||''))body.full_name=name||null;
+    if(email!==u.email)body.email=email;
+    if(password)body.new_password=password;
+    if(!Object.keys(body).length){showFormError('profileError','Вы ничего не изменили');return}
+    if((body.email||body.new_password)&&!current){showFormError('profileError','Введите текущий пароль, чтобы сменить email или пароль');return}
+    if(current)body.current_password=current;
+    const btn=$('profileSave');btn.disabled=true;
+    try{const data=await apiRequest('/api/auth/me',{method:'PATCH',body:JSON.stringify(body)});if(data.access_token)setToken(data.access_token);setUser(data.user||data);toast('Данные аккаунта обновлены')}
+    catch(err){showFormError('profileError',notSupported(err)?'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).':err.message)}
+    finally{btn.disabled=false}
+  };
+  $('deleteForm').onsubmit=async e=>{
+    e.preventDefault();const u=currentUser;if(!u)return;$('deleteError').hidden=true;
+    if(!confirm(`Удалить аккаунт ${u.email} и все его чеки? Это действие нельзя отменить.`))return;
+    const btn=$('deleteSubmit');btn.disabled=true;
+    try{await apiRequest('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:$('deletePassword').value})});forgetAccount(u.id);removeToken();setGuest();showPage('upload');toast('Аккаунт удалён')}
+    catch(err){showFormError('deleteError',notSupported(err)?'Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).':err.message)}
+    finally{btn.disabled=false}
+  };
+
+  // --- Подробности покупки (чека) ---
+  let openedReceipt=null;
+  function openReceipt(id){
+    const r=receipts.find(x=>String(x.id)===String(id));if(!r)return;openedReceipt=r;const items=r.items||[];
+    $('rmStore').textContent=r.store||'Магазин не определён';
+    $('rmDate').textContent=[r.date,r.time].filter(Boolean).join(' · ')||'Дата покупки не распознана';
+    $('rmTotal').textContent=money(r.total);
+    $('rmMeta').innerHTML=[r.category,items.length+' позиций','Сохранён '+fmtDateTime(r.created_at)].filter(Boolean).map(t=>`<span class="pill">${esc(t)}</span>`).join('');
+    const photo=$('rmPhoto');if(r.image_path){photo.onerror=()=>{photo.hidden=true};photo.src=r.image_path;photo.hidden=false}else{photo.hidden=true;photo.removeAttribute('src')}
+    $('rmItems').innerHTML=items.length?items.map(it=>`<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity??1)} × ${money(it.price_per_unit??it.total_price)}</small><span class="item-cat">${esc(it.category||guessCategory(it.name))}</span></div><div style="text-align:right"><strong>${money(it.total_price)}</strong></div></div>`).join(''):'<div class="empty">В чеке нет товарных позиций</div>';
+    // Подсказка, если распознавание потеряло или исказило строку
+    const sum=items.reduce((s,i)=>s+(Number(i.total_price)||0),0);
+    $('rmWarn').hidden=!(items.length&&Math.abs(sum-(Number(r.total)||0))>=1);
+    $('rmWarn').textContent=`Сумма позиций (${money(sum)}) не совпадает с итогом чека (${money(r.total)}). Возможно, распознавание пропустило или исказило строку.`;
+    $('receiptModal').hidden=false;$('receiptClose').focus();
+  }
+  function closeReceipt(){$('receiptModal').hidden=true;openedReceipt=null}
+  $('receiptClose').onclick=closeReceipt;$('receiptModal').onclick=e=>{if(e.target.id==='receiptModal')closeReceipt()};
+  $('rmDownload').onclick=()=>{if(openedReceipt)downloadJson(openedReceipt,`receipt_${openedReceipt.id}.json`)};
+  $('rmDelete').onclick=async ()=>{if(openedReceipt&&await deleteReceipt(openedReceipt.id))closeReceipt()};
+  async function deleteReceipt(id){
+    if(!confirm('Удалить этот чек из истории?'))return false;
+    try{await apiRequest('/api/receipts/'+id,{method:'DELETE'});await loadReceipts();toast('Чек удалён');return true}
+    catch(e){toast('Не удалось удалить: '+e.message);return false}
+  }
+  async function loadReceipts(){
+    if(!getToken()){receipts=[];rerender();return}
+    try{const data=await apiRequest('/api/receipts');receipts=data.map(r=>({...r,iso:receiptIso(r)}));rerender()}
+    catch(e){toast('Не удалось загрузить историю: '+e.message)}
+  }
+  async function checkAuthOnStartup(){
+    if(!getToken()){setGuest();return}
+    try{setUser(await apiRequest('/api/auth/me'));await loadReceipts()}
+    catch(e){setGuest();if(getToken())toast('Не удалось связаться с сервером')}
+  }
+
+  // --- Окно входа / регистрации ---
+  function setAuthMode(mode){authMode=mode;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===mode));$('authTitle').textContent=mode==='login'?'Вход':'Регистрация';$('nameField').hidden=mode!=='register';$('authSubmit').textContent=mode==='login'?'Войти':'Зарегистрироваться';$('authPassword').autocomplete=mode==='login'?'current-password':'new-password';$('authError').hidden=true}
+  function openAuth(mode='login'){setAuthMode(mode);closeMenu();$('authModal').hidden=false;setTimeout(()=>$(mode==='register'?'authName':'authEmail').focus(),0)}
+  function closeAuth(){$('authModal').hidden=true;pendingSave=false}
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setAuthMode(t.dataset.tab));
+  $('loginBtn').onclick=()=>openAuth('login');$('authClose').onclick=closeAuth;$('authModal').onclick=e=>{if(e.target.id==='authModal')closeAuth()};
+  $('logoutBtn').onclick=logout;
+  $('authForm').onsubmit=async e=>{
+    e.preventDefault();const btn=$('authSubmit'),isLogin=authMode==='login';
+    const body={email:$('authEmail').value.trim(),password:$('authPassword').value};
+    if(!isLogin)body.full_name=$('authName').value.trim()||null;
+    btn.disabled=true;$('authError').hidden=true;
+    try{
+      const data=await apiRequest(isLogin?'/api/auth/login':'/api/auth/register',{method:'POST',body:JSON.stringify(body)});
+      setToken(data.access_token);setUser(data.user);
+      const wasPending=pendingSave;closeAuth();$('authForm').reset();
+      toast(isLogin?'Добро пожаловать!':'Регистрация успешна!');
+      await loadReceipts();
+      if(wasPending)await saveReceipt();
+    }catch(err){$('authError').textContent=err.message;$('authError').hidden=false}
+    finally{btn.disabled=false}
+  };
+  function showPage(name){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav-link').forEach(b=>b.classList.toggle('active',b.dataset.page===name));closeMenu();if(name==='history')renderHistory();if(name==='categories')renderCategories();if(name==='analysis')renderAnalysis();if(name==='profile'){renderProfile();fillProfileForm()}}
   function closeMenu(){$('drawer').classList.remove('open');$('overlay').classList.remove('show')};function toggleMenu(){$('drawer').classList.toggle('open');$('overlay').classList.toggle('show')}
-  $('menuBtn').onclick=toggleMenu;$('overlay').onclick=closeMenu;document.querySelectorAll('.nav-link').forEach(b=>b.onclick=()=>showPage(b.dataset.page));document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
+  $('menuBtn').onclick=toggleMenu;$('overlay').onclick=closeMenu;document.querySelectorAll('.nav-link').forEach(b=>b.onclick=()=>showPage(b.dataset.page));document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMenu();closeAccountMenu();if(!$('receiptModal').hidden)closeReceipt();else if(!$('authModal').hidden)closeAuth()}});
   function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2400)}
   $('chooseBtn').onclick=()=> $('fileInput').click();$('dropzone').onclick=e=>{if(e.target.closest('button')||e.target.id==='fileInput')return;if(!$('previewBox').hidden)return;$('fileInput').click()};
   $('fileInput').onchange=e=>{const f=e.target.files[0];if(f)selectFile(f)};
   function selectFile(file){if(!file.type.startsWith('image/')){toast('Выберите файл изображения');return}selectedFile=file;$('imagePreview').src=URL.createObjectURL(file);$('fileName').textContent=file.name;$('dropPrompt').hidden=true;$('previewBox').hidden=false;$('uploadMessage').hidden=true}
   $('removeBtn').onclick=()=>{selectedFile=null;$('fileInput').value='';$('previewBox').hidden=true;$('dropPrompt').hidden=false};
   const dz=$('dropzone');['dragenter','dragover'].forEach(e=>dz.addEventListener(e,x=>{x.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(e=>dz.addEventListener(e,x=>{x.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)selectFile(f)});
-  async function analyze(test=false){const btn=test?$('testBtn'):$('analyzeBtn');btn.disabled=true;btn.textContent=test?'Распознаём демо-чек…':'Распознаём…';try{let resp;if(test)resp=await fetch('/api/analyze-test',{method:'POST'});else{const fd=new FormData();fd.append('file',selectedFile);resp=await fetch('/api/analyze',{method:'POST',body:fd})}const payload=await resp.json();if(!resp.ok||payload.success===false)throw new Error(payload.detail||payload.error||'Не удалось распознать чек');const data=payload.data??payload;lastResult=data;renderResult(data);$('uploadMessage').hidden=true}catch(e){$('uploadMessage').textContent='Не получилось распознать чек: '+e.message;$('uploadMessage').hidden=false}finally{btn.disabled=false;btn.textContent=test?'Попробовать на демо-чеке →':'Распознать чек'}}
+  async function analyze(test=false){const btn=test?$('testBtn'):$('analyzeBtn');btn.disabled=true;btn.textContent=test?'Распознаём демо-чек…':'Распознаём…';try{let payload;if(test)payload=await apiRequest('/api/analyze-test',{method:'POST'});else{const fd=new FormData();fd.append('file',selectedFile);payload=await apiRequest('/api/analyze',{method:'POST',body:fd})}if(payload.success===false)throw new Error(payload.error||'Не удалось распознать чек');const data=payload.data??payload;lastResult=data;renderResult(data);$('uploadMessage').hidden=true}catch(e){$('uploadMessage').textContent='Не получилось распознать чек: '+e.message;$('uploadMessage').hidden=false}finally{btn.disabled=false;btn.textContent=test?'Попробовать на демо-чеке →':'Распознать чек'}}
   $('analyzeBtn').onclick=()=>analyze();$('testBtn').onclick=()=>analyze(true);
   function renderResult(data){$('resultPlaceholder').hidden=true;$('resultContent').hidden=false;$('resStore').textContent=data.store||'Магазин не определён';$('resDate').textContent=[data.date,data.time].filter(Boolean).join(' · ')||'Дата не распознана';$('resTotal').textContent=money(data.total);$('resCount').textContent=(data.items||[]).length+' позиций';$('resultItems').innerHTML=(data.items||[]).map((it,i)=>{const cat=it.category||guessCategory(it.name);return `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity??1)} × ${money(it.price_per_unit??it.total_price)}</small></div><div style="text-align:right"><strong>${money(it.total_price??0)}</strong><br><select class="tiny-select" data-item="${i}">${CATEGORIES.map(([n])=>`<option ${n===cat?'selected':''}>${n}</option>`).join('')}</select></div></div>`}).join('')||'<div class="empty">Не удалось найти товарные позиции</div>';document.querySelectorAll('#resultItems select').forEach(s=>s.onchange=()=>{data.items[s.dataset.item].category=s.value})}
-  $('saveReceiptBtn').onclick=async ()=>{if(!lastResult)return;const data=JSON.parse(JSON.stringify(lastResult));data.items=(data.items||[]).map(it=>({...it,category:it.category||guessCategory(it.name)}));try{const res=await fetch('/api/receipts/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(res.ok){await loadReceipts();toast('Чек добавлен в историю БД');showPage('history')}}catch(e){toast('Ошибка при сохранении')}};
-  $('downloadBtn').onclick=()=>{if(!lastResult)return;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(lastResult,null,2)],{type:'application/json'}));a.download='receipt_data.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+  // Гость может распознавать чеки, а для сохранения просим войти
+  async function saveReceipt(){
+    if(!lastResult)return;
+    if(!getToken()){pendingSave=true;openAuth('login');toast('Войдите, чтобы сохранить чек');return}
+    const btn=$('saveReceiptBtn'),data=JSON.parse(JSON.stringify(lastResult));
+    data.items=(data.items||[]).map(it=>({...it,category:it.category||guessCategory(it.name)}));
+    btn.disabled=true;
+    try{await apiRequest('/api/receipts/save',{method:'POST',body:JSON.stringify(data)});await loadReceipts();toast('Чек сохранён в ваш аккаунт');showPage('history')}
+    catch(e){if(!getToken()){pendingSave=true;openAuth('login')}toast('Ошибка при сохранении: '+e.message)}
+    finally{btn.disabled=false}
+  }
+  $('saveReceiptBtn').onclick=saveReceipt;
+  $('downloadBtn').onclick=()=>{if(lastResult)downloadJson(lastResult,'receipt_data.json')};
   const inPeriod=(r,p)=>{if(p==='all')return true;const d=new Date(r.iso||'');if(Number.isNaN(+d))return false;const now=new Date();if(p==='year')return d.getFullYear()===now.getFullYear();if(p==='month')return d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth();const start=new Date(now);start.setHours(0,0,0,0);start.setDate(start.getDate()-((start.getDay()+6)%7));return d>=start&&d<=now};
   const filtered=(p='all')=>receipts.filter(r=>inPeriod(r,p));
-  function renderHistory(){const p=$('historyPeriod').value,list=filtered(p),total=list.reduce((s,r)=>s+r.total,0);$('historyTotal').textContent=money(total);$('historyCount').textContent=list.length;$('historyAverage').textContent=money(list.length?total/list.length:0);$('historyList').innerHTML=list.length?list.map(r=>`<article class="card receipt-row"><div><h3>${esc(r.store)}</h3><p>${esc(r.date)} · ${(r.items||[]).length} позиций</p></div><div class="receipt-amount">${money(r.total)}</div><button class="text-btn" data-delete="${r.id}">Удалить</button></article>`).join(''):'<div class="card empty">Пока нет чеков за этот период. Загрузите чек, чтобы начать историю.</div>';document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async ()=>{await fetch('/api/receipts/'+b.dataset.delete,{method:'DELETE'});await loadReceipts();toast('Чек удалён')})}
+  function renderHistory(){const p=$('historyPeriod').value,list=filtered(p),total=list.reduce((s,r)=>s+(Number(r.total)||0),0);$('historyTotal').textContent=money(total);$('historyCount').textContent=list.length;$('historyAverage').textContent=money(list.length?total/list.length:0);$('historyList').innerHTML=list.length?list.map(r=>`<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store||'магазин не определён')}"><div><h3>${esc(r.store||'Магазин не определён')}</h3><p>${esc(r.date||fmtDateTime(r.created_at))} · ${(r.items||[]).length} позиций</p></div><div class="receipt-amount">${money(r.total)}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button">Удалить</button></article>`).join(''):(currentUser?'<div class="card empty">Пока нет чеков за этот период. Загрузите чек, чтобы начать историю.</div>':'<div class="card empty">История хранится в аккаунте. <button class="text-btn" data-open-auth type="button">Войдите или зарегистрируйтесь</button>, чтобы сохранять чеки.</div>');document.querySelectorAll('[data-open-auth]').forEach(b=>b.onclick=()=>openAuth('login'));$('historyList').querySelectorAll('[data-delete]').forEach(b=>b.onclick=async e=>{e.stopPropagation();b.disabled=true;if(!await deleteReceipt(b.dataset.delete))b.disabled=false});$('historyList').querySelectorAll('[data-open]').forEach(row=>{row.onclick=()=>openReceipt(row.dataset.open);row.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===row){e.preventDefault();openReceipt(row.dataset.open)}}})}
   $('historyPeriod').onchange=renderHistory;
   function sumsByCategory(list){const sums={};list.forEach(r=>(r.items||[]).forEach(it=>{const c=it.category||guessCategory(it.name);sums[c]=(sums[c]||0)+(Number(it.total_price)||0)}));return sums}
   function renderCategories(){const sums=sumsByCategory(filtered(document.querySelector('.periodFilter').value));const sorted=CATEGORIES.map(([name,icon])=>({name,icon,value:sums[name]||0})).sort((a,b)=>b.value-a.value);$('categoryGrid').innerHTML=sorted.map(c=>`<div class="card category-row"><div class="cat-icon">${c.icon}</div><div><h3>${c.name}</h3><small>по сохранённым чекам</small></div><div class="category-amount">${money(c.value)}</div></div>`).join('')}
   document.querySelector('.periodFilter').onchange=renderCategories;
   function renderAnalysis(){const p=$('analysisPeriod').value,cat=$('analysisCategory').value,list=filtered(p),allSums=sumsByCategory(list),cats=CATEGORIES.map(([n])=>n);$('analysisCategory').innerHTML='<option value="all">Все категории</option>'+cats.map(c=>`<option>${c}</option>`).join('');$('analysisCategory').value=cat;const chosen=cat==='all'?list:list.map(r=>({...r,items:(r.items||[]).filter(i=>(i.category||guessCategory(i.name))===cat)}));const total=chosen.reduce((s,r)=>s+(cat==='all'?r.total:(r.items||[]).reduce((a,i)=>a+(Number(i.total_price)||0),0)),0);$('analysisTotal').textContent=money(total);$('analysisItems').textContent=chosen.reduce((a,r)=>a+(r.items||[]).length,0);const tops=Object.entries(allSums).sort((a,b)=>b[1]-a[1]);$('analysisTop').textContent=tops[0]?.[0]||'—';const sums=cat==='all'?allSums:{[cat]:allSums[cat]||0};const sorted=Object.entries(sums).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);$('breakdown').innerHTML=sorted.length?sorted.map(([n,v])=>`<div class="legend-row"><i class="dot"></i><div>${n}<div class="progress"><i style="width:${Math.round(v/Math.max(...sorted.map(x=>x[1]))*100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join(''):'<div class="empty">Нет данных для выбранного периода</div>';let buckets=[];const now=new Date();if(p==='week'){for(let i=6;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);buckets.push({label:['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][d.getDay()],key:d.toDateString(),sum:0})}}else if(p==='year'){for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);buckets.push({label:d.toLocaleDateString('ru-RU',{month:'short'}),key:d.getFullYear()+'-'+d.getMonth(),sum:0})}}else{for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);buckets.push({label:d.toLocaleDateString('ru-RU',{month:'short'}),key:d.getFullYear()+'-'+d.getMonth(),sum:0})}}chosen.forEach(r=>{const d=new Date(r.iso);let b;if(p==='week')b=buckets.find(x=>x.key===d.toDateString());else b=buckets.find(x=>x.key===d.getFullYear()+'-'+d.getMonth());if(b)b.sum+=cat==='all'?r.total:(r.items||[]).reduce((a,i)=>a+(Number(i.total_price)||0),0)});const max=Math.max(1,...buckets.map(b=>b.sum));$('chart').innerHTML=buckets.map(b=>`<div class="bar-wrap" title="${money(b.sum)}"><div class="bar" style="height:${Math.max(2,b.sum/max*82)}%"></div><span class="bar-label">${b.label}</span></div>`).join('');$('chartTitle').textContent=p==='week'?'Последние 7 дней':p==='year'?'По месяцам':'Динамика за 6 месяцев'}
   $('analysisPeriod').onchange=renderAnalysis;$('analysisCategory').onchange=renderAnalysis;
-  renderHistory();
+  checkAuthOnStartup();
 </script></body></html>
