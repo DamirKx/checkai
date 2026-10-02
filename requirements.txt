@@ -10,3 +10,5 @@ httpx
 sqlalchemy
 jinja2
 ollama
+bcrypt>=4.0.0
+pyjwt>=2.8.0
