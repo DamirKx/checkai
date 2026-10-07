@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import tempfile
+import logging
 from typing import List, Dict, Any
 
 # КРИТИЧНО: Отключаем багнутые фичи PaddlePaddle 3.x ДО импорта PaddleOCR
@@ -90,21 +91,35 @@ def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
     return lines
 
 
+logger = logging.getLogger("checkai.ocr")
+
+
 def analyze_receipt(image_input, ocr: PaddleOCR = None) -> Dict[str, Any]:
-    """Полный цикл: изображение → структурированный словарь."""
+    """Полный цикл: изображение → структурированный словарь.
+    
+    Если Ollama/Qwen доступна — используется нейросетевой анализ.
+    Если Ollama отключена или не отвечает — срабатывает мгновенный алгоритмический парсер app.parser.
+    """
     if ocr is None:
         ocr = init_ocr()
 
     lines = ocr_image(ocr, image_input)
-    
-    # Склеиваем строки в один текст
     raw_text = "\n".join(lines)
-    
-    # Используем крутой парсер Qwen, который написал разработчик!
-    from ml.app.agent_parser import parse_receipt as ai_parse_receipt
-    parsed = ai_parse_receipt(raw_text)
-    
-    parsed['raw_lines'] = lines
+
+    use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()
+    parsed = None
+
+    if use_ai not in ("0", "false", "no", "off"):
+        try:
+            from ml.app.agent_parser import parse_receipt as ai_parse_receipt
+            parsed = ai_parse_receipt(raw_text)
+        except Exception as e:
+            logger.info("Ollama/LLM недоступна (%s). Используется встроенный парсер app.parser", e)
+
+    if not parsed:
+        parsed = parse_receipt(lines)
+
+    parsed["raw_lines"] = lines
     return parsed
 
 
