@@ -20,6 +20,17 @@ temp_*
 
 # Данные приложения (БД, загруженные чеки) — не коммитим!
 data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Логи
+*.log
+
+# Секреты (SECRET_KEY и др.). Шаблон — .env.example
+.env
+.env.*
+!.env.example
 
 # Результаты распознавания
 *_result.json

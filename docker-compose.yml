@@ -11,23 +11,37 @@ services:
       # Прокидываем app и server.py для удобной разработки
       - ./app:/app/app
       - ./server.py:/app/server.py
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
     environment:
-      # Указываем Python-библиотеке ollama адрес соседнего контейнера
+      # Ключ подписи JWT берётся из файла .env рядом с docker-compose.yml (см. .env.example)
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env (see .env.example)}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
+      # Адрес Ollama (если запущен контейнер ollama)
       - OLLAMA_HOST=http://ollama:11434
+      # Режим работы: auto (Ollama при наличии, fallback на быстрый regex-парсер)
+      - USE_AI_PARSER=${USE_AI_PARSER:-auto}
       # Отключаем багнутые фичи PaddlePaddle 3.0 на Intel/AMD процессорах
       - FLAGS_enable_pir_api=0
       - FLAGS_use_onednn=0
       - FLAGS_enable_pir_in_executor=0
       - FLAGS_pir_apply_inplace_pass=0
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
+        required: false
 
   ollama:
     image: ollama/ollama:latest
+    # Сервис ollama запускается ТОЛЬКО при указании профиля:
+    # docker compose --profile full up (или --profile ml)
+    profiles:
+      - full
+      - ml
     ports:
       - "11434:11434"
     volumes:
-      # Сохраняем скачанные модели нейросетей, чтобы не скачивать каждый раз заново
+      # Сохраняем скачанные модели нейросетей
       - ollama_data:/root/.ollama
 
 volumes:

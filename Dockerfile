@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+# Та же версия Python, что и в локальном .venv (закреплённый numpy 2.3 требует Python 3.11+)
+FROM python:3.12-slim
 
 # Устанавливаем системные библиотеки, необходимые для работы PaddleOCR и OpenCV
 RUN apt-get update && apt-get install -y \
