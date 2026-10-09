@@ -34,7 +34,7 @@ python -m uvicorn server:app --reload
 
 ## 2. Фронтенд-разработчик (Frontend)
 
-Фронтендер работает со статикой и JS без сборщиков (Vanilla HTML/CSS/JS в `frontend/templates/index.html`).
+Фронтендер работает со статикой и JS без сборщиков (Vanilla HTML/CSS/JS: разметка в `frontend/templates/index.html`, стили в `frontend/static/css/app.css`, скрипт в `frontend/static/js/app.js`).
 
 ### Запуск окружения:
 ```bash
@@ -45,7 +45,7 @@ docker compose up
 python -m uvicorn server:app --reload
 ```
 ### Особенности работы:
-1. Папка `frontend/` смонтирована в контейнер «на лету» (`volumes`). Это значит, что любые правки в `frontend/templates/index.html` сразу видны в браузере после нажатия `F5` — **пересобирать контейнер не нужно**.
+1. Папка `frontend/` смонтирована в контейнер «на лету» (`volumes`). Это значит, что любые правки в `frontend/templates/` и `frontend/static/` сразу видны в браузере после нажатия `F5` — **пересобирать контейнер не нужно**.
 2. Распознавание чеков работает быстро (Ollama не требуется).
 3. Все запросы интерфейса идут к API по адресам `/api/*` (авторизация через JWT в `localStorage`).
 

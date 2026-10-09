@@ -56,6 +56,10 @@ os.makedirs(FRONTEND_TEMPLATES_DIR, exist_ok=True)
 
 # Статикой раздаём ТОЛЬКО фото чеков. Папка data/ целиком закрыта — там лежит checkai.db.
 app.mount(RECEIPTS_URL_PREFIX, StaticFiles(directory=UPLOADS_DIR), name="receipts")
+# Стили и скрипты интерфейса
+FRONTEND_STATIC_DIR = os.path.join(BASE_DIR, "frontend", "static")
+os.makedirs(FRONTEND_STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=FRONTEND_STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=FRONTEND_TEMPLATES_DIR)
 
 
