@@ -25,7 +25,8 @@ if len(SECRET_KEY) < 32:
     logger.warning("SECRET_KEY короче 32 символов — используйте более длинный случайный ключ")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_DAYS = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -42,10 +43,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Создание JWT access токена."""
+    """Создание JWT access токена (короткий срок жизни — 60 минут)."""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
-    to_encode.update({"exp": expire})
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Создание долгоживущего JWT refresh токена (30 дней)."""
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_access_token(token: str) -> Optional[dict]:
@@ -61,6 +69,9 @@ def _user_from_token(token: Optional[str], db: Session) -> Optional[models.User]
         return None
     payload = decode_access_token(token)
     if payload is None:
+        return None
+    # Refresh токен нельзя использовать для доступа к обычным защищённым эндпоинтам
+    if payload.get("type") == "refresh":
         return None
     try:
         user_id = int(payload.get("sub"))
