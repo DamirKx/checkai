@@ -88,8 +88,13 @@ applyTheme(document.documentElement.dataset.theme || 'dark', false);
 const TOKEN_KEY = 'checkai_token';
 const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
 const setToken = t => { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} };
-const removeToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} };
-// Сохранённые на устройстве аккаунты для быстрого переключения: [{token,user}]
+// Access-токен живёт час; refresh-токен (30 дней) обменивается на новую пару через /api/auth/refresh
+const REFRESH_KEY = 'checkai_refresh';
+const getRefresh = () => { try { return localStorage.getItem(REFRESH_KEY); } catch (e) { return null; } };
+const setRefresh = t => { try { if (t) localStorage.setItem(REFRESH_KEY, t); else localStorage.removeItem(REFRESH_KEY); } catch (e) {} };
+// Выход и истёкшая сессия: убираем оба токена
+const removeToken = () => { try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(REFRESH_KEY); } catch (e) {} };
+// Сохранённые на устройстве аккаунты для быстрого переключения: [{token,refresh,user}]
 const ACCOUNTS_KEY = 'checkai_accounts';
 const getAccounts = () => {
   try {
@@ -98,7 +103,13 @@ const getAccounts = () => {
   } catch (e) { return []; }
 };
 const saveAccounts = list => { try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(list.slice(0, 5))); } catch (e) {} };
-const rememberAccount = (token, user) => { if (token && user) saveAccounts([{ token, user }, ...getAccounts().filter(a => a.user.id !== user.id)]); };
+const rememberAccount = (token, user) => { if (token && user) saveAccounts([{ token, refresh: getRefresh(), user }, ...getAccounts().filter(a => a.user.id !== user.id)]); };
+// Ответ входа, регистрации, смены данных и обновления: {access_token, refresh_token, user}
+function setSession(data) {
+  setToken(data.access_token);
+  setRefresh(data.refresh_token || null);
+  if (data.user) rememberAccount(data.access_token, data.user);
+}
 const forgetAccount = id => saveAccounts(getAccounts().filter(a => a.user.id !== id));
 const forgetToken = token => saveAccounts(getAccounts().filter(a => a.token !== token));
 // У ошибки есть поле status, чтобы отличать «нет такого эндпоинта» (404/405) от остальных
@@ -142,7 +153,28 @@ function handleResponse(status, data, token) {
 }
 const networkError = () => Object.assign(new Error('Нет связи с сервером. Проверьте подключение и попробуйте снова'), { status: 0 });
 
-async function apiRequest(url, options = {}) {
+// Один запрос обновления на все одновременные 401
+let refreshing = null;
+function refreshSession() {
+  if (!refreshing) {
+    refreshing = (async () => {
+      const refreshToken = getRefresh();
+      if (!refreshToken) return false;
+      try {
+        const response = await fetch('/api/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refreshToken }) });
+        if (!response.ok) return false;
+        const data = await response.json();
+        // Пока шёл запрос, пользователь сменил аккаунт — новые токены уже не нужны
+        if (getRefresh() !== refreshToken) return true;
+        setSession(data);
+        return true;
+      } catch (e) { return false; }
+    })().finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
+
+async function apiRequest(url, options = {}, retried = false) {
   const token = getToken();
   options.headers = options.headers || {};
   if (token) options.headers['Authorization'] = `Bearer ${token}`;
@@ -150,6 +182,8 @@ async function apiRequest(url, options = {}) {
   let response;
   try { response = await fetch(url, options); } catch (e) { throw networkError(); }
   const data = await response.json().catch(() => ({}));
+  // Access-токен истёк — обновляем его и повторяем запрос один раз
+  if (response.status === 401 && token && !retried && await refreshSession()) return apiRequest(url, options, true);
   return handleResponse(response.status, data, token);
 }
 // Загрузка файла через XHR: fetch не умеет сообщать прогресс отправки
@@ -220,18 +254,19 @@ function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(
 
 // --- Смена аккаунта ---
 async function switchAccount(id) {
-  const acc = getAccounts().find(a => a.user.id === id), prev = getToken();
+  const acc = getAccounts().find(a => a.user.id === id), prev = getToken(), prevRefresh = getRefresh();
   if (!acc || acc.token === prev) return;
-  closeAccountMenu(); closeReceipt(); setToken(acc.token);
+  const restore = () => { setToken(prev); setRefresh(prevRefresh); };
+  closeAccountMenu(); closeReceipt(); setToken(acc.token); setRefresh(acc.refresh || null);
   try {
     const user = await apiRequest('/api/auth/me');
     setUser(user);
     await loadReceipts();
     toast('Вы вошли как ' + (user.full_name || user.email));
   } catch (e) {
-    if (getToken()) { setToken(prev); toast('Не удалось переключиться: ' + e.message); return; }
+    if (getToken()) { restore(); toast('Не удалось переключиться: ' + e.message); return; }
     // Токен сохранённого аккаунта истёк: возвращаем прежний аккаунт и просим войти заново
-    if (prev) { setToken(prev); await checkAuthOnStartup(); }
+    if (prev) { restore(); await checkAuthOnStartup(); }
     openAuth('login');
     $('authEmail').value = acc.user.email;
     $('authPassword').focus();
@@ -298,7 +333,7 @@ $('profileForm').onsubmit = async e => {
   btn.disabled = true;
   try {
     const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
-    if (data.access_token) setToken(data.access_token);
+    if (data.access_token) setSession(data);
     setUser(data.user || data);
     toast('Данные аккаунта обновлены');
   } catch (err) {
@@ -605,7 +640,7 @@ $('authForm').onsubmit = async e => {
   $('authError').hidden = true;
   try {
     const data = await apiRequest(isLogin ? '/api/auth/login' : '/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
-    setToken(data.access_token);
+    setSession(data);
     setUser(data.user);
     const wasPending = pendingSave;
     closeAuth();

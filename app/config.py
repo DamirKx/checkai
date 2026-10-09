@@ -21,8 +21,17 @@ def _int_env(name: str, default: int) -> int:
         raise RuntimeError(f"Переменная окружения {name} должна быть целым числом, получено: {raw!r}")
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
 DATA_DIR = os.path.join(BASE_DIR, "data")
-UPLOADS_DIR = os.path.join(DATA_DIR, "receipts")
+# Папка с фото чеков. Если база вынесена в другое место (например, в тестах), фото стоит вынести рядом:
+# очистка «осиротевших» фото сверяет файлы именно с этой базой.
+UPLOADS_DIR = os.getenv("UPLOADS_DIR", "").strip() or os.path.join(DATA_DIR, "receipts")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or f"sqlite:///{os.path.join(DATA_DIR, 'checkai.db')}"
 
@@ -31,3 +40,11 @@ SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 
 # Максимальный размер загружаемого фото чека, в мегабайтах.
 MAX_UPLOAD_MB = _int_env("MAX_UPLOAD_MB", 10)
+
+# Доверять заголовку X-Forwarded-For (IP клиента для лимита запросов).
+# Включайте только за своим обратным прокси (nginx и т.п.): иначе клиент подставит любой IP и обойдёт лимит.
+TRUST_PROXY = _bool_env("TRUST_PROXY", False)
+
+# Как часто удалять фото чеков, которые распознали, но не сохранили (часы). 0 — не удалять.
+# Удаляются только файлы старше суток.
+ORPHAN_CLEANUP_HOURS = _int_env("ORPHAN_CLEANUP_HOURS", 6)

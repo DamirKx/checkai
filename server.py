@@ -4,6 +4,7 @@ import time
 import uuid
 import logging
 import threading
+from contextlib import asynccontextmanager
 from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Query
@@ -22,7 +23,7 @@ from app import schemas
 from app import crud
 from app import auth
 from app.rate_limit import limiter, get_client_ip
-from app.dates import normalize_date_time
+from app.dates import normalize_date_time, split_date_time
 from app.ocr import init_ocr, analyze_receipt
 
 logger = logging.getLogger("checkai")
@@ -30,7 +31,16 @@ logger = logging.getLogger("checkai")
 # Применяем миграции Alembic (создают таблицы в новой базе)
 database.init_db()
 
-app = FastAPI(title="CheckAI — Анализ кассовых чеков", version="2.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Фоновая очистка стартует вместе с сервером, а не при импорте модуля (импортируют и тесты)
+    stop_cleanup = _start_orphan_cleanup_thread()
+    yield
+    if stop_cleanup is not None:
+        stop_cleanup.set()
+
+
+app = FastAPI(title="CheckAI — Анализ кассовых чеков", version="2.1.0", lifespan=lifespan)
 
 BASE_DIR = config.BASE_DIR
 UPLOADS_DIR = config.UPLOADS_DIR
@@ -232,7 +242,8 @@ def cleanup_orphan_images(db: Session, max_age_seconds: int = 86400) -> int:
     now = time.time()
     deleted_count = 0
     for filename in os.listdir(UPLOADS_DIR):
-        if filename.startswith("."):
+        # Трогаем только фото чеков (служебные файлы вроде .gitkeep пропускаем)
+        if filename.startswith(".") or os.path.splitext(filename)[1].lower() not in ALLOWED_EXTENSIONS:
             continue
         file_path = os.path.join(UPLOADS_DIR, filename)
         if not os.path.isfile(file_path):
@@ -251,26 +262,39 @@ def cleanup_orphan_images(db: Session, max_age_seconds: int = 86400) -> int:
     return deleted_count
 
 
-def _start_orphan_cleanup_thread():
+def _start_orphan_cleanup_thread() -> Optional[threading.Event]:
+    """Сразу после старта и затем раз в ORPHAN_CLEANUP_HOURS часов. Возвращает событие для остановки."""
+    if config.ORPHAN_CLEANUP_HOURS <= 0:
+        return None
+    stop = threading.Event()
+
     def _worker():
-        try:
-            with database.SessionLocal() as db:
-                count = cleanup_orphan_images(db, max_age_seconds=86400)
-                if count:
-                    logger.info("Удалено %d осиротевших фото чеков", count)
-        except Exception:
-            logger.exception("Ошибка фоновой очистки осиротевших фото")
+        while not stop.is_set():
+            try:
+                with database.SessionLocal() as db:
+                    count = cleanup_orphan_images(db, max_age_seconds=86400)
+                    if count:
+                        logger.info("Удалено %d осиротевших фото чеков", count)
+            except Exception:
+                logger.exception("Ошибка фоновой очистки осиротевших фото")
+            stop.wait(config.ORPHAN_CLEANUP_HOURS * 3600)
 
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-
-
-_start_orphan_cleanup_thread()
+    threading.Thread(target=_worker, name="orphan-cleanup", daemon=True).start()
+    return stop
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
+
+def _token_response(user: models.User) -> schemas.TokenOut:
+    access_token, refresh_token = auth.issue_tokens(user)
+    return schemas.TokenOut(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=schemas.UserOut.model_validate(user),
+    )
 
 # --- Аутентификация (Регистрация, Вход, Профиль) ---
 
@@ -291,14 +315,7 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(database.get_d
         full_name=user_data.full_name
     )
 
-    access_token = auth.create_access_token(data={"sub": str(user.id), "email": user.email})
-    refresh_token = auth.create_refresh_token(data={"sub": str(user.id), "email": user.email})
-    return schemas.TokenOut(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        user=schemas.UserOut.model_validate(user)
-    )
+    return _token_response(user)
 
 @app.post("/api/auth/login", response_model=schemas.TokenOut, tags=["Auth"])
 def login(user_data: schemas.UserLogin, db: Session = Depends(database.get_db)):
@@ -308,37 +325,17 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(database.get_db)):
     if not user or not auth.verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Неверный email или пароль")
 
-    access_token = auth.create_access_token(data={"sub": str(user.id), "email": user.email})
-    refresh_token = auth.create_refresh_token(data={"sub": str(user.id), "email": user.email})
-    return schemas.TokenOut(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        user=schemas.UserOut.model_validate(user)
-    )
+    return _token_response(user)
 
 @app.post("/api/auth/refresh", response_model=schemas.TokenOut, tags=["Auth"])
 def refresh_token(data: schemas.RefreshTokenInput, db: Session = Depends(database.get_db)):
     """Обновление access токена с помощью refresh токена."""
-    payload = auth.decode_access_token(data.refresh_token)
-    if not payload or payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Недействительный refresh токен")
-    try:
-        user_id = int(payload.get("sub"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="Недействительный refresh токен")
-    user = crud.get_user_by_id(db, user_id=user_id)
-    if not user:
-        raise HTTPException(status_code=401, detail="Пользователь не найден")
+    user = auth.user_from_refresh_token(data.refresh_token, db)
+    if user is None:
+        # Токен истёк, подделан, пользователь удалён или сменил пароль — нужно войти заново
+        raise HTTPException(status_code=401, detail="Сессия истекла, войдите снова")
 
-    access_token = auth.create_access_token(data={"sub": str(user.id), "email": user.email})
-    new_refresh_token = auth.create_refresh_token(data={"sub": str(user.id), "email": user.email})
-    return schemas.TokenOut(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
-        token_type="bearer",
-        user=schemas.UserOut.model_validate(user),
-    )
+    return _token_response(user)
 
 @app.get("/api/auth/me", response_model=schemas.UserOut, tags=["Auth"])
 def get_me(current_user: models.User = Depends(auth.get_current_user)):
@@ -373,14 +370,7 @@ def update_me(
     db.commit()
     db.refresh(current_user)
 
-    access_token = auth.create_access_token(data={"sub": str(current_user.id), "email": current_user.email})
-    refresh_token = auth.create_refresh_token(data={"sub": str(current_user.id), "email": current_user.email})
-    return schemas.TokenOut(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        user=schemas.UserOut.model_validate(current_user),
-    )
+    return _token_response(current_user)
 
 @app.delete("/api/auth/me", tags=["Auth"])
 def delete_me(
@@ -448,6 +438,14 @@ def save_receipt(
     image_path = _resolve_image_path(receipt.image_path)
     return crud.create_receipt(db=db, data=receipt, user_id=current_user.id, image_path=image_path)
 
+def _iso_query_date(value: Optional[str], name: str) -> Optional[str]:
+    if not value:
+        return None
+    iso_date, _ = split_date_time(value)
+    if iso_date is None:
+        raise HTTPException(status_code=422, detail=f"Параметр {name}: укажите дату в формате ГГГГ-ММ-ДД")
+    return iso_date
+
 @app.get("/api/receipts", response_model=List[schemas.ReceiptOut], tags=["Receipts"])
 def read_receipts(
     skip: int = Query(0, ge=0),
@@ -460,6 +458,8 @@ def read_receipts(
     current_user: models.User = Depends(auth.get_current_user)
 ):
     """Чеки текущего пользователя с поддержкой фильтров, поиска и пагинации."""
+    # Даты в базе — строки YYYY-MM-DD и сравниваются как строки, поэтому другой формат дал бы тихо неверный результат
+    from_date, to_date = _iso_query_date(from_date, "from"), _iso_query_date(to_date, "to")
     return crud.get_all_receipts(
         db,
         user_id=current_user.id,

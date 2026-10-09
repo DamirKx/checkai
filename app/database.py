@@ -27,6 +27,9 @@ if _is_sqlite:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+        # Встроенная lower() в SQLite меняет регистр только у латиницы, и ilike не находит
+        # «магнум» в «Магнум». Подменяем её на Python-версию, которая понимает кириллицу.
+        dbapi_connection.create_function("lower", 1, lambda s: s.lower() if isinstance(s, str) else s, deterministic=True)
 
 
 # Ревизия, которая соответствует схеме, созданной до перехода на Alembic
