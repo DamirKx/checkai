@@ -46,6 +46,20 @@ class ReceiptCreate(BaseModel):
         return self
 
 
+class ReceiptUpdate(BaseModel):
+    store: Optional[str] = Field(default=None, max_length=255)
+    date: Optional[str] = None
+    time: Optional[str] = None
+    category: Optional[str] = Field(default="Продукты", max_length=100)
+    total: Optional[float] = 0.0
+    items: List[ItemSchema] = []
+
+    @model_validator(mode="after")
+    def _normalize_date_time(self):
+        self.date, self.time = normalize_date_time(self.date, self.time)
+        return self
+
+
 class ReceiptOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -62,7 +76,7 @@ class ReceiptOut(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr if EmailStr is not None else str
+    email: str
     password: str
     full_name: Optional[str] = Field(default=None, max_length=255)
 
@@ -84,6 +98,38 @@ class UserCreate(BaseModel):
         return value
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    email: Optional[str] = None
+    new_password: Optional[str] = None
+    current_password: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not _EMAIL_REGEX.match(v):
+            raise ValueError("Введите корректный email (например, user@example.com)")
+        return v
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if len(value) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Пароль должен содержать минимум {MIN_PASSWORD_LENGTH} символов")
+        if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
+            raise ValueError("Пароль слишком длинный")
+        return value
+
+
+class UserDelete(BaseModel):
+    password: str
+
+
 class UserLogin(BaseModel):
     # Без строгой проверки формата: вход не должен ломаться для уже существующих аккаунтов
     email: str
@@ -101,8 +147,13 @@ class UserOut(BaseModel):
 
 class TokenOut(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserOut
+
+
+class RefreshTokenInput(BaseModel):
+    refresh_token: str
 
 
 class AnalyticsOut(BaseModel):

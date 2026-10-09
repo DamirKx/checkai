@@ -19,10 +19,21 @@ __pycache__/
 temp_*
 
 # Данные приложения (БД, загруженные чеки) — не коммитим!
-data/
+data/*
+!data/.gitkeep
+!data/receipts/
+data/receipts/*
+!data/receipts/.gitkeep
 *.db
 *.sqlite
 *.sqlite3
+
+# Тесты и покрытие
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Логи
 *.log

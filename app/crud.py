@@ -29,6 +29,13 @@ def create_user(db: Session, email: str, hashed_password: str, full_name: Option
     db.refresh(user)
     return user
 
+def delete_user(db: Session, user: models.User) -> List[str]:
+    """Удаляет пользователя и его чеки (cascade). Возвращает список image_path для очистки файлов."""
+    image_paths = [r.image_path for r in user.receipts if r.image_path]
+    db.delete(user)
+    db.commit()
+    return image_paths
+
 # --- Операции с чеками ---
 
 def create_receipt(
@@ -76,10 +83,28 @@ def get_all_receipts(
     user_id: int,
     skip: int = 0,
     limit: int = 100,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    category: Optional[str] = None,
+    q: Optional[str] = None,
 ) -> List[models.Receipt]:
+    query = db.query(models.Receipt).filter(models.Receipt.user_id == user_id)
+
+    if from_date:
+        query = query.filter(models.Receipt.date >= from_date)
+    if to_date:
+        query = query.filter(models.Receipt.date <= to_date)
+    if category:
+        query = query.filter(models.Receipt.category.ilike(category))
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            models.Receipt.store.ilike(term) |
+            models.Receipt.items.any(models.ReceiptItem.name.ilike(term))
+        )
+
     return (
-        db.query(models.Receipt)
-        .filter(models.Receipt.user_id == user_id)
+        query
         .order_by(*_receipts_order())
         .offset(skip)
         .limit(limit)
@@ -92,6 +117,31 @@ def get_receipt_by_id(db: Session, receipt_id: int, user_id: int) -> Optional[mo
         .filter(models.Receipt.id == receipt_id, models.Receipt.user_id == user_id)
         .first()
     )
+
+def update_receipt(
+    db: Session,
+    receipt: models.Receipt,
+    data: schemas.ReceiptUpdate,
+) -> models.Receipt:
+    receipt.store = data.store
+    receipt.date = data.date
+    receipt.time = data.time
+    receipt.category = data.category or "Продукты"
+    receipt.total = data.total or 0.0
+
+    receipt.items = [
+        models.ReceiptItem(
+            name=item_data.name,
+            quantity=item_data.quantity or 1.0,
+            price_per_unit=item_data.price_per_unit or 0.0,
+            total_price=item_data.total_price or 0.0,
+            category=item_data.category,
+        )
+        for item_data in data.items
+    ]
+    db.commit()
+    db.refresh(receipt)
+    return receipt
 
 def delete_receipt(db: Session, receipt: models.Receipt) -> None:
     db.delete(receipt)
