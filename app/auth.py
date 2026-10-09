@@ -1,6 +1,8 @@
+import hashlib
+import hmac
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -56,6 +58,15 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) 
     to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+def password_fingerprint(user: models.User) -> str:
+    """Короткий отпечаток хеша пароля. Хранится в токенах: после смены пароля все старые токены перестают действовать."""
+    return hmac.new(SECRET_KEY.encode("utf-8"), user.hashed_password.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+def issue_tokens(user: models.User) -> Tuple[str, str]:
+    """Пара (access, refresh) для пользователя."""
+    claims = {"sub": str(user.id), "email": user.email, "pwd": password_fingerprint(user)}
+    return create_access_token(claims), create_refresh_token(claims)
+
 def decode_access_token(token: str) -> Optional[dict]:
     """Декодирование и проверка JWT токена."""
     try:
@@ -64,20 +75,26 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 
-def _user_from_token(token: Optional[str], db: Session) -> Optional[models.User]:
+def _user_from_token(token: Optional[str], db: Session, token_type: str = "access") -> Optional[models.User]:
     if not token:
         return None
     payload = decode_access_token(token)
-    if payload is None:
-        return None
-    # Refresh токен нельзя использовать для доступа к обычным защищённым эндпоинтам
-    if payload.get("type") == "refresh":
+    # Refresh токен нельзя использовать вместо access, и наоборот
+    if payload is None or payload.get("type") != token_type:
         return None
     try:
         user_id = int(payload.get("sub"))
     except (TypeError, ValueError):
         return None
-    return db.query(models.User).filter(models.User.id == user_id).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    # Пароль сменили после выдачи токена — токен больше не действует
+    if user is None or not hmac.compare_digest(str(payload.get("pwd", "")), password_fingerprint(user)):
+        return None
+    return user
+
+
+def user_from_refresh_token(token: str, db: Session) -> Optional[models.User]:
+    return _user_from_token(token, db, token_type="refresh")
 
 
 def get_current_user(

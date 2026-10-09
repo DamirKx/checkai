@@ -17,6 +17,9 @@ services:
       # Ключ подписи JWT берётся из файла .env рядом с docker-compose.yml (см. .env.example)
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env (see .env.example)}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
+      # X-Forwarded-For учитывается только за своим прокси (1); иначе лимит запросов можно обойти
+      - TRUST_PROXY=${TRUST_PROXY:-0}
+      - ORPHAN_CLEANUP_HOURS=${ORPHAN_CLEANUP_HOURS:-6}
       # Адрес Ollama (если запущен контейнер ollama)
       - OLLAMA_HOST=http://ollama:11434
       # Режим работы: auto (Ollama при наличии, fallback на быстрый regex-парсер)

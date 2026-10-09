@@ -78,6 +78,11 @@ def _receipts_order():
     )
 
 
+def _escape_like(value: str) -> str:
+    """Символы % и _ в запросе пользователя ищем буквально, а не как шаблон LIKE."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def get_all_receipts(
     db: Session,
     user_id: int,
@@ -94,13 +99,18 @@ def get_all_receipts(
         query = query.filter(models.Receipt.date >= from_date)
     if to_date:
         query = query.filter(models.Receipt.date <= to_date)
-    if category:
-        query = query.filter(models.Receipt.category.ilike(category))
-    if q and q.strip():
-        term = f"%{q.strip()}%"
+    if category and category.strip():
+        # Категория чека или любой его позиции (как в аналитике)
+        cat = _escape_like(category.strip())
         query = query.filter(
-            models.Receipt.store.ilike(term) |
-            models.Receipt.items.any(models.ReceiptItem.name.ilike(term))
+            models.Receipt.category.ilike(cat, escape="\\") |
+            models.Receipt.items.any(models.ReceiptItem.category.ilike(cat, escape="\\"))
+        )
+    if q and q.strip():
+        term = f"%{_escape_like(q.strip())}%"
+        query = query.filter(
+            models.Receipt.store.ilike(term, escape="\\") |
+            models.Receipt.items.any(models.ReceiptItem.name.ilike(term, escape="\\"))
         )
 
     return (
