@@ -25,6 +25,7 @@ from app import auth
 from app.rate_limit import limiter, get_client_ip
 from app.dates import normalize_date_time, split_date_time
 from app.ocr import init_ocr, analyze_receipt
+from app.tasks import task_manager
 
 logger = logging.getLogger("checkai")
 
@@ -38,6 +39,7 @@ async def lifespan(_app: FastAPI):
     yield
     if stop_cleanup is not None:
         stop_cleanup.set()
+    task_manager._executor.shutdown(wait=False)
 
 
 app = FastAPI(title="CheckAI — Анализ кассовых чеков", version="2.1.0", lifespan=lifespan)
@@ -79,9 +81,12 @@ templates = Jinja2Templates(directory=FRONTEND_TEMPLATES_DIR)
 
 # Ограничение частоты запросов (макс. запросов, секунд в окне)
 RATE_LIMIT_RULES = {
-    "/api/auth/login": (10, 60),      # защита от перебора паролей
-    "/api/auth/register": (10, 60),   # защита от спама регистраций
-    "/api/analyze": (15, 60),         # защита от перегрузки OCR
+    "/api/auth/login": (10, 60),            # защита от перебора паролей
+    "/api/auth/register": (10, 60),         # защита от спама регистраций
+    "/api/auth/forgot-password": (5, 60),   # защита от спама сброса паролей
+    "/api/auth/reset-password": (5, 60),    # защита от перебора токенов сброса
+    "/api/analyze": (15, 60),               # защита от перегрузки OCR
+    "/api/analyze/async": (15, 60),         # защита от перегрузки OCR
 }
 
 
@@ -101,7 +106,7 @@ async def upload_limit_and_headers(request: Request, call_next):
             )
 
     # Отсекаем заведомо большие загрузки ещё до разбора multipart
-    if request.url.path == "/api/analyze":
+    if request.url.path in ("/api/analyze", "/api/analyze/async"):
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES + 64 * 1024:
             return JSONResponse(
@@ -283,6 +288,57 @@ def _start_orphan_cleanup_thread() -> Optional[threading.Event]:
     return stop
 
 
+@app.get("/api/health", response_model=schemas.HealthCheckOut, tags=["System"])
+def health_check(db: Session = Depends(database.get_db)):
+    """Health-check эндпоинт для Docker и мониторинга: статус БД, OCR и Ollama."""
+    from sqlalchemy import text
+
+    # 1. База данных
+    db_status = "connected"
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.error("Healthcheck: ошибка соединения с БД: %s", e)
+        db_status = f"error: {e}"
+
+    # 2. OCR
+    ocr_status = "ready" if _ocr_model is not None else "standby"
+
+    # 3. Ollama (ИИ-парсер)
+    use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()
+    if use_ai in ("0", "false", "no", "off"):
+        ollama_status = "disabled"
+    else:
+        ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434").rstrip("/")
+        try:
+            import httpx
+            resp = httpx.get(f"{ollama_host}/api/version", timeout=1.0)
+            ollama_status = "available" if resp.status_code == 200 else f"http_{resp.status_code}"
+        except Exception:
+            ollama_status = "unavailable"
+
+    is_healthy = db_status == "connected"
+    overall_status = "healthy" if is_healthy else "unhealthy"
+
+    if not is_healthy:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": overall_status,
+                "database": db_status,
+                "ocr": ocr_status,
+                "ollama": ollama_status,
+            },
+        )
+
+    return schemas.HealthCheckOut(
+        status=overall_status,
+        database=db_status,
+        ocr=ocr_status,
+        ollama=ollama_status,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
@@ -389,6 +445,49 @@ def delete_me(
 
     return {"success": True}
 
+
+@app.post("/api/auth/forgot-password", tags=["Auth"])
+def forgot_password(
+    data: schemas.ForgotPasswordRequest,
+    db: Session = Depends(database.get_db),
+):
+    """Запрос на сброс пароля. Генерирует одноразовый токен сброса."""
+    email = data.email.strip().lower()
+    user = crud.get_user_by_email(db, email=email)
+
+    reset_token = None
+    if user:
+        reset_token = auth.create_password_reset_token(user)
+        logger.info("Сгенерирован токен сброса пароля для %s", email)
+
+    return {
+        "success": True,
+        "message": "Если пользователь с таким email зарегистрирован, ссылка для сброса пароля сформирована.",
+        # Токен отдаётся в ответе для удобства тестирования и интеграции без почтового SMTP-сервера
+        "reset_token": reset_token,
+    }
+
+
+@app.post("/api/auth/reset-password", tags=["Auth"])
+def reset_password(
+    data: schemas.ResetPasswordRequest,
+    db: Session = Depends(database.get_db),
+):
+    """Сброс пароля по одноразовому токену."""
+    user = auth.user_from_reset_token(data.token, db)
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Ссылка для сброса пароля недействительна или срок её действия истёк",
+        )
+
+    user.hashed_password = auth.hash_password(data.new_password)
+    db.commit()
+    db.refresh(user)
+
+    logger.info("Пароль успешно сброшен для пользователя id=%s", user.id)
+    return {"success": True, "message": "Пароль успешно изменён. Войдите с новым паролем."}
+
 # --- Распознавание чеков (доступно и гостям) ---
 # Эндпоинты объявлены через def, а не async def: FastAPI выполняет их в пуле потоков,
 # поэтому долгий OCR не блокирует остальные запросы.
@@ -425,6 +524,51 @@ def analyze_receipt_endpoint(file: UploadFile = File(...)):
     # Путь к картинке клиент вернёт при сохранении чека
     data["image_path"] = f"{RECEIPTS_URL_PREFIX}/{filename}"
     return {"success": True, "data": data}
+
+
+@app.post("/api/analyze/async", tags=["OCR"])
+def analyze_receipt_async_endpoint(file: UploadFile = File(...)):
+    """Асинхронное распознавание чека через очередь фоновых задач.
+    Возвращает task_id для периодического опроса статуса через GET /api/tasks/{task_id}."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail="Загрузите изображение чека")
+
+    file_path, filename = _save_upload(file)
+    image_url = f"{RECEIPTS_URL_PREFIX}/{filename}"
+    task = task_manager.create_task(file_path=file_path, image_url=image_url)
+
+    def _worker_fn(task_id: str) -> dict:
+        task_manager.update_task(task_id, step="ocr", progress=40)
+        data = _run_ocr(file_path)
+        data["image_path"] = image_url
+        return data
+
+    task_manager.submit(task.id, _worker_fn)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "success": True,
+            "task_id": task.id,
+            "status": "pending",
+            "check_url": f"/api/tasks/{task.id}",
+        },
+    )
+
+
+@app.get("/api/tasks/{task_id}", response_model=schemas.TaskStatusOut, tags=["OCR"])
+def get_task_status(task_id: str):
+    """Проверка статуса задачи из очереди распознавания."""
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена или устарела")
+    return schemas.TaskStatusOut(
+        task_id=task.id,
+        status=task.status,
+        step=task.step,
+        progress=task.progress,
+        result=task.result,
+        error=task.error,
+    )
 
 # --- Сохранение, просмотр и аналитика чеков (только для авторизованных) ---
 

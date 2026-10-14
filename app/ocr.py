@@ -111,7 +111,10 @@ def analyze_receipt(image_input, ocr: PaddleOCR = None) -> Dict[str, Any]:
 
     if use_ai not in ("0", "false", "no", "off"):
         try:
-            from ml.app.agent_parser import parse_receipt as ai_parse_receipt
+            try:
+                from ml.app.agent_parser import parse_receipt_with_correction as ai_parse_receipt
+            except ImportError:
+                from ml.app.agent_parser import parse_receipt as ai_parse_receipt
             parsed = ai_parse_receipt(raw_text)
         except Exception as e:
             logger.info("Ollama/LLM недоступна (%s). Используется встроенный парсер app.parser", e)

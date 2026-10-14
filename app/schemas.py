@@ -165,3 +165,46 @@ class AnalyticsOut(BaseModel):
     by_store: Dict[str, float]
     by_month: Dict[str, float]
     recent_items: List[Dict[str, Any]]
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_REGEX.match(v):
+            raise ValueError("Введите корректный email (например, user@example.com)")
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password(cls, value: str) -> str:
+        if len(value) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Пароль должен содержать минимум {MIN_PASSWORD_LENGTH} символов")
+        if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
+            raise ValueError("Пароль слишком длинный")
+        return value
+
+
+class HealthCheckOut(BaseModel):
+    status: str
+    database: str
+    ocr: str
+    ollama: str
+
+
+class TaskStatusOut(BaseModel):
+    task_id: str
+    status: str
+    step: Optional[str] = None
+    progress: int = 0
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
