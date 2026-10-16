@@ -1,0 +1,23 @@
+{
+  "country": "KZ",
+  "store": null,
+  "date": "2024-06-30",
+  "currency": "RUB",
+  "items": [
+    {
+      "name": "Бургер с говядиной",
+      "quantity": 1,
+      "price": 2450,
+      "total": 2450
+    },
+    {
+      "name": "Чай термос",
+      "quantity": 1,
+      "price": 1500,
+      "total": 1500
+    }
+  ],
+  "total": 4345,
+  "receipt_id": "receipt_005",
+  "extra_charges": 395.0
+}

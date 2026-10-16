@@ -18,8 +18,12 @@ def init_ocr() -> PaddleOCR:
     Инициализация PaddleOCR.
     Используется русская модель распознавания.
     """
-    return PaddleOCR(lang="ru")
-
+    return PaddleOCR(
+        lang="ru",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False
+    )
 
 def ocr_image(
     ocr: PaddleOCR,

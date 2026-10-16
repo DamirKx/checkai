@@ -400,7 +400,7 @@ def _call_llm(
     system_prompt: str = SYSTEM_PROMPT
 ) -> Dict[str, Any]:
 
-    response = ollama.chat(
+    response = ollama.Client(timeout=120).chat(
         model=MODEL,
         messages=[
             {
@@ -414,7 +414,8 @@ def _call_llm(
         ],
         format="json",
         options={
-            "temperature": 0
+            "temperature": 0,
+            "num_predict": 512
         }
     )
 

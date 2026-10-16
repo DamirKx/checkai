@@ -1,0 +1,16 @@
+{
+  "country": "RU",
+  "store": "Управляющая компания ТСК Солнечный город",
+  "date": "2019-11-21",
+  "currency": "RUB",
+  "items": [
+    {
+      "name": "Ремонт домофона",
+      "quantity": 1,
+      "price": 1500,
+      "total": 1500
+    }
+  ],
+  "total": 1500,
+  "receipt_id": "receipt_004"
+}
