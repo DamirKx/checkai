@@ -5,6 +5,7 @@ import uuid
 import logging
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Query
@@ -663,6 +664,47 @@ def delete_receipt(
     if image_path and crud.count_receipts_with_image(db, image_path) == 0:
         _delete_image_file(image_path)
     return {"success": True}
+
+
+# --- Бюджеты и лимиты расходов (только для авторизованных) ---
+
+_MONTH_REGEX = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+@app.get("/api/budgets", response_model=List[schemas.BudgetItem], tags=["Budgets"])
+def get_budgets(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Список лимитов текущего пользователя. Если лимитов нет, возвращает пустой список []."""
+    return crud.get_user_budgets(db, user_id=current_user.id)
+
+
+@app.put("/api/budgets", response_model=List[schemas.BudgetItem], tags=["Budgets"])
+def set_budgets(
+    data: schemas.BudgetListUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Установка списка лимитов пользователя в одной транзакции (полная замена списка)."""
+    return crud.set_user_budgets(db, user_id=current_user.id, budgets_data=data.budgets)
+
+
+@app.get("/api/budgets/status", response_model=schemas.BudgetStatusOut, tags=["Budgets"])
+def get_budgets_status(
+    month: Optional[str] = Query(None, description="Месяц в формате YYYY-MM (по умолчанию текущий)"),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Расчёт расходов по бюджетам текущего пользователя за указанный месяц."""
+    if not month:
+        target_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    else:
+        target_month = month.strip()
+        if not _MONTH_REGEX.match(target_month):
+            raise HTTPException(status_code=422, detail="Параметр month: укажите месяц в формате ГГГГ-ММ")
+    return crud.get_budget_status(db, user_id=current_user.id, month=target_month)
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

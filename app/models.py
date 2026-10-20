@@ -17,6 +17,7 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
+    budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
 
 class Receipt(Base):
     __tablename__ = "receipts"
@@ -45,3 +46,16 @@ class ReceiptItem(Base):
     total_price = Column(Float, nullable=True, default=0.0)
     category = Column(String(100), nullable=True)
     receipt = relationship("Receipt", back_populates="items")
+
+
+class Budget(Base):
+    __tablename__ = "budgets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(100), nullable=True)  # NULL означает общий лимит
+    limit = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    user = relationship("User", back_populates="budgets")

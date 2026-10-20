@@ -208,3 +208,67 @@ class TaskStatusOut(BaseModel):
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
+
+class BudgetItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    category: Optional[str] = Field(default=None, max_length=100)
+    limit: float
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _clean_category(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return v
+
+    @field_validator("limit")
+    @classmethod
+    def _validate_limit(cls, v: float) -> float:
+        if v is None or v <= 0:
+            raise ValueError("Лимит бюджета должен быть больше нуля")
+        if v > 1e12:
+            raise ValueError("Лимит бюджета не может превышать 1 000 000 000 000")
+        return round(float(v), 2)
+
+
+class BudgetListUpdate(BaseModel):
+    budgets: List[BudgetItem]
+
+    @field_validator("budgets")
+    @classmethod
+    def _validate_budgets_list(cls, items: List[BudgetItem]) -> List[BudgetItem]:
+        if len(items) > 50:
+            raise ValueError("Количество лимитов не может превышать 50")
+
+        seen_categories = set()
+        for item in items:
+            cat_key = item.category.lower() if item.category is not None else None
+            if cat_key in seen_categories:
+                if cat_key is None:
+                    raise ValueError("Общий лимит (без категории) указан несколько раз")
+                else:
+                    raise ValueError(f"Категория «{item.category}» указана несколько раз")
+            seen_categories.add(cat_key)
+        return items
+
+
+class BudgetStatusItem(BaseModel):
+    category: Optional[str] = None
+    limit: float
+    spent: float
+    remaining: float
+    percent: float
+    percentage: float
+    is_over_budget: bool
+
+
+class BudgetStatusOut(BaseModel):
+    month: str
+    total_budget: Optional[float] = None
+    total_spent: float
+    budgets: List[BudgetStatusItem]
+

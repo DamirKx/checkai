@@ -239,3 +239,117 @@ def get_analytics(db: Session, user_id: int) -> Dict[str, Any]:
         "by_month": by_month,
         "recent_items": recent_items,
     }
+
+
+# --- Операции с бюджетами ---
+
+def _budgets_order():
+    # Общий бюджет (category is None) выводим первым, затем остальные по алфавиту
+    return (
+        models.Budget.category.isnot(None),
+        models.Budget.category.asc(),
+    )
+
+
+def get_user_budgets(db: Session, user_id: int) -> List[models.Budget]:
+    """Возвращает все лимиты пользователя, отсортированные: общий лимит первым, затем по алфавиту."""
+    return (
+        db.query(models.Budget)
+        .filter(models.Budget.user_id == user_id)
+        .order_by(*_budgets_order())
+        .all()
+    )
+
+
+def set_user_budgets(db: Session, user_id: int, budgets_data: List[schemas.BudgetItem]) -> List[models.Budget]:
+    """Заменяет весь список лимитов пользователя в одной транзакции."""
+    db.query(models.Budget).filter(models.Budget.user_id == user_id).delete(synchronize_session=False)
+
+    new_budgets = [
+        models.Budget(
+            user_id=user_id,
+            category=item.category,
+            limit=item.limit,
+        )
+        for item in budgets_data
+    ]
+    if new_budgets:
+        db.add_all(new_budgets)
+
+    db.commit()
+    return get_user_budgets(db, user_id)
+
+
+def get_budget_status(db: Session, user_id: int, month: str) -> schemas.BudgetStatusOut:
+    """Расчёт фактических расходов за месяц month (YYYY-MM) в сравнении с бюджетами."""
+    budgets = get_user_budgets(db, user_id)
+
+    R, I = models.Receipt, models.ReceiptItem
+    receipt_total = func.coalesce(R.total, 0.0)
+    month_filter = (R.user_id == user_id) & (func.substr(R.date, 1, 7) == month)
+
+    total_spent = (
+        db.query(func.coalesce(func.sum(receipt_total), 0.0))
+        .filter(month_filter)
+        .scalar()
+    ) or 0.0
+
+    category_col = func.coalesce(I.category, R.category, "Прочее")
+    by_category_raw = (
+        db.query(category_col, func.sum(func.coalesce(I.total_price, 0.0)))
+        .join(R, I.receipt_id == R.id)
+        .filter(month_filter)
+        .group_by(category_col)
+        .all()
+    )
+    by_category: Dict[str, float] = {name: value for name, value in by_category_raw}
+
+    # Чеки без позиций учитываем целиком по категории чека
+    receipt_category = func.coalesce(R.category, "Прочее")
+    for name, value in (
+        db.query(receipt_category, func.sum(receipt_total))
+        .filter(month_filter, ~R.items.any())
+        .group_by(receipt_category)
+        .all()
+    ):
+        by_category[name] = by_category.get(name, 0.0) + value
+
+    # Сопоставляем траты без учёта регистра: "Кафе" -> "кафе"
+    spending_lower: Dict[str, float] = {}
+    for k, v in by_category.items():
+        if k:
+            spending_lower[k.lower()] = spending_lower.get(k.lower(), 0.0) + v
+
+    general_budget = next((b for b in budgets if b.category is None), None)
+    total_budget_limit = general_budget.limit if general_budget else None
+
+    status_items = []
+    for b in budgets:
+        if b.category is None:
+            spent = round(total_spent, 2)
+        else:
+            cat_key = b.category.strip().lower()
+            spent = round(spending_lower.get(cat_key, 0.0), 2)
+
+        remaining = round(b.limit - spent, 2)
+        percent = round((spent / b.limit) * 100, 1) if b.limit > 0 else 0.0
+        is_over = spent > b.limit
+
+        status_items.append(
+            schemas.BudgetStatusItem(
+                category=b.category,
+                limit=round(b.limit, 2),
+                spent=spent,
+                remaining=remaining,
+                percent=percent,
+                percentage=percent,
+                is_over_budget=is_over,
+            )
+        )
+
+    return schemas.BudgetStatusOut(
+        month=month,
+        total_budget=round(total_budget_limit, 2) if total_budget_limit is not None else None,
+        total_spent=round(total_spent, 2),
+        budgets=status_items,
+    )
