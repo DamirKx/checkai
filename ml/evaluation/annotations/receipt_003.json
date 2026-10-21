@@ -1,0 +1,34 @@
+{
+  "country": "RU",
+  "store": "ООО СуперЧек.ru",
+  "date": "2007-03-14",
+  "currency": "RUB",
+  "items": [
+    {
+      "name": "Кирпич пустотелый одинарный М-150",
+      "quantity": 800,
+      "price": 10.22,
+      "total": 8176
+    },
+    {
+      "name": "Цемент ПЦ-400 Д20 (мешках)",
+      "quantity": 1,
+      "price": 5400,
+      "total": 5400
+    },
+    {
+      "name": "Щебень фракция 20x40",
+      "quantity": 5,
+      "price": 480,
+      "total": 2400
+    },
+    {
+      "name": "Гвозди жидкие 310 мл",
+      "quantity": 4,
+      "price": 163,
+      "total": 652
+    }
+  ],
+  "total": 16628,
+  "receipt_id": "receipt_003"
+}

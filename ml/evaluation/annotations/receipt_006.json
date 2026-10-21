@@ -1,0 +1,16 @@
+{
+  "country": "RU",
+  "store": "DNS",
+  "date": "2023-05-02",
+  "currency": "RUB",
+  "items": [
+    {
+      "name": "Смартфон 80 565L FEST 2/16GB",
+      "quantity": 1,
+      "price": 4199,
+      "total": 4199
+    }
+  ],
+  "total": 4199,
+  "receipt_id": "receipt_006"
+}
