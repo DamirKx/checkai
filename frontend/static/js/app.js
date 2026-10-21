@@ -69,6 +69,8 @@ const itemsSum = items => round2((items || []).reduce((s, i) => s + num(i.total_
 
 let receipts = [], lastResult = null, selectedFile = null, currentUser = null, pendingSave = false, authMode = 'login';
 let analyzing = false, historyShown = HISTORY_PAGE;
+// Лимиты расходов: total — общий на месяц, categories — {категория: лимит}; budgetsLocal — сервер их пока не хранит
+let budgets = { total: null, categories: {} }, budgetsLocal = false;
 
 // --- Тема ---
 const THEME_KEY = 'checkai_theme';
@@ -238,10 +240,11 @@ function setUser(user) {
   $('navProfile').hidden = false;
   $('drawerFoot').textContent = 'Чеки сохраняются в вашем аккаунте';
   renderAccountMenu(); renderProfile(); fillProfileForm();
+  closeBudgetEditor(); loadBudgets();
 }
 function setGuest() {
-  currentUser = null; receipts = [];
-  closeAccountMenu(); closeReceipt();
+  currentUser = null; receipts = []; budgets = emptyBudgets(); budgetsLocal = false;
+  closeAccountMenu(); closeReceipt(); closeBudgetEditor();
   $('loginBtn').hidden = false;
   $('userChip').hidden = true;
   $('navProfile').hidden = true;
@@ -249,7 +252,7 @@ function setGuest() {
   if ($('page-profile').classList.contains('active')) showPage('upload');
   rerender();
 }
-function rerender() { renderHistory(); renderCategories(); renderAnalysis(); renderProfile(); }
+function rerender() { renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
 function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
 
 // --- Смена аккаунта ---
@@ -350,6 +353,7 @@ $('deleteForm').onsubmit = async e => {
   btn.disabled = true;
   try {
     await apiRequest('/api/auth/me', { method: 'DELETE', body: JSON.stringify({ password: $('deletePassword').value }) });
+    try { localStorage.removeItem(budgetsKey(u.id)); } catch (e) {}
     forgetAccount(u.id); removeToken(); setGuest(); showPage('upload');
     toast('Аккаунт удалён');
   } catch (err) {
@@ -666,6 +670,7 @@ function showPage(name) {
   if (name === 'history') renderHistory();
   if (name === 'categories') renderCategories();
   if (name === 'analysis') renderAnalysis();
+  if (name === 'budgets') renderBudgets();
   if (name === 'profile') { renderProfile(); fillProfileForm(); }
 }
 function setMenu(open) {
@@ -690,11 +695,11 @@ document.addEventListener('keydown', e => {
   else if ($('drawer').classList.contains('open')) { closeMenu(); $('menuBtn').focus(); }
 });
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 2800) {
   $('toast').textContent = msg;
   $('toast').classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => $('toast').classList.remove('show'), ms);
 }
 
 // --- Загрузка фото ---
@@ -827,9 +832,12 @@ async function saveReceipt() {
   const btn = $('saveReceiptBtn');
   btn.disabled = true;
   try {
-    await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(toPayload(lastResult)) });
+    const payload = toPayload(lastResult);
+    await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(payload) });
     await loadReceipts();
-    toast('Чек сохранён в ваш аккаунт');
+    const alert = budgetAlert(payload);
+    if (alert) toast('Чек сохранён. ' + alert, 6000);
+    else toast('Чек сохранён в ваш аккаунт');
     showPage('history');
   } catch (e) {
     if (!getToken()) { pendingSave = true; openAuth('login'); }
@@ -979,5 +987,214 @@ function renderAnalysis() {
 }
 $('analysisPeriod').onchange = renderAnalysis;
 $('analysisCategory').onchange = renderAnalysis;
+
+// --- Бюджеты: лимиты расходов на месяц ---
+// Лимиты действуют каждый месяц. Сервер хранит их списком [{category, limit}], category: null — общий лимит.
+// Пока на сервере нет /api/budgets (404/405), лимиты хранятся в браузере — только на этом устройстве
+const BUDGET_WARN = 0.8;
+const emptyBudgets = () => ({ total: null, categories: {} });
+const budgetsKey = userId => 'checkai_budgets_' + userId;
+function budgetsFromList(list) {
+  const b = emptyBudgets();
+  (Array.isArray(list) ? list : []).forEach(x => {
+    const limit = round2(x?.limit);
+    if (limit <= 0) return;
+    if (x.category) b.categories[x.category] = limit; else b.total = limit;
+  });
+  return b;
+}
+const budgetsToList = b => [
+  ...(b.total ? [{ category: null, limit: b.total }] : []),
+  ...Object.entries(b.categories).map(([category, limit]) => ({ category, limit })),
+];
+const hasBudgets = b => !!b.total || Object.keys(b.categories).length > 0;
+const readLocalBudgets = userId => { try { return JSON.parse(localStorage.getItem(budgetsKey(userId))) || []; } catch (e) { return []; } };
+const writeLocalBudgets = (userId, list) => { try { localStorage.setItem(budgetsKey(userId), JSON.stringify(list)); } catch (e) {} };
+
+async function loadBudgets() {
+  const user = currentUser;
+  let next = emptyBudgets(), local = false;
+  if (user) {
+    try { next = budgetsFromList(await apiRequest('/api/budgets')); }
+    catch (e) {
+      if (notSupported(e)) { local = true; next = budgetsFromList(readLocalBudgets(user.id)); }
+      else toast('Не удалось загрузить бюджеты: ' + e.message);
+    }
+  }
+  // Пока шёл запрос, пользователь сменил аккаунт или вышел
+  if (currentUser?.id !== user?.id) return;
+  budgets = next;
+  budgetsLocal = local;
+  renderBudgets();
+}
+async function saveBudgets(next) {
+  if (!budgetsLocal) {
+    try {
+      budgets = budgetsFromList(await apiRequest('/api/budgets', { method: 'PUT', body: JSON.stringify({ budgets: budgetsToList(next) }) }));
+      return;
+    } catch (e) { if (!notSupported(e)) throw e; budgetsLocal = true; }
+  }
+  writeLocalBudgets(currentUser.id, budgetsToList(next));
+  budgets = next;
+}
+
+// Месяц как ключ YYYY-MM; месяц чека — по дате покупки, а без неё по дате сохранения
+const monthKey = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+const receiptMonth = r => { const d = new Date(r.iso || ''); return Number.isNaN(+d) ? '' : monthKey(d); };
+const shiftMonth = (key, delta) => { const [y, m] = key.split('-').map(Number); return monthKey(new Date(y, m - 1 + delta, 1)); };
+const monthLabel = key => {
+  const [y, m] = key.split('-').map(Number), s = new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+function monthSpending(key) {
+  const list = receipts.filter(r => receiptMonth(r) === key);
+  return { total: list.reduce((s, r) => s + num(r.total), 0), byCategory: sumsByCategory(list) };
+}
+// Средние траты в месяц за последние полные месяцы (считаем только месяцы, где были чеки)
+function averageSpending(months) {
+  const current = monthKey(new Date()), keys = Array.from({ length: months }, (_, i) => shiftMonth(current, -i - 1));
+  const list = receipts.filter(r => keys.includes(receiptMonth(r)));
+  const n = new Set(list.map(receiptMonth)).size || 1, byCategory = sumsByCategory(list);
+  Object.keys(byCategory).forEach(k => { byCategory[k] /= n; });
+  return { total: list.reduce((s, r) => s + num(r.total), 0) / n, byCategory };
+}
+// Без общего лимита бюджет месяца — сумма лимитов по категориям и траты только в этих категориях
+const overallLimit = b => b.total || Object.values(b.categories).reduce((s, v) => s + v, 0);
+const overallSpent = (b, spending) => b.total ? spending.total : Object.keys(b.categories).reduce((s, c) => s + (spending.byCategory[c] || 0), 0);
+const budgetState = (spent, limit) => spent > limit ? 'over' : spent >= limit * BUDGET_WARN ? 'warn' : 'ok';
+const budgetPct = (spent, limit) => limit ? Math.round(spent / limit * 100) : 0;
+const budgetBar = (label, pct) => `<div class="progress budget-bar" role="progressbar" aria-label="${esc(label)}: потрачено ${pct}% лимита" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(pct, 100)}"><i style="width:${Math.min(pct, 100)}%"></i></div>`;
+const leftText = (spent, limit) => spent <= limit ? 'осталось ' + money(limit - spent) : 'перерасход ' + money(spent - limit);
+
+// Прогноз только для текущего месяца: траты в среднем за прошедшие дни × дней в месяце
+function budgetForecast(key, spent, limit) {
+  const now = new Date();
+  if (key !== monthKey(now) || !limit) return '';
+  if (spent > limit) return `Лимит месяца уже превышен на ${money(spent - limit)}.`;
+  const day = now.getDate(), days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const projected = spent / day * days, perDay = money((limit - spent) / (days - day + 1));
+  const pace = projected > limit
+    ? `По текущему темпу к концу месяца выйдет около ${money(projected)} — на ${money(projected - limit)} больше лимита.`
+    : `По текущему темпу к концу месяца выйдет около ${money(projected)} — укладываетесь в лимит.`;
+  return `${pace} Чтобы уложиться, тратьте не больше ${perDay} в день.`;
+}
+function budgetRow(b) {
+  const pct = budgetPct(b.spent, b.limit);
+  return `<div class="card budget-row ${budgetState(b.spent, b.limit)}">
+    <div class="cat-icon" aria-hidden="true">${CATEGORY_ICON[b.name] || '◌'}</div>
+    <div class="budget-main">
+      <div class="budget-line"><h3>${esc(b.name)}</h3><span class="budget-pct">${pct}%</span></div>
+      ${budgetBar(b.name, pct)}
+      <small>${money(b.spent)} из ${money(b.limit)} · ${leftText(b.spent, b.limit)}</small>
+    </div>
+  </div>`;
+}
+function fillBudgetMonths() {
+  const sel = $('budgetMonth'), current = monthKey(new Date()), prev = sel.value || current;
+  const keys = Array.from({ length: 12 }, (_, i) => shiftMonth(current, -i));
+  sel.innerHTML = keys.map(k => `<option value="${k}">${esc(monthLabel(k))}</option>`).join('');
+  sel.value = keys.includes(prev) ? prev : current;
+}
+// Пометка «перерасход» в меню, если в текущем месяце превышен какой-то лимит
+function updateBudgetBadge() {
+  const spending = monthSpending(monthKey(new Date()));
+  $('budgetBadge').hidden = !(currentUser && (
+    (budgets.total && spending.total > budgets.total) ||
+    Object.entries(budgets.categories).some(([c, limit]) => (spending.byCategory[c] || 0) > limit)));
+}
+function renderBudgets() {
+  const guest = !currentUser;
+  $('budgetGuest').hidden = !guest;
+  $('budgetBody').hidden = guest;
+  $('budgetControls').hidden = guest;
+  $('budgetLocalNote').hidden = guest || !budgetsLocal;
+  updateBudgetBadge();
+  if (guest) return;
+  fillBudgetMonths();
+  const key = $('budgetMonth').value, spending = monthSpending(key);
+  const limit = overallLimit(budgets), spent = overallSpent(budgets, spending), state = budgetState(spent, limit);
+  $('budgetLimitLabel').textContent = budgets.total || !limit ? 'Бюджет на месяц' : 'Сумма лимитов';
+  $('budgetLimit').textContent = limit ? money(limit) : '—';
+  $('budgetSpent').textContent = money(spent);
+  $('budgetLeftLabel').textContent = limit && spent > limit ? 'Перерасход' : 'Осталось';
+  $('budgetLeft').textContent = limit ? money(Math.abs(limit - spent)) : '—';
+  $('budgetLeft').classList.toggle('over', !!limit && spent > limit);
+  if (!hasBudgets(budgets)) {
+    $('budgetOverall').innerHTML = '<div class="card empty">Лимиты ещё не заданы. <button class="text-btn" type="button" data-budget-edit>Настроить лимиты</button></div>';
+  } else {
+    const pct = budgetPct(spent, limit), title = budgets.total ? 'Весь месяц' : 'Категории с лимитом', forecast = budgetForecast(key, spent, limit);
+    $('budgetOverall').innerHTML = `<div class="card budget-overall ${state}">
+      <div class="budget-line"><h3>${title}</h3><span class="budget-pct">${pct}%</span></div>
+      ${budgetBar(title, pct)}
+      <small>${money(spent)} из ${money(limit)} · ${leftText(spent, limit)}</small>
+      ${forecast ? `<p>${esc(forecast)}</p>` : ''}
+    </div>`;
+  }
+  // Сначала категории, где лимит ближе всего к исчерпанию
+  $('budgetList').innerHTML = Object.entries(budgets.categories)
+    .map(([name, lim]) => ({ name, limit: lim, spent: spending.byCategory[name] || 0 }))
+    .sort((a, b) => b.spent / b.limit - a.spent / a.limit)
+    .map(budgetRow).join('');
+  const unlimited = Object.entries(spending.byCategory).filter(([n, v]) => v > 0 && !budgets.categories[n]).sort((a, b) => b[1] - a[1]);
+  $('budgetUnlimited').hidden = !unlimited.length || !hasBudgets(budgets);
+  $('budgetUnlimited').textContent = 'Без лимита: ' + unlimited.map(([n, v]) => `${n} — ${money(v)}`).join(', ');
+}
+// Предупреждение, если новый чек довёл лимит до 80% или превысил его
+function budgetAlert(payload) {
+  if (!hasBudgets(budgets)) return '';
+  const spending = monthSpending(payload.date ? payload.date.slice(0, 7) : monthKey(new Date())), added = {};
+  payload.items.forEach(i => { added[i.category] = (added[i.category] || 0) + num(i.total_price); });
+  const checks = Object.entries(budgets.categories).filter(([c]) => added[c])
+    .map(([c, limit]) => ({ name: `«${c}»`, limit, spent: spending.byCategory[c] || 0, added: added[c] }));
+  if (budgets.total) checks.push({ name: 'месяца', limit: budgets.total, spent: spending.total, added: num(payload.total) });
+  const rank = { ok: 0, warn: 1, over: 2 };
+  const crossed = checks
+    .filter(c => rank[budgetState(c.spent, c.limit)] > rank[budgetState(c.spent - c.added, c.limit)])
+    .sort((a, b) => b.spent / b.limit - a.spent / a.limit)[0];
+  if (!crossed) return '';
+  return crossed.spent > crossed.limit
+    ? `Бюджет ${crossed.name} превышен на ${money(crossed.spent - crossed.limit)}`
+    : `Бюджет ${crossed.name}: потрачено ${budgetPct(crossed.spent, crossed.limit)}%`;
+}
+const budgetField = (name, limit, avg) => `<label class="budget-field"><span><span aria-hidden="true">${CATEGORY_ICON[name] || '◌'}</span> ${esc(name)}</span><input class="field" type="number" min="0" step="any" inputmode="decimal" data-cat="${esc(name)}" value="${limit ? esc(limit) : ''}" placeholder="Без лимита"><small>${avg ? 'в среднем ' + money(avg) + ' в месяц' : 'трат пока не было'}</small></label>`;
+function openBudgetEditor() {
+  if (!currentUser) return;
+  const avg = averageSpending(3), cats = categoryNames([...allItemCategories(), ...Object.keys(budgets.categories)]);
+  $('budgetFields').innerHTML = cats.map(c => budgetField(c, budgets.categories[c], avg.byCategory[c])).join('');
+  $('budgetTotalInput').value = budgets.total || '';
+  $('budgetTotalHint').textContent = avg.total ? `В среднем ${money(avg.total)} в месяц. Без общего лимита бюджет — сумма лимитов по категориям` : 'Без общего лимита бюджет — сумма лимитов по категориям';
+  $('budgetError').hidden = true;
+  $('budgetEditor').hidden = false;
+  $('budgetEditBtn').setAttribute('aria-expanded', 'true');
+  $('budgetTotalInput').focus();
+}
+function closeBudgetEditor() {
+  $('budgetEditor').hidden = true;
+  $('budgetEditBtn').setAttribute('aria-expanded', 'false');
+}
+$('budgetEditor').onsubmit = async e => {
+  e.preventDefault();
+  if (!currentUser) return;
+  $('budgetError').hidden = true;
+  const next = emptyBudgets(), total = round2($('budgetTotalInput').value);
+  if (total > 0) next.total = total;
+  $('budgetFields').querySelectorAll('[data-cat]').forEach(i => { const v = round2(i.value); if (v > 0) next.categories[i.dataset.cat] = v; });
+  const btn = $('budgetSave');
+  btn.disabled = true;
+  try {
+    await saveBudgets(next);
+    closeBudgetEditor();
+    renderBudgets();
+    $('budgetEditBtn').focus();
+    toast(budgetsLocal ? 'Лимиты сохранены на этом устройстве' : 'Лимиты сохранены');
+  } catch (err) {
+    showFormError('budgetError', err.message);
+  } finally { btn.disabled = false; }
+};
+$('budgetEditBtn').onclick = () => { if ($('budgetEditor').hidden) openBudgetEditor(); else closeBudgetEditor(); };
+$('budgetCancel').onclick = () => { closeBudgetEditor(); $('budgetEditBtn').focus(); };
+$('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) openBudgetEditor(); };
+$('budgetLoginBtn').onclick = () => openAuth('login');
+$('budgetMonth').onchange = renderBudgets;
 
 checkAuthOnStartup();

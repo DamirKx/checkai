@@ -36,6 +36,7 @@
       <button class="nav-link" data-page="history" type="button"><span aria-hidden="true">▤</span><span>История и расходы</span></button>
       <button class="nav-link" data-page="categories" type="button"><span aria-hidden="true">◈</span><span>Категории</span></button>
       <button class="nav-link" data-page="analysis" type="button"><span aria-hidden="true">◔</span><span>Анализ расходов</span></button>
+      <button class="nav-link" data-page="budgets" type="button"><span aria-hidden="true">◎</span><span>Бюджеты</span><span class="nav-badge" id="budgetBadge" hidden>перерасход</span></button>
       <button class="nav-link" data-page="profile" id="navProfile" type="button" hidden><span aria-hidden="true">⚙</span><span>Профиль</span></button>
     </nav>
     <div class="drawer-foot" id="drawerFoot">Войдите, чтобы сохранять чеки</div>
@@ -141,6 +142,36 @@
         <div class="card chart-card"><h3 id="chartTitle">Динамика расходов</h3><div class="chart" id="chart" role="img"></div></div>
         <div class="card breakdown-card"><h3>Расходы по категориям</h3><div id="breakdown" class="legend"></div></div>
       </div>
+    </section>
+
+    <section class="page" id="page-budgets" aria-labelledby="budgetsTitle">
+      <div class="page-head">
+        <div><div class="eyebrow">Контроль трат</div><h1 id="budgetsTitle">Бюджеты</h1><p>Задайте лимиты на месяц — CheckAI покажет, сколько осталось, и предупредит о перерасходе.</p></div>
+        <div class="filterbar" id="budgetControls">
+          <select id="budgetMonth" aria-label="Месяц"></select>
+          <button class="btn soft small" id="budgetEditBtn" type="button" aria-controls="budgetEditor" aria-expanded="false">Настроить лимиты</button>
+        </div>
+      </div>
+      <div class="card empty" id="budgetGuest" hidden>Бюджеты хранятся в аккаунте. <button class="text-btn" id="budgetLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы задать лимиты.</div>
+      <form class="card budget-editor" id="budgetEditor" hidden>
+        <h3>Лимиты на месяц</h3>
+        <p>Лимиты действуют каждый месяц. Оставьте поле пустым, если лимит не нужен.</p>
+        <label class="budget-field budget-total"><span>Общий лимит на месяц</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
+        <div class="budget-fields" id="budgetFields"></div>
+        <div class="auth-error" id="budgetError" role="alert" hidden></div>
+        <div class="button-row"><button class="btn" id="budgetSave" type="submit">Сохранить лимиты</button><button class="btn soft" id="budgetCancel" type="button">Отмена</button></div>
+      </form>
+      <div id="budgetBody">
+        <div class="summary-grid">
+          <div class="card stat"><span id="budgetLimitLabel">Бюджет на месяц</span><strong id="budgetLimit">—</strong></div>
+          <div class="card stat"><span>Потрачено</span><strong id="budgetSpent">0 ₸</strong></div>
+          <div class="card stat"><span id="budgetLeftLabel">Осталось</span><strong id="budgetLeft">—</strong></div>
+        </div>
+        <div id="budgetOverall"></div>
+        <div class="budget-list" id="budgetList"></div>
+        <p class="budget-unlimited" id="budgetUnlimited" hidden></p>
+      </div>
+      <div class="notice" id="budgetLocalNote" hidden>Лимиты пока сохраняются только в этом браузере: сервер ещё не поддерживает бюджеты. На другом устройстве их не будет.</div>
     </section>
 
     <section class="page" id="page-profile" aria-labelledby="profileTitle">
