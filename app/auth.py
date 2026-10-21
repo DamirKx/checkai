@@ -97,6 +97,22 @@ def user_from_refresh_token(token: str, db: Session) -> Optional[models.User]:
     return _user_from_token(token, db, token_type="refresh")
 
 
+PASSWORD_RESET_EXPIRE_MINUTES = 30
+
+
+def create_password_reset_token(user: models.User, expires_delta: Optional[timedelta] = None) -> str:
+    """Создание одноразового JWT токена для сброса пароля (30 минут)."""
+    to_encode = {"sub": str(user.id), "email": user.email, "pwd": password_fingerprint(user)}
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "type": "password_reset"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def user_from_reset_token(token: str, db: Session) -> Optional[models.User]:
+    """Проверка токена сброса пароля. После смены пароля отпечаток меняется, и токен перестаёт действовать."""
+    return _user_from_token(token, db, token_type="password_reset")
+
+
 def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(database.get_db)

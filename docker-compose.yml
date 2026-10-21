@@ -20,6 +20,8 @@ services:
       # X-Forwarded-For учитывается только за своим прокси (1); иначе лимит запросов можно обойти
       - TRUST_PROXY=${TRUST_PROXY:-0}
       - ORPHAN_CLEANUP_HOURS=${ORPHAN_CLEANUP_HOURS:-6}
+      # База данных (по умолчанию SQLite; для Postgres: postgresql://checkai:checkai_secret@db:5432/checkai)
+      - DATABASE_URL=${DATABASE_URL:-}
       # Адрес Ollama (если запущен контейнер ollama)
       - OLLAMA_HOST=http://ollama:11434
       # Режим работы: auto (Ollama при наличии, fallback на быстрый regex-парсер)
@@ -33,6 +35,24 @@ services:
       ollama:
         condition: service_started
         required: false
+      db:
+        condition: service_started
+        required: false
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-checkai}
+      POSTGRES_USER: ${POSTGRES_USER:-checkai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-checkai_secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - postgres
+      - full
 
   ollama:
     image: ollama/ollama:latest
@@ -49,3 +69,4 @@ services:
 
 volumes:
   ollama_data:
+  postgres_data:
