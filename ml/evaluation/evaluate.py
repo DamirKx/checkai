@@ -75,6 +75,9 @@ def get_item_total(item):
     return price * quantity
 
 
+from app.currency import detect_currency, SUPPORTED
+
+
 def evaluate_parser(predicted, expected):
     """Сравнивает результат парсера с эталоном."""
     predicted = predicted if isinstance(predicted, dict) else {}
@@ -108,6 +111,13 @@ def evaluate_parser(predicted, expected):
     else:
         predicted_total = get_number(predicted.get("total"))
 
+    expected_currency = str(expected.get("currency") or "").upper()
+    predicted_currency = str(predicted.get("currency") or "").upper()
+
+    currency_correct = None
+    if expected_currency in SUPPORTED:
+        currency_correct = predicted_currency == expected_currency
+
     # Новые чеки SROIE пока не имеют разметки товаров
     items_annotated = expected.get("items_annotated", True)
 
@@ -115,6 +125,7 @@ def evaluate_parser(predicted, expected):
         "store_correct": store_correct,
         "date_correct": date_correct,
         "total_correct": total_correct,
+        "currency_correct": currency_correct,
         "items_annotated": items_annotated,
         "matched_items": 0,
         "expected_items": 0,
@@ -221,6 +232,7 @@ def print_receipt_metrics(name, metrics):
     print(f"  Магазин: {format_status(metrics['store_correct'])}")
     print(f"  Дата: {format_status(metrics['date_correct'])}")
     print(f"  Итог: {format_status(metrics['total_correct'])}")
+    print(f"  Валюта: {format_status(metrics['currency_correct'])}")
 
     if not metrics["items_annotated"]:
         print("  Товары: нет эталонной разметки")
@@ -272,6 +284,9 @@ def print_summary(name, results):
     store_acc, store_count = calculate_accuracy(results, "store_correct")
     date_acc, date_count = calculate_accuracy(results, "date_correct")
     total_acc, total_count = calculate_accuracy(results, "total_correct")
+    currency_acc, currency_count = calculate_accuracy(
+        results, "currency_correct"
+    )
 
     item_results = [
         result for result in results
@@ -307,6 +322,10 @@ def print_summary(name, results):
     print(f"Точность магазина: {format_percent(store_acc)} ({store_count} чеков)")
     print(f"Точность даты: {format_percent(date_acc)} ({date_count} чеков)")
     print(f"Точность итога: {format_percent(total_acc)} ({total_count} чеков)")
+    print(
+        f"Точность валюты: {format_percent(currency_acc)} "
+        f"({currency_count} чеков)"
+    )
 
     print(f"\nЧеков с разметкой товаров: {len(item_results)}")
     print(f"Правильно найдено товаров: {matched}/{expected}")
@@ -384,6 +403,16 @@ def main():
                 json.dump(cache, f, ensure_ascii=False, indent=2)
 
             print(f"Сохранён результат: {receipt_id}")
+
+        detected_currency, detected_source = detect_currency(
+            result.get("ocr_lines") or []
+        )
+
+        for parser_key in ("regex_v01", "ai_agent_v02"):
+            original = result.get(parser_key)
+            if isinstance(original, dict):
+                result[parser_key] = dict(original)
+                result[parser_key]["currency"] = detected_currency
 
         for name, key in (
             ("Regex", "regex_v01"),

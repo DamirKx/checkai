@@ -28,9 +28,13 @@ SYSTEM_PROMPT = """
       "category": null
     }
   ],
-  "total": 100.0
+  "total": 100.0,
+  "currency": null
 }
 
+
+
+Определи currency: ISO-код KZT, RUB, USD, EUR, KGS, UZS, CNY, TRY или null, если валюта неизвестна.
 
 ========================
 STORE
@@ -459,6 +463,7 @@ OCR-ТЕКСТ:
 - date
 - items
 - total
+- currency
 
 Название магазина ищи по всему чеку.
 
@@ -497,6 +502,7 @@ MO447CTZ0, CYMKA
     result.setdefault("date", "")
     result.setdefault("items", [])
     result.setdefault("total", None)
+    result.setdefault("currency", None)
 
     if not isinstance(
         result["items"],
@@ -1141,10 +1147,15 @@ def parse_receipt_with_correction(
     ):
 
         # 4. Qwen повторно анализирует чек
+        previous_currency = data.get("currency")
+
         data = self_correction(
             ocr_text,
             data
         )
+
+        if not data.get("currency"):
+            data["currency"] = previous_currency
 
         # 5. Снова удаляем служебный мусор
         data = clean_items(
