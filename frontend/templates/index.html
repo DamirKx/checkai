@@ -87,6 +87,7 @@
           <div class="placeholder" id="resultPlaceholder"><b id="resultTitle">Здесь появится чек</b><span>Сначала загрузите фото — мы распознаем позиции и сумму.</span></div>
           <div id="resultContent" hidden>
             <div class="eyebrow">Чек распознан — проверьте и поправьте, если нужно</div>
+            <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
             <div id="resultEditor"></div>
             <div class="notice">Категории предложены по названию товара. Распознавание иногда ошибается — проверьте названия, цены и итог.</div>
             <div class="button-row" style="margin-top:18px">
@@ -108,10 +109,11 @@
         </div>
       </div>
       <div class="summary-grid">
-        <div class="card stat"><span>Всего потрачено</span><strong id="historyTotal">0 ₸</strong></div>
+        <div class="card stat"><span>Всего потрачено</span><strong id="historyTotal">0</strong></div>
         <div class="card stat"><span>Чеков</span><strong id="historyCount">0</strong></div>
-        <div class="card stat"><span>Средний чек</span><strong id="historyAverage">0 ₸</strong></div>
+        <div class="card stat"><span>Средний чек</span><strong id="historyAverage">0</strong></div>
       </div>
+      <p class="currency-note" id="historySkipped" hidden></p>
       <div class="history-list" id="historyList"></div>
       <div class="more-row" id="historyMore" hidden><button class="btn soft" id="historyMoreBtn" type="button">Показать ещё</button></div>
     </section>
@@ -121,6 +123,7 @@
         <div><h1 id="categoriesTitle">Категории</h1></div>
         <div class="filterbar"><select class="periodFilter" id="categoriesPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select></div>
       </div>
+      <p class="currency-note" id="categoriesSkipped" hidden></p>
       <div class="category-grid" id="categoryGrid"></div>
       <div class="notice">Категории берутся из сохранённых чеков. Поменять категорию товара можно в подробностях чека — кнопка «Редактировать».</div>
     </section>
@@ -134,10 +137,11 @@
         </div>
       </div>
       <div class="summary-grid">
-        <div class="card stat"><span>Расходы за период</span><strong id="analysisTotal">0 ₸</strong></div>
+        <div class="card stat"><span>Расходы за период</span><strong id="analysisTotal">0</strong></div>
         <div class="card stat"><span>Самая крупная категория</span><strong id="analysisTop">—</strong></div>
         <div class="card stat"><span>Позиций учтено</span><strong id="analysisItems">0</strong></div>
       </div>
+      <p class="currency-note" id="analysisSkipped" hidden></p>
       <div class="analysis-grid">
         <div class="card chart-card"><h3 id="chartTitle">Динамика расходов</h3><div class="chart" id="chart" role="img"></div></div>
         <div class="card breakdown-card"><h3>Расходы по категориям</h3><div id="breakdown" class="legend"></div></div>
@@ -154,7 +158,7 @@
       </div>
       <div class="card empty" id="budgetGuest" hidden>Бюджеты хранятся в аккаунте. <button class="text-btn" id="budgetLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы задать лимиты.</div>
       <form class="card budget-editor" id="budgetEditor" hidden>
-        <h3>Лимиты на месяц</h3>
+        <h3 id="budgetEditorTitle">Лимиты на месяц</h3>
         <p>Лимиты действуют каждый месяц. Оставьте поле пустым, если лимит не нужен.</p>
         <label class="budget-field budget-total"><span>Общий лимит на месяц</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
         <div class="budget-fields" id="budgetFields"></div>
@@ -164,9 +168,10 @@
       <div id="budgetBody">
         <div class="summary-grid">
           <div class="card stat"><span id="budgetLimitLabel">Бюджет на месяц</span><strong id="budgetLimit">—</strong></div>
-          <div class="card stat"><span>Потрачено</span><strong id="budgetSpent">0 ₸</strong></div>
+          <div class="card stat"><span>Потрачено</span><strong id="budgetSpent">0</strong></div>
           <div class="card stat"><span id="budgetLeftLabel">Осталось</span><strong id="budgetLeft">—</strong></div>
         </div>
+        <p class="currency-note" id="budgetSkipped" hidden></p>
         <div id="budgetOverall"></div>
         <div class="budget-list" id="budgetList"></div>
         <p class="budget-unlimited" id="budgetUnlimited" hidden></p>
@@ -179,7 +184,7 @@
       <div class="profile-grid">
         <div class="card profile-card">
           <div class="profile-head"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div><div><h3 id="profileName"></h3><p id="profileEmail"></p></div></div>
-          <dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0 ₸</dd></dl>
+          <dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0</dd></dl>
         </div>
         <div class="card profile-card">
           <h3>Аккаунты на этом устройстве</h3><p>Переключайтесь между аккаунтами без повторного ввода пароля.</p>
@@ -191,6 +196,7 @@
           <form class="auth-form" id="profileForm">
             <label>Имя<input id="editName" autocomplete="name" maxlength="255"></label>
             <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
+            <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">В ней показываются итоги, аналитика и бюджеты. Лимиты бюджетов при смене не пересчитываются</span></label>
             <label>Новый пароль<input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять" aria-describedby="editPasswordHint"><span class="hint" id="editPasswordHint">Минимум 8 символов</span></label>
             <label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Нужен для смены email или пароля"></label>
             <div class="auth-error" id="profileError" role="alert" hidden></div>
@@ -215,7 +221,7 @@
       <button class="icon-btn modal-close" id="receiptClose" type="button" aria-label="Закрыть">✕</button>
       <div class="eyebrow">Подробности покупки</div>
       <div id="rmView">
-        <h2 id="rmStore"></h2><div class="store" id="rmDate"></div><div class="total" id="rmTotal"></div><div class="meta" id="rmMeta"></div>
+        <h2 id="rmStore"></h2><div class="store" id="rmDate"></div><div class="total" id="rmTotal"></div><div class="converted" id="rmConverted" hidden></div><div class="meta" id="rmMeta"></div>
         <img class="receipt-photo" id="rmPhoto" alt="Фото чека" hidden>
         <div class="item-list" id="rmItems"></div>
         <div class="notice" id="rmWarn" hidden></div>

@@ -22,13 +22,88 @@ const RECEIPTS_PAGE = 200;
 const HISTORY_PAGE = 20;
 // Сервер не сообщает этапы распознавания: после загрузки через столько мс показываем «Анализ»
 const OCR_STEP_MS = 5000;
+// Валюты, пока сервер не отдаёт /api/currencies. digits — знаков после запятой при показе
+const DEFAULT_CURRENCIES = [
+  { code: 'KZT', symbol: '₸', name: 'Казахстанский тенге', digits: 0 },
+  { code: 'RUB', symbol: '₽', name: 'Российский рубль', digits: 0 },
+  { code: 'USD', symbol: '$', name: 'Доллар США', digits: 2 },
+  { code: 'EUR', symbol: '€', name: 'Евро', digits: 2 },
+  { code: 'KGS', symbol: 'сом', name: 'Киргизский сом', digits: 2 },
+  { code: 'UZS', symbol: 'сум', name: 'Узбекский сум', digits: 0 },
+  { code: 'CNY', symbol: '¥', name: 'Китайский юань', digits: 2 },
+  { code: 'TRY', symbol: '₺', name: 'Турецкая лира', digits: 2 },
+];
+// Валюта чеков, сохранённых до появления валют, и чеков, где её не нашли
+const DEFAULT_CURRENCY = 'KZT';
 
 // --- Утилиты ---
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const money = n => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(n) || 0) + ' ₸';
 const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const round2 = n => Math.round(num(n) * 100) / 100;
+const plural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+};
+
+// --- Валюты ---
+let currencyList = DEFAULT_CURRENCIES, currencies = Object.fromEntries(DEFAULT_CURRENCIES.map(c => [c.code, c]));
+const currencyInfo = code => currencies[code] || { code, symbol: code, name: code, digits: 2 };
+// Итоги, аналитика и бюджеты — в основной валюте пользователя
+const baseCurrency = () => currentUser?.base_currency || DEFAULT_CURRENCY;
+// Код валюты из ответа сервера. Старый парсер присылает символ («₸») — переводим его в код
+function currencyCode(value) {
+  const v = String(value || '').trim();
+  if (/^[a-z]{3}$/i.test(v)) return v.toUpperCase();
+  return currencyList.find(c => c.symbol === v)?.code || DEFAULT_CURRENCY;
+}
+const curOf = r => r?.currency ? currencyCode(r.currency) : DEFAULT_CURRENCY;
+const money = (n, cur = baseCurrency()) => {
+  const c = currencyInfo(cur);
+  return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: c.digits, maximumFractionDigits: c.digits }).format(Number(n) || 0) + ' ' + c.symbol;
+};
+// Расхождение суммы позиций с итогом, которое считаем ошибкой: 1 ₸, но 1 цент
+const sumMismatch = (sum, total, cur) => Math.abs(round2(sum - total)) >= (currencyInfo(cur).digits ? 0.01 : 1);
+// Множитель к основной валюте считает сервер (rate_to_base). Без него пересчитать можно только чек в основной валюте
+const baseRate = r => r.rate_to_base ?? (curOf(r) === baseCurrency() ? 1 : null);
+// Сумма чека в основной валюте или null, если курса нет
+const toBase = (r, amount) => { const rate = baseRate(r); return rate == null ? null : num(amount) * rate; };
+// Сводка по чекам в основной валюте: чеки без курса не складываем, а считаем отдельно по валютам
+function baseSummary(list) {
+  const s = { total: 0, counted: 0, converted: false, skipped: {} };
+  list.forEach(r => {
+    const v = toBase(r, r.total), cur = curOf(r);
+    if (v == null) { s.skipped[cur] = (s.skipped[cur] || 0) + 1; return; }
+    s.total += v;
+    s.counted++;
+    if (cur !== baseCurrency()) s.converted = true;
+  });
+  return s;
+}
+// «≈» перед суммой, в которую вошли пересчитанные по курсу чеки
+const approx = (text, converted) => (converted ? '≈ ' : '') + text;
+function skippedText(skipped) {
+  const parts = Object.entries(skipped).map(([cur, n]) => `${n} ${plural(n, 'чек', 'чека', 'чеков')} в ${cur}`);
+  return parts.length ? `Не учтено: ${parts.join(', ')} — нет курса к ${baseCurrency()}.` : '';
+}
+function showSkipped(id, skipped) {
+  const text = skippedText(skipped);
+  $(id).textContent = text;
+  $(id).hidden = !text;
+}
+const currencyOptions = selected => {
+  const list = currencies[selected] ? currencyList : [...currencyList, currencyInfo(selected)];
+  return list.map(c => `<option value="${esc(c.code)}" ${c.code === selected ? 'selected' : ''}>${esc(c.symbol)} ${esc(c.code)} — ${esc(c.name)}</option>`).join('');
+};
+async function loadCurrencies() {
+  try {
+    const list = await apiRequest('/api/currencies');
+    if (!Array.isArray(list) || !list.length) return;
+    currencyList = list.map(c => ({ code: String(c.code).toUpperCase(), symbol: c.symbol || c.code, name: c.name || c.code, digits: Number.isInteger(c.digits) ? c.digits : 2 }));
+    currencies = Object.fromEntries(currencyList.map(c => [c.code, c]));
+    rerender();
+  } catch (e) { /* сервер ещё не отдаёт список (404) — остаётся встроенный */ }
+}
 // Дата чека: YYYY-MM-DD или ДД.ММ.ГГГГ / ДД.ММ.ГГ
 const parseDate = s => {
   if (!s) return null;
@@ -304,7 +379,8 @@ function renderProfile() {
   $('profileEmail').textContent = u.email;
   $('profileCreated').textContent = fmtDateTime(u.created_at);
   $('profileReceipts').textContent = receipts.length;
-  $('profileSpent').textContent = money(receipts.reduce((s, r) => s + num(r.total), 0));
+  const spent = baseSummary(receipts);
+  $('profileSpent').textContent = approx(money(spent.total), spent.converted);
   $('profileAccounts').innerHTML = getAccounts().map(a => `<div class="account-row"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${a.user.id === u.id ? '<span class="pill">Текущий</span>' : `<button class="text-btn" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="text-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`).join('');
   $('profileAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
   $('profileAccounts').querySelectorAll('[data-forget]').forEach(b => b.onclick = () => { forgetAccount(+b.dataset.forget); renderProfile(); renderAccountMenu(); });
@@ -314,6 +390,7 @@ function fillProfileForm() {
   $('profileForm').reset();
   $('editName').value = currentUser.full_name || '';
   $('editEmail').value = currentUser.email;
+  $('editBaseCurrency').innerHTML = currencyOptions(baseCurrency());
   $('profileError').hidden = true;
   $('deleteForm').reset();
   $('deleteError').hidden = true;
@@ -329,6 +406,8 @@ $('profileForm').onsubmit = async e => {
   if (name !== (u.full_name || '')) body.full_name = name || null;
   if (email !== u.email) body.email = email;
   if (password) body.new_password = password;
+  const base = $('editBaseCurrency').value;
+  if (base !== baseCurrency()) body.base_currency = base;
   if (!Object.keys(body).length) { showFormError('profileError', 'Вы ничего не изменили'); return; }
   if ((body.email || body.new_password) && !current) { showFormError('profileError', 'Введите текущий пароль, чтобы сменить email или пароль'); return; }
   if (current) body.current_password = current;
@@ -337,7 +416,14 @@ $('profileForm').onsubmit = async e => {
   try {
     const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
     if (data.access_token) setSession(data);
-    setUser(data.user || data);
+    const user = data.user || data;
+    setUser(user);
+    if (body.base_currency) {
+      // Старый сервер молча пропустит неизвестное поле — проверяем, что валюта действительно сменилась
+      if (user.base_currency !== body.base_currency) { showFormError('profileError', 'Сервер пока не поддерживает основную валюту — остальные изменения сохранены.'); return; }
+      // rate_to_base у чеков пересчитан сервером под новую валюту
+      await loadReceipts();
+    }
     toast('Данные аккаунта обновлены');
   } catch (err) {
     showFormError('profileError', notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message);
@@ -370,6 +456,9 @@ function toDraft(src) {
     date: toIsoDate(src.date),
     time: toTime(src.time) || toTime(src.date),
     total: round2(src.total),
+    currency: curOf(src),
+    // Откуда распознавание взяло валюту: symbol | country | default (у сохранённых чеков нет)
+    currency_source: src.currency_source || null,
     category: src.category || null,
     image_path: src.image_path || null,
     items: (src.items || []).map(it => {
@@ -396,6 +485,7 @@ function toPayload(draft) {
     time: draft.time || null,
     category: mainCategory(items, draft.category),
     total: round2(draft.total),
+    currency: draft.currency,
     image_path: draft.image_path,
     items,
   };
@@ -418,7 +508,8 @@ function mountEditor(root, draft) {
     <div class="edit-items" data-items></div>
     <div><button class="btn soft small" type="button" data-add>＋ Добавить позицию</button></div>
     <div class="edit-foot">
-      <label>Итог чека, ₸<input class="field edit-total" type="number" min="0" step="any" inputmode="decimal" data-f="total" value="${esc(draft.total)}"></label>
+      <label><span data-total-label></span><input class="field edit-total" type="number" min="0" step="any" inputmode="decimal" data-f="total" value="${esc(draft.total)}"></label>
+      <label>Валюта<select class="field" data-f="currency">${currencyOptions(draft.currency)}</select></label>
       <div class="edit-sum" data-sum aria-live="polite"></div>
     </div>
   </div>`;
@@ -426,28 +517,31 @@ function mountEditor(root, draft) {
   const editor = root.firstElementChild;
   const list = editor.querySelector('[data-items]'), sumBox = editor.querySelector('[data-sum]'), totalInput = editor.querySelector('[data-f="total"]');
   const renderItems = () => {
-    const cats = categoryNames(draft.items.map(i => i.category));
+    const cats = categoryNames(draft.items.map(i => i.category)), sym = currencyInfo(draft.currency).symbol;
+    editor.querySelector('[data-total-label]').textContent = `Итог чека, ${sym}`;
     list.innerHTML = draft.items.length ? draft.items.map((it, i) => `<div class="edit-item" data-i="${i}">
       <div class="edit-name">
         <label>Название<input class="field" data-k="name" maxlength="500" value="${esc(it.name)}" placeholder="Товар или услуга"></label>
         <button class="icon-btn remove-item" type="button" data-remove aria-label="Удалить позицию ${esc(it.name || '№' + (i + 1))}">✕</button>
       </div>
       <div class="edit-nums">
-        ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, 'Цена, ₸')}${numInput('total_price', it.total_price, 'Сумма, ₸')}
+        ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
         <label>Категория<select class="field" data-k="category">${cats.map(c => `<option ${c === it.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
       </div>
     </div>`).join('') : '<div class="empty">Позиций нет. Добавьте их вручную или оставьте только итог.</div>';
     updateSum();
   };
   const updateSum = () => {
-    const sum = itemsSum(draft.items), mismatch = draft.items.length && Math.abs(sum - num(draft.total)) >= 1;
-    sumBox.innerHTML = `Сумма позиций: <b>${money(sum)}</b>` + (mismatch ? ` — не совпадает с итогом. <button class="text-btn" type="button" data-fix-total>Сделать итогом</button>` : '');
+    const sum = itemsSum(draft.items), mismatch = draft.items.length && sumMismatch(sum, num(draft.total), draft.currency);
+    sumBox.innerHTML = `Сумма позиций: <b>${money(sum, draft.currency)}</b>` + (mismatch ? ` — не совпадает с итогом. <button class="text-btn" type="button" data-fix-total>Сделать итогом</button>` : '');
   };
   editor.addEventListener('input', e => {
     const t = e.target;
     if (t.dataset.f) {
       draft[t.dataset.f] = t.dataset.f === 'total' ? num(t.value) : t.value;
       if (t.dataset.f === 'total') updateSum();
+      // Подписи «Цена, $» и сумма позиций — в новой валюте
+      if (t.dataset.f === 'currency') renderItems();
       return;
     }
     const row = t.closest('[data-i]');
@@ -506,18 +600,28 @@ function openReceipt(id) {
   $('rmEditView').hidden = true;
   $('rmStore').textContent = r.store || 'Магазин не определён';
   $('rmDate').textContent = fmtPurchase(r) || 'Дата покупки не распознана';
-  $('rmTotal').textContent = money(r.total);
-  $('rmMeta').innerHTML = [r.category, items.length + ' позиций', 'Сохранён ' + fmtDateTime(r.created_at)].filter(Boolean).map(t => `<span class="pill">${esc(t)}</span>`).join('');
+  const cur = curOf(r), foreign = cur !== baseCurrency();
+  $('rmTotal').textContent = money(r.total, cur);
+  // Чек не в основной валюте: показываем, сколько это по курсу на дату покупки
+  $('rmConverted').hidden = !foreign;
+  if (foreign) {
+    const converted = toBase(r, r.total), d = parseDate(r.date);
+    const day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : fmtDateTime(r.created_at).split(',')[0];
+    $('rmConverted').textContent = converted == null
+      ? 'Курс на дату покупки не найден — чек не учитывается в итогах, аналитике и бюджетах.'
+      : `≈ ${money(converted)} по курсу НБ РК на ${day}`;
+  }
+  $('rmMeta').innerHTML = [r.category, foreign && cur, items.length + ' позиций', 'Сохранён ' + fmtDateTime(r.created_at)].filter(Boolean).map(t => `<span class="pill">${esc(t)}</span>`).join('');
   const photo = $('rmPhoto');
   if (r.image_path) { photo.onerror = () => { photo.hidden = true; }; photo.src = r.image_path; photo.hidden = false; }
   else { photo.hidden = true; photo.removeAttribute('src'); }
   $('rmItems').innerHTML = items.length
-    ? items.map(it => `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity ?? 1)} × ${money(it.price_per_unit ?? it.total_price)}</small><span class="item-cat">${esc(categoryOf(it))}</span></div><div style="text-align:right"><strong>${money(it.total_price)}</strong></div></div>`).join('')
+    ? items.map(it => `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity ?? 1)} × ${money(it.price_per_unit ?? it.total_price, cur)}</small><span class="item-cat">${esc(categoryOf(it))}</span></div><div style="text-align:right"><strong>${money(it.total_price, cur)}</strong></div></div>`).join('')
     : '<div class="empty">В чеке нет товарных позиций</div>';
   // Подсказка, если распознавание потеряло или исказило строку
   const sum = itemsSum(items);
-  $('rmWarn').hidden = !(items.length && Math.abs(sum - num(r.total)) >= 1);
-  $('rmWarn').textContent = `Сумма позиций (${money(sum)}) не совпадает с итогом чека (${money(r.total)}). Возможно, распознавание пропустило или исказило строку — исправьте через «Редактировать».`;
+  $('rmWarn').hidden = !(items.length && sumMismatch(sum, num(r.total), cur));
+  $('rmWarn').textContent = `Сумма позиций (${money(sum, cur)}) не совпадает с итогом чека (${money(r.total, cur)}). Возможно, распознавание пропустило или исказило строку — исправьте через «Редактировать».`;
   openModal('receiptModal', $('receiptClose'));
 }
 function closeReceipt() { closeModal('receiptModal'); openedReceipt = null; editDraft = null; }
@@ -821,6 +925,11 @@ function renderResult(data) {
   $('resultPlaceholder').hidden = true;
   $('resultContent').hidden = false;
   mountEditor($('resultEditor'), lastResult);
+  // Валюту не нашли на самом чеке — просим проверить
+  const name = currencyInfo(lastResult.currency).name;
+  const hint = { default: `Валюта на чеке не найдена, поставили «${name}». Проверьте поле «Валюта» под позициями.`, country: `Валюта определена по стране чека: «${name}». Если платили в другой валюте, поменяйте её под позициями.` }[lastResult.currency_source];
+  $('currencyHint').textContent = hint || '';
+  $('currencyHint').hidden = !hint;
   if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 // Гость может распознавать чеки, а для сохранения просим войти
@@ -832,10 +941,10 @@ async function saveReceipt() {
   const btn = $('saveReceiptBtn');
   btn.disabled = true;
   try {
-    const payload = toPayload(lastResult);
-    await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(payload) });
+    // В ответе — сохранённый чек с курсом к основной валюте (rate_to_base), он нужен для бюджетов
+    const saved = await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(toPayload(lastResult)) });
     await loadReceipts();
-    const alert = budgetAlert(payload);
+    const alert = budgetAlert(saved);
     if (alert) toast('Чек сохранён. ' + alert, 6000);
     else toast('Чек сохранён в ваш аккаунт');
     showPage('history');
@@ -845,6 +954,8 @@ async function saveReceipt() {
   } finally { btn.disabled = false; }
 }
 $('saveReceiptBtn').onclick = saveReceipt;
+// Пользователь сам выбрал валюту — подсказка «проверьте валюту» больше не нужна
+$('resultEditor').addEventListener('input', e => { if (e.target.dataset.f === 'currency') $('currencyHint').hidden = true; });
 $('downloadBtn').onclick = () => { if (lastResult) downloadJson(toPayload(lastResult), 'receipt_data.json'); };
 
 // --- История: фильтры, поиск, «Показать ещё», экспорт ---
@@ -867,10 +978,12 @@ const historyList = () => {
   return filtered($('historyPeriod').value).filter(r => matchesSearch(r, q));
 };
 function renderHistory() {
-  const list = historyList(), total = list.reduce((s, r) => s + num(r.total), 0), searching = !!$('historySearch').value.trim();
-  $('historyTotal').textContent = money(total);
+  const list = historyList(), sum = baseSummary(list), searching = !!$('historySearch').value.trim();
+  // Сводка — в основной валюте; средний чек — по чекам, которые удалось пересчитать
+  $('historyTotal').textContent = approx(money(sum.total), sum.converted);
   $('historyCount').textContent = list.length;
-  $('historyAverage').textContent = money(list.length ? total / list.length : 0);
+  $('historyAverage').textContent = approx(money(sum.counted ? sum.total / sum.counted : 0), sum.converted);
+  showSkipped('historySkipped', sum.skipped);
   $('exportCsvBtn').disabled = !list.length;
   const shown = list.slice(0, historyShown);
   let empty;
@@ -878,7 +991,7 @@ function renderHistory() {
   else if (searching) empty = '<div class="card empty">Ничего не найдено. Попробуйте другое название магазина или товара.</div>';
   else empty = '<div class="card empty">Пока нет чеков за этот период. Загрузите чек, чтобы начать историю.</div>';
   $('historyList').innerHTML = shown.length
-    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${money(r.total)}"><div><h3>${esc(r.store || 'Магазин не определён')}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${money(r.total)}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
+    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}"><div><h3>${esc(r.store || 'Магазин не определён')}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
     : empty;
   const rest = list.length - shown.length;
   $('historyMore').hidden = rest <= 0;
@@ -915,13 +1028,15 @@ const csvNum = n => String(round2(n)).replace('.', ',');
 function exportCsv() {
   const list = historyList();
   if (!list.length) return;
-  const rows = [['Дата', 'Время', 'Магазин', 'Итог чека', 'Товар', 'Количество', 'Цена', 'Сумма', 'Категория']];
+  // Цены и суммы — в валюте чека, отдельная колонка — итог в основной валюте (пусто, если курса нет)
+  const rows = [['Дата', 'Время', 'Магазин', 'Валюта', 'Итог чека', `Итог в ${baseCurrency()}`, 'Товар', 'Количество', 'Цена', 'Сумма', 'Категория']];
   list.forEach(r => {
     const d = parseDate(r.date), day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : '';
-    const base = [day, r.time || '', r.store || '', csvNum(r.total)];
+    const inBase = toBase(r, r.total);
+    const head = [day, r.time || '', r.store || '', curOf(r), csvNum(r.total), inBase == null ? '' : csvNum(inBase)];
     const items = r.items || [];
-    if (!items.length) rows.push([...base, '', '', '', '', r.category || '']);
-    items.forEach(i => rows.push([...base, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), categoryOf(i)]));
+    if (!items.length) rows.push([...head, '', '', '', '', r.category || '']);
+    items.forEach(i => rows.push([...head, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), categoryOf(i)]));
   });
   const csv = '﻿' + rows.map(row => row.map(csvCell).join(';')).join('\r\n');
   downloadFile(csv, 'text/csv;charset=utf-8', `checkai_${isoDay(new Date())}.csv`);
@@ -930,18 +1045,24 @@ function exportCsv() {
 $('exportCsvBtn').onclick = exportCsv;
 
 // --- Категории и анализ ---
+// Траты по категориям в основной валюте; чеки без курса пропускаем (их показывает baseSummary)
 function sumsByCategory(list) {
   const sums = {};
-  list.forEach(r => (r.items || []).forEach(it => { const c = categoryOf(it); sums[c] = (sums[c] || 0) + num(it.total_price); }));
+  list.forEach(r => {
+    const rate = baseRate(r);
+    if (rate == null) return;
+    (r.items || []).forEach(it => { const c = categoryOf(it); sums[c] = (sums[c] || 0) + num(it.total_price) * rate; });
+  });
   return sums;
 }
 const allItemCategories = () => receipts.flatMap(r => (r.items || []).map(i => i.category));
 function renderCategories() {
-  const sums = sumsByCategory(filtered($('categoriesPeriod').value));
+  const list = filtered($('categoriesPeriod').value), sums = sumsByCategory(list), summary = baseSummary(list);
+  showSkipped('categoriesSkipped', summary.skipped);
   const sorted = categoryNames(Object.keys(sums))
     .map(name => ({ name, icon: CATEGORY_ICON[name] || '◌', value: sums[name] || 0 }))
     .sort((a, b) => b.value - a.value);
-  $('categoryGrid').innerHTML = sorted.map(c => `<div class="card category-row"><div class="cat-icon" aria-hidden="true">${c.icon}</div><div><h3>${esc(c.name)}</h3><small>по сохранённым чекам</small></div><div class="category-amount">${money(c.value)}</div></div>`).join('');
+  $('categoryGrid').innerHTML = sorted.map(c => `<div class="card category-row"><div class="cat-icon" aria-hidden="true">${c.icon}</div><div><h3>${esc(c.name)}</h3><small>по сохранённым чекам</small></div><div class="category-amount">${approx(money(c.value), summary.converted && c.value > 0)}</div></div>`).join('');
 }
 $('categoriesPeriod').onchange = renderCategories;
 function renderAnalysis() {
@@ -949,9 +1070,16 @@ function renderAnalysis() {
   $('analysisCategory').innerHTML = '<option value="all">Все категории</option>' + cats.map(c => `<option>${esc(c)}</option>`).join('');
   $('analysisCategory').value = cats.includes(cat) ? cat : 'all';
   const chosenCat = $('analysisCategory').value;
-  const spent = r => chosenCat === 'all' ? num(r.total) : (r.items || []).reduce((a, i) => a + num(i.total_price), 0);
+  // Траты чека в основной валюте; чек без курса не учитываем
+  const spent = r => {
+    const rate = baseRate(r);
+    if (rate == null) return 0;
+    return rate * (chosenCat === 'all' ? num(r.total) : (r.items || []).reduce((a, i) => a + num(i.total_price), 0));
+  };
   const chosen = chosenCat === 'all' ? list : list.map(r => ({ ...r, items: (r.items || []).filter(i => categoryOf(i) === chosenCat) }));
-  $('analysisTotal').textContent = money(chosen.reduce((s, r) => s + spent(r), 0));
+  const summary = baseSummary(list);
+  $('analysisTotal').textContent = approx(money(chosen.reduce((s, r) => s + spent(r), 0)), summary.converted);
+  showSkipped('analysisSkipped', summary.skipped);
   $('analysisItems').textContent = chosen.reduce((a, r) => a + (r.items || []).length, 0);
   const tops = Object.entries(allSums).sort((a, b) => b[1] - a[1]);
   $('analysisTop').textContent = tops[0]?.[0] || '—';
@@ -1046,9 +1174,10 @@ const monthLabel = key => {
   const [y, m] = key.split('-').map(Number), s = new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
+// Траты за месяц в основной валюте: лимиты бюджетов тоже в ней
 function monthSpending(key) {
-  const list = receipts.filter(r => receiptMonth(r) === key);
-  return { total: list.reduce((s, r) => s + num(r.total), 0), byCategory: sumsByCategory(list) };
+  const list = receipts.filter(r => receiptMonth(r) === key), summary = baseSummary(list);
+  return { total: summary.total, byCategory: sumsByCategory(list), converted: summary.converted, skipped: summary.skipped };
 }
 // Средние траты в месяц за последние полные месяцы (считаем только месяцы, где были чеки)
 function averageSpending(months) {
@@ -1056,7 +1185,7 @@ function averageSpending(months) {
   const list = receipts.filter(r => keys.includes(receiptMonth(r)));
   const n = new Set(list.map(receiptMonth)).size || 1, byCategory = sumsByCategory(list);
   Object.keys(byCategory).forEach(k => { byCategory[k] /= n; });
-  return { total: list.reduce((s, r) => s + num(r.total), 0) / n, byCategory };
+  return { total: baseSummary(list).total / n, byCategory };
 }
 // Без общего лимита бюджет месяца — сумма лимитов по категориям и траты только в этих категориях
 const overallLimit = b => b.total || Object.values(b.categories).reduce((s, v) => s + v, 0);
@@ -1115,7 +1244,8 @@ function renderBudgets() {
   const limit = overallLimit(budgets), spent = overallSpent(budgets, spending), state = budgetState(spent, limit);
   $('budgetLimitLabel').textContent = budgets.total || !limit ? 'Бюджет на месяц' : 'Сумма лимитов';
   $('budgetLimit').textContent = limit ? money(limit) : '—';
-  $('budgetSpent').textContent = money(spent);
+  $('budgetSpent').textContent = approx(money(spent), spending.converted);
+  showSkipped('budgetSkipped', spending.skipped);
   $('budgetLeftLabel').textContent = limit && spent > limit ? 'Перерасход' : 'Осталось';
   $('budgetLeft').textContent = limit ? money(Math.abs(limit - spent)) : '—';
   $('budgetLeft').classList.toggle('over', !!limit && spent > limit);
@@ -1139,14 +1269,15 @@ function renderBudgets() {
   $('budgetUnlimited').hidden = !unlimited.length || !hasBudgets(budgets);
   $('budgetUnlimited').textContent = 'Без лимита: ' + unlimited.map(([n, v]) => `${n} — ${money(v)}`).join(', ');
 }
-// Предупреждение, если новый чек довёл лимит до 80% или превысил его
-function budgetAlert(payload) {
-  if (!hasBudgets(budgets)) return '';
-  const spending = monthSpending(payload.date ? payload.date.slice(0, 7) : monthKey(new Date())), added = {};
-  payload.items.forEach(i => { added[i.category] = (added[i.category] || 0) + num(i.total_price); });
+// Предупреждение, если новый чек довёл лимит до 80% или превысил его. receipt — ответ сервера на сохранение
+function budgetAlert(receipt) {
+  const rate = baseRate(receipt);
+  if (!hasBudgets(budgets) || rate == null) return '';
+  const spending = monthSpending(receiptMonth({ iso: receiptIso(receipt) })), added = {};
+  (receipt.items || []).forEach(i => { const c = categoryOf(i); added[c] = (added[c] || 0) + num(i.total_price) * rate; });
   const checks = Object.entries(budgets.categories).filter(([c]) => added[c])
     .map(([c, limit]) => ({ name: `«${c}»`, limit, spent: spending.byCategory[c] || 0, added: added[c] }));
-  if (budgets.total) checks.push({ name: 'месяца', limit: budgets.total, spent: spending.total, added: num(payload.total) });
+  if (budgets.total) checks.push({ name: 'месяца', limit: budgets.total, spent: spending.total, added: num(receipt.total) * rate });
   const rank = { ok: 0, warn: 1, over: 2 };
   const crossed = checks
     .filter(c => rank[budgetState(c.spent, c.limit)] > rank[budgetState(c.spent - c.added, c.limit)])
@@ -1162,6 +1293,7 @@ function openBudgetEditor() {
   const avg = averageSpending(3), cats = categoryNames([...allItemCategories(), ...Object.keys(budgets.categories)]);
   $('budgetFields').innerHTML = cats.map(c => budgetField(c, budgets.categories[c], avg.byCategory[c])).join('');
   $('budgetTotalInput').value = budgets.total || '';
+  $('budgetEditorTitle').textContent = `Лимиты на месяц, ${currencyInfo(baseCurrency()).symbol}`;
   $('budgetTotalHint').textContent = avg.total ? `В среднем ${money(avg.total)} в месяц. Без общего лимита бюджет — сумма лимитов по категориям` : 'Без общего лимита бюджет — сумма лимитов по категориям';
   $('budgetError').hidden = true;
   $('budgetEditor').hidden = false;
@@ -1197,4 +1329,5 @@ $('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) 
 $('budgetLoginBtn').onclick = () => openAuth('login');
 $('budgetMonth').onchange = renderBudgets;
 
+loadCurrencies();
 checkAuthOnStartup();
