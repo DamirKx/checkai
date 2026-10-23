@@ -231,8 +231,8 @@ select option { background: var(--surface); color: var(--cream); }
 .edit-name { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
 .edit-nums { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
 .remove-item { width: 38px; height: 38px; border-radius: 7px; font-size: 15px; }
-.edit-foot { display: grid; grid-template-columns: minmax(0, 220px) 1fr; align-items: end; gap: 12px; }
-.edit-sum { color: var(--muted); font-size: 14px; }
+.edit-foot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 12px; }
+.edit-sum { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
 .edit-sum b { color: var(--cream); font-weight: 600; }
 .edit-total { font-size: 20px; }
 
@@ -269,6 +269,11 @@ select option { background: var(--surface); color: var(--cream); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--aqua); }
 .legend-row:nth-child(3n+2) .dot { background: var(--cream); }
 .legend-row:nth-child(3n) .dot { background: var(--rose); }
+
+/* --- Валюты --- */
+.converted { margin: -2px 0 12px; color: var(--muted); font-size: 14px; }
+.currency-note { margin: -8px 0 16px; color: var(--muted); font-size: 14px; }
+.currency-hint { margin: 4px 0 14px; }
 
 /* --- Бюджеты --- */
 .nav-badge { margin-left: auto; padding: 1px 7px; border-radius: 5px; background: var(--danger); color: var(--danger-text); font-size: 12px; font-weight: 700; }
@@ -327,6 +332,8 @@ select option { background: var(--surface); color: var(--cream); }
 .auth-form label { display: grid; gap: 5px; color: var(--muted); font-size: 14px; }
 .auth-form input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--field); color: var(--cream); }
 .auth-form input:focus { border-color: var(--aqua); outline: none; }
+.auth-form select { padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--field); color: var(--cream); }
+.auth-form select:focus { border-color: var(--aqua); outline: none; }
 .hint { color: var(--muted); font-size: 12px; }
 
 @media (max-width: 850px) {
