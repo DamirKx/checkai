@@ -2,21 +2,52 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 
-def clean_number(text: str) -> Optional[float]:
+def clean_number(text: str, currency: str = "KZT") -> Optional[float]:
     """
-    Очищает строку от посторонних символов (символы валют, пробелы, шум OCR)
-    и возвращает float.
+    Преобразует число из OCR в float.
+
+    Примеры:
+    1 234,50  -> 1234.5
+    1,234.50  -> 1234.5
+    1.234,50  -> 1234.5
+    1,234 USD -> 1234.0
+    0,450 KZT -> 0.45
     """
     if not text:
         return None
-    # Оставляем только цифры, точки и запятые
-    cleaned = re.sub(r'[^\d.,]', '', text)
-    cleaned = cleaned.replace(',', '.')
-    
-    # Если несколько точек (например, 1.200.50 или артефакт OCR), оставляем последнюю
-    if cleaned.count('.') > 1:
-        parts = cleaned.split('.')
-        cleaned = ''.join(parts[:-1]) + '.' + parts[-1]
+
+    cleaned = re.sub(r"[^\d.,]", "", str(text))
+
+    if not cleaned or not re.search(r"\d", cleaned):
+        return None
+
+    if "." in cleaned and "," in cleaned:
+        # Последний разделитель считаем десятичным.
+        decimal_separator = (
+            "." if cleaned.rfind(".") > cleaned.rfind(",") else ","
+        )
+        thousands_separator = "," if decimal_separator == "." else "."
+        cleaned = cleaned.replace(thousands_separator, "")
+        cleaned = cleaned.replace(decimal_separator, ".")
+
+    elif "," in cleaned:
+        parts = cleaned.split(",")
+
+        if (
+            len(parts) == 2
+            and len(parts[1]) == 3
+            and parts[0] != "0"
+            and currency.upper() in {"USD", "EUR", "CNY"}
+        ):
+            cleaned = "".join(parts)
+        elif len(parts) > 2:
+            cleaned = "".join(parts[:-1]) + "." + parts[-1]
+        else:
+            cleaned = cleaned.replace(",", ".")
+
+    elif cleaned.count(".") > 1:
+        parts = cleaned.split(".")
+        cleaned = "".join(parts[:-1]) + "." + parts[-1]
 
     try:
         return float(cleaned)

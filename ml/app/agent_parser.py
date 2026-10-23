@@ -28,9 +28,13 @@ SYSTEM_PROMPT = """
       "category": null
     }
   ],
-  "total": 100.0
+  "total": 100.0,
+  "currency": null
 }
 
+
+
+Определи currency: ISO-код KZT, RUB, USD, EUR, KGS, UZS, CNY, TRY или null, если валюта неизвестна.
 
 ========================
 STORE
@@ -459,6 +463,7 @@ OCR-ТЕКСТ:
 - date
 - items
 - total
+- currency
 
 Название магазина ищи по всему чеку.
 
@@ -497,6 +502,7 @@ MO447CTZ0, CYMKA
     result.setdefault("date", "")
     result.setdefault("items", [])
     result.setdefault("total", None)
+    result.setdefault("currency", None)
 
     if not isinstance(
         result["items"],
@@ -792,6 +798,87 @@ def extract_total_from_ocr(
         if line.strip()
     ]
 
+    # OCR иногда распознаёт "ИТОГО" как "ТОГ".
+    # Ищем сумму непосредственно после такого заголовка.
+    for i, line in enumerate(lines):
+        if re.fullmatch(r"(?:ИТОГО|ИТОГ|ТОГ)", line, re.I):
+            if i + 1 < len(lines):
+                match = re.search(
+                    r"\d+[.,]\d{2}",
+                    lines[i + 1]
+                )
+                if match:
+                    return float(
+                        match.group().replace(",", ".")
+                    )
+
+    # Для строки "К ОПЛАТЕ" пропускаем обменный курс.
+    # Число без разделителя восстанавливаем только
+    # если оно согласуется с суммой позиций и надбавкой.
+    for i, line in enumerate(lines):
+        if not re.search(r"К\s*ОПЛАТЕ", line, re.I):
+            continue
+
+        for candidate in lines[i + 1:i + 5]:
+            candidate = candidate.strip()
+
+            if "=" in candidate:
+                continue
+
+            if re.fullmatch(r"\d{5,8}", candidate):
+                possible_total = int(candidate) / 100
+
+                # Ищем промежуточную сумму и обслуживание.
+                subtotal = None
+                service = None
+
+                for j, source_line in enumerate(lines):
+                    normalized = source_line.lower()
+
+                    if (
+                        "надбавка" in normalized
+                        or "обслуж" in normalized
+                    ):
+                        for nearby in lines[j + 1:j + 5]:
+                            nearby = nearby.strip()
+
+                            if re.fullmatch(
+                                r"\d+[.,]\d{2}", nearby
+                            ):
+                                subtotal = float(
+                                    nearby.replace(",", ".")
+                                )
+                                break
+
+                    service_match = re.fullmatch(
+                        r"\+(\d+[.,]\d{2})",
+                        source_line.strip()
+                    )
+
+                    if service_match:
+                        service = float(
+                            service_match.group(1).replace(",", ".")
+                        )
+
+                # Принимаем сумму только при совпадении.
+                if subtotal is not None and service is not None:
+                    calculated = round(subtotal + service, 2)
+
+                    if abs(calculated - possible_total) < 0.01:
+                        return possible_total
+
+                continue
+
+            if re.fullmatch(r"[^\d]*\d+[.,]\d{2}", candidate):
+                match = re.search(
+                    r"\d+[.,]\d{2}",
+                    candidate
+                )
+                if match:
+                    return float(
+                        match.group().replace(",", ".")
+                    )
+
     patterns = [
         (
             r"(?:ИТОГО|ИТОГ|НТОГ|ВСЕГО)"
@@ -875,6 +962,84 @@ def extract_total_from_ocr(
                     return number
 
     return None
+
+
+
+def correct_item_quantities(
+    ocr_text: str,
+    data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Исправляет количество по подтверждённым OCR-строкам."""
+
+    lines = [
+        line.strip()
+        for line in ocr_text.splitlines()
+        if line.strip()
+    ]
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        return data
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        try:
+            price = float(item.get("price_per_unit", 0))
+        except (TypeError, ValueError):
+            continue
+
+        name = str(item.get("name", "")).strip().lower()
+
+        if not name or price <= 0:
+            continue
+
+        for i, line in enumerate(lines):
+            if line.lower() != name:
+                continue
+
+            for j in range(i + 1, min(i + 4, len(lines) - 1)):
+                match = re.fullmatch(
+                    r"(\\d+[.,]\\d{2})([1-9])",
+                    lines[j]
+                )
+
+                if not match:
+                    continue
+
+                detected_price = float(
+                    match.group(1).replace(",", ".")
+                )
+                detected_quantity = int(match.group(2))
+
+                next_line = lines[j + 1]
+
+                if not re.fullmatch(
+                    r"\\d+[.,]\\d{2}",
+                    next_line
+                ):
+                    continue
+
+                detected_total = float(
+                    next_line.replace(",", ".")
+                )
+
+                if (
+                    abs(detected_price - price) < 0.01
+                    and abs(
+                        detected_price * detected_quantity
+                        - detected_total
+                    ) < 0.01
+                ):
+                    item["quantity"] = detected_quantity
+                    item["total_price"] = round(
+                        detected_total, 2
+                    )
+                    break
+
+    return data
 
 
 def calculate_items_total(
@@ -1119,6 +1284,146 @@ HAC 20%
     return result
 
 
+
+def correct_item_quantities(ocr_text, data):
+    """Исправление количества при подтверждении OCR."""
+    import re
+
+    lines = [
+        line.strip()
+        for line in ocr_text.splitlines()
+        if line.strip()
+    ]
+
+    for item in data.get("items", []):
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name", "")).strip().lower()
+
+        try:
+            price = float(item.get("price_per_unit", 0))
+        except (TypeError, ValueError):
+            continue
+
+        if not name or price <= 0:
+            continue
+
+        for i, line in enumerate(lines):
+            if line.lower() != name:
+                continue
+
+            for j in range(i + 1, min(i + 4, len(lines) - 1)):
+                match = re.fullmatch(
+                    r"(\d+[.,]\d{2})([1-9])",
+                    lines[j]
+                )
+
+                if not match:
+                    continue
+
+                found_price = float(
+                    match.group(1).replace(",", ".")
+                )
+                quantity = int(match.group(2))
+
+                next_line = lines[j + 1]
+
+                if not re.fullmatch(
+                    r"\d+[.,]\d{2}",
+                    next_line
+                ):
+                    continue
+
+                found_total = float(
+                    next_line.replace(",", ".")
+                )
+
+                if (
+                    abs(found_price - price) < 0.01
+                    and abs(found_price * quantity - found_total) < 0.01
+                ):
+                    item["quantity"] = quantity
+                    item["total_price"] = round(found_total, 2)
+                    break
+
+    return data
+
+
+def remove_confirmed_service_rows(ocr_text, data):
+    """Убирает подтверждённые строки итогов и обслуживания."""
+    import re
+
+    lines = [
+        line.strip()
+        for line in ocr_text.splitlines()
+        if line.strip()
+    ]
+
+    service_context = any(
+        re.search(r"надбавк|обслуж", line, re.I)
+        for line in lines
+    )
+
+    subtotal = None
+    service = None
+
+    if service_context:
+        for i, line in enumerate(lines):
+            if re.search(r"надбавк|обслуж", line, re.I):
+                for candidate in lines[i + 1:i + 5]:
+                    if re.fullmatch(r"\d+[.,]\d{2}", candidate):
+                        subtotal = float(candidate.replace(",", "."))
+                        break
+
+            match = re.fullmatch(
+                r"\+(\d+[.,]\d{2})",
+                line
+            )
+
+            if match:
+                service = float(
+                    match.group(1).replace(",", ".")
+                )
+
+    if subtotal is None or service is None:
+        return data
+
+    confirmed_total = extract_total_from_ocr(ocr_text)
+
+    if confirmed_total is None:
+        return data
+
+    if abs(subtotal + service - confirmed_total) > 0.01:
+        return data
+
+    cleaned = []
+
+    for item in data.get("items", []):
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name", "")).lower()
+
+        if re.search(
+            r"надбавк|обслуж|подная суеса|полная сумма",
+            name
+        ):
+            continue
+
+        cleaned.append(item)
+
+    data["items"] = cleaned
+    return data
+
+
+def finalize_receipt_items(ocr_text, data):
+    data = clean_items(data)
+    data = remove_confirmed_service_rows(ocr_text, data)
+    data = correct_item_quantities(ocr_text, data)
+    return data
+
+
 def parse_receipt_with_correction(
     ocr_text: str
 ) -> Dict[str, Any]:
@@ -1141,17 +1446,28 @@ def parse_receipt_with_correction(
     ):
 
         # 4. Qwen повторно анализирует чек
+        previous_currency = data.get("currency")
+
         data = self_correction(
             ocr_text,
             data
         )
+
+        if not data.get("currency"):
+            data["currency"] = previous_currency
 
         # 5. Снова удаляем служебный мусор
         data = clean_items(
             data
         )
 
-    # 6. Отдельно получаем итог из OCR
+    # 6. Исправляем количество товаров по OCR
+    data = correct_item_quantities(
+        ocr_text,
+        data
+    )
+
+    # 7. Отдельно получаем итог из OCR
     ocr_total = extract_total_from_ocr(
         ocr_text
     )
@@ -1160,6 +1476,12 @@ def parse_receipt_with_correction(
         data.get("total") is None
         and ocr_total is not None
     ):
+        data["total"] = ocr_total
+
+    data = finalize_receipt_items(ocr_text, data)
+
+    ocr_total = extract_total_from_ocr(ocr_text)
+    if ocr_total is not None:
         data["total"] = ocr_total
 
     return data

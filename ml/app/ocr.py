@@ -11,7 +11,30 @@ from app.parser import parse_receipt as parse_receipt_regex
 
 # Наш новый локальный AI Agent
 from app.agent_parser import parse_receipt_with_correction
+from app.currency import detect_currency, SUPPORTED
 
+
+
+def resolve_currency(lines, parsed):
+    """Выбирает валюту с учётом приоритетов."""
+    detected, source = detect_currency(lines)
+
+    ai_currency = parsed.get("currency")
+    if isinstance(ai_currency, str):
+        ai_currency = ai_currency.strip().upper()
+    else:
+        ai_currency = None
+
+    if detected is not None and source == "symbol":
+        return detected, "symbol"
+
+    if ai_currency in SUPPORTED:
+        return ai_currency, "ai"
+
+    if detected is not None and source == "country":
+        return detected, "country"
+
+    return "KZT", "default"
 
 def init_ocr() -> PaddleOCR:
     """
@@ -163,6 +186,10 @@ def analyze_receipt(
     # 4. Сохраняем исходные OCR-строки.
     # Это пригодится для отладки
     # и научного сравнения.
+    currency, currency_source = resolve_currency(lines, parsed)
+
+    parsed["currency"] = currency
+    parsed["currency_source"] = currency_source
     parsed["raw_lines"] = lines
 
     return parsed
@@ -209,6 +236,10 @@ def analyze_receipt_comparison(
     ai_result = parse_receipt_with_correction(
         ocr_text
     )
+
+    currency, currency_source = resolve_currency(lines, ai_result)
+    ai_result["currency"] = currency
+    ai_result["currency_source"] = currency_source
 
     return {
         "ocr_lines": lines,
