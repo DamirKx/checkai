@@ -798,6 +798,87 @@ def extract_total_from_ocr(
         if line.strip()
     ]
 
+    # OCR иногда распознаёт "ИТОГО" как "ТОГ".
+    # Ищем сумму непосредственно после такого заголовка.
+    for i, line in enumerate(lines):
+        if re.fullmatch(r"(?:ИТОГО|ИТОГ|ТОГ)", line, re.I):
+            if i + 1 < len(lines):
+                match = re.search(
+                    r"\d+[.,]\d{2}",
+                    lines[i + 1]
+                )
+                if match:
+                    return float(
+                        match.group().replace(",", ".")
+                    )
+
+    # Для строки "К ОПЛАТЕ" пропускаем обменный курс.
+    # Число без разделителя восстанавливаем только
+    # если оно согласуется с суммой позиций и надбавкой.
+    for i, line in enumerate(lines):
+        if not re.search(r"К\s*ОПЛАТЕ", line, re.I):
+            continue
+
+        for candidate in lines[i + 1:i + 5]:
+            candidate = candidate.strip()
+
+            if "=" in candidate:
+                continue
+
+            if re.fullmatch(r"\d{5,8}", candidate):
+                possible_total = int(candidate) / 100
+
+                # Ищем промежуточную сумму и обслуживание.
+                subtotal = None
+                service = None
+
+                for j, source_line in enumerate(lines):
+                    normalized = source_line.lower()
+
+                    if (
+                        "надбавка" in normalized
+                        or "обслуж" in normalized
+                    ):
+                        for nearby in lines[j + 1:j + 5]:
+                            nearby = nearby.strip()
+
+                            if re.fullmatch(
+                                r"\d+[.,]\d{2}", nearby
+                            ):
+                                subtotal = float(
+                                    nearby.replace(",", ".")
+                                )
+                                break
+
+                    service_match = re.fullmatch(
+                        r"\+(\d+[.,]\d{2})",
+                        source_line.strip()
+                    )
+
+                    if service_match:
+                        service = float(
+                            service_match.group(1).replace(",", ".")
+                        )
+
+                # Принимаем сумму только при совпадении.
+                if subtotal is not None and service is not None:
+                    calculated = round(subtotal + service, 2)
+
+                    if abs(calculated - possible_total) < 0.01:
+                        return possible_total
+
+                continue
+
+            if re.fullmatch(r"[^\d]*\d+[.,]\d{2}", candidate):
+                match = re.search(
+                    r"\d+[.,]\d{2}",
+                    candidate
+                )
+                if match:
+                    return float(
+                        match.group().replace(",", ".")
+                    )
+
     patterns = [
         (
             r"(?:ИТОГО|ИТОГ|НТОГ|ВСЕГО)"
