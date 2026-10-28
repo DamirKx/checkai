@@ -122,6 +122,16 @@ def analyze_receipt(image_input, ocr: PaddleOCR = None) -> Dict[str, Any]:
     if not parsed:
         parsed = parse_receipt(lines)
 
+    # Определение валюты чека
+    currency, source = None, "default"
+    try:
+        from ml.app.currency import detect_currency
+        currency, source = detect_currency(lines)
+    except Exception as e:
+        logger.debug("Ошибка в detect_currency: %s", e)
+
+    parsed["currency"] = currency or "KZT"
+    parsed["currency_source"] = source
     parsed["raw_lines"] = lines
     return parsed
 

@@ -1,8 +1,12 @@
+import time
+from datetime import date, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app import models
 from app import schemas
+from app import rates
+from app.currencies import DEFAULT_CURRENCY
 
 # Все операции с чеками требуют user_id: анонимы с историей не работают
 # (эндпоинты защищены через auth.get_current_user).
@@ -17,12 +21,19 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[models.User]:
     """Поиск пользователя по id."""
     return db.query(models.User).filter(models.User.id == user_id).first()
 
-def create_user(db: Session, email: str, hashed_password: str, full_name: Optional[str] = None) -> models.User:
+def create_user(
+    db: Session,
+    email: str,
+    hashed_password: str,
+    full_name: Optional[str] = None,
+    base_currency: str = DEFAULT_CURRENCY,
+) -> models.User:
     """Создание нового пользователя."""
     user = models.User(
         email=email.strip().lower(),
         hashed_password=hashed_password,
-        full_name=full_name.strip() if full_name else None
+        full_name=full_name.strip() if full_name else None,
+        base_currency=base_currency or DEFAULT_CURRENCY,
     )
     db.add(user)
     db.commit()
@@ -38,12 +49,92 @@ def delete_user(db: Session, user: models.User) -> List[str]:
 
 # --- Операции с чеками ---
 
+def receipt_day(r: models.Receipt) -> str:
+    """Определяет день для поиска курса валюты чека."""
+    if r.date:
+        return r.date[:10]
+    if r.created_at:
+        # created_at хранится в UTC, а курс при сохранении берётся на местное «сегодня»
+        return r.created_at.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")
+    return date.today().strftime("%Y-%m-%d")
+
+
+def _rate_day(receipt_date: Optional[str]) -> str:
+    """День курса для сохраняемого чека: дата покупки, без неё — сегодня."""
+    return receipt_date[:10] if receipt_date else date.today().strftime("%Y-%m-%d")
+
+
+def _resolve_rate(db: Session, cur: str, receipt_date: Optional[str]) -> Optional[float]:
+    """Курс чека к тенге при сохранении.
+
+    Для KZT курс всегда 1.0, поэтому ленту на дату (нужна для смены основной валюты)
+    докачиваем в фоне и не заставляем пользователя ждать Нацбанк.
+    """
+    if cur == "KZT":
+        return 1.0
+    return rates.rate_to_kzt(db, cur, _rate_day(receipt_date), fetch=True)
+
+
+def _ensure_rates_later(cur: str, receipt_date: Optional[str]) -> None:
+    if cur == "KZT":
+        rates.run_in_background(rates.ensure_rates, _rate_day(receipt_date))
+
+
+def attach_base_rates(
+    db: Session,
+    receipts: Any,
+    base: str = DEFAULT_CURRENCY,
+) -> Any:
+    """Проставляет каждому чеку base_currency и rate_to_base (обычные атрибуты объекта, не колонки в БД).
+    
+    При чтении в сеть не ходим (fetch=False).
+    """
+    if receipts is None:
+        return None
+
+    is_single = isinstance(receipts, models.Receipt)
+    receipt_list: List[models.Receipt] = [receipts] if is_single else list(receipts)
+
+    base = base or DEFAULT_CURRENCY
+    rates_cache: Dict[tuple, Optional[float]] = {}
+
+    def cached_rate(cur: str, day: str) -> Optional[float]:
+        if (cur, day) not in rates_cache:
+            rates_cache[(cur, day)] = rates.rate_to_kzt(db, cur, day, fetch=False)
+        return rates_cache[(cur, day)]
+
+    for r in receipt_list:
+        cur = r.currency or DEFAULT_CURRENCY
+        day = receipt_day(r)
+        # Курс чека не сохранился (например, не было сети), но мог появиться в exchange_rates позже.
+        # В объект не записываем: при чтении базу не меняем, это делает backfill_user_rates.
+        rate_kzt = r.rate_to_kzt
+        if rate_kzt is None:
+            rate_kzt = 1.0 if cur == "KZT" else cached_rate(cur, day)
+
+        r.base_currency = base
+        if cur == base:
+            r.rate_to_base = 1.0
+        elif rate_kzt is None:
+            r.rate_to_base = None
+        elif base == "KZT":
+            r.rate_to_base = rate_kzt
+        else:
+            base_rate = cached_rate(base, day)
+            r.rate_to_base = (rate_kzt / base_rate) if base_rate else None
+
+    return receipt_list[0] if is_single else receipt_list
+
+
 def create_receipt(
     db: Session,
     data: schemas.ReceiptCreate,
     user_id: int,
     image_path: Optional[str] = None,
 ) -> models.Receipt:
+    cur = data.currency or DEFAULT_CURRENCY
+    rate = _resolve_rate(db, cur, data.date)
+
     receipt = models.Receipt(
         user_id=user_id,
         store=data.store,
@@ -51,6 +142,8 @@ def create_receipt(
         time=data.time,
         category=data.category or "Продукты",
         total=data.total or 0.0,
+        currency=cur,
+        rate_to_kzt=rate,
         image_path=image_path,
     )
     receipt.items = [
@@ -66,6 +159,7 @@ def create_receipt(
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
+    _ensure_rates_later(cur, data.date)
     return receipt
 
 
@@ -133,6 +227,14 @@ def update_receipt(
     receipt: models.Receipt,
     data: schemas.ReceiptUpdate,
 ) -> models.Receipt:
+    # Без currency в запросе валюта чека не меняется
+    cur = data.currency or receipt.currency or DEFAULT_CURRENCY
+    # Курс берётся заново, если изменились валюта или дата или его не удалось получить раньше
+    rate_changed = cur != receipt.currency or data.date != receipt.date
+    if rate_changed or receipt.rate_to_kzt is None:
+        receipt.rate_to_kzt = _resolve_rate(db, cur, data.date)
+
+    receipt.currency = cur
     receipt.store = data.store
     receipt.date = data.date
     receipt.time = data.time
@@ -151,7 +253,28 @@ def update_receipt(
     ]
     db.commit()
     db.refresh(receipt)
+    if rate_changed:
+        _ensure_rates_later(cur, data.date)
     return receipt
+
+
+def backfill_user_rates(db: Session, user_id: int) -> None:
+    """Докачивает курсы на дни чеков пользователя и проставляет rate_to_kzt чекам, где его нет.
+
+    Запускается в фоне при смене основной валюты: запросы к Нацбанку идут по одному с паузой.
+    """
+    receipts = db.query(models.Receipt).filter(models.Receipt.user_id == user_id).all()
+    for day in sorted({receipt_day(r) for r in receipts}):
+        if rates.has_rates(db, day):
+            continue
+        rates.ensure_rates(db, day)
+        time.sleep(0.3)
+
+    for r in receipts:
+        if r.rate_to_kzt is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            r.rate_to_kzt = 1.0 if cur == "KZT" else rates.rate_to_kzt(db, cur, receipt_day(r), fetch=False)
+    db.commit()
 
 def delete_receipt(db: Session, receipt: models.Receipt) -> None:
     db.delete(receipt)
@@ -161,83 +284,109 @@ def count_receipts_with_image(db: Session, image_path: str) -> int:
     return db.query(func.count(models.Receipt.id)).filter(models.Receipt.image_path == image_path).scalar() or 0
 
 
-def get_analytics(db: Session, user_id: int) -> Dict[str, Any]:
-    R, I = models.Receipt, models.ReceiptItem
-    receipt_total = func.coalesce(R.total, 0.0)
+def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None) -> Dict[str, Any]:
+    """Сводка аналитики с пересчётом всех сумм в основную валюту пользователя.
+    
+    Чеки без курса не суммируются, а группируются в unconverted.
+    """
+    if not base_currency:
+        user = get_user_by_id(db, user_id)
+        base_currency = user.base_currency if user else DEFAULT_CURRENCY
 
-    total_spent, receipts_count = (
-        db.query(func.coalesce(func.sum(receipt_total), 0.0), func.count(R.id))
-        .filter(R.user_id == user_id)
-        .one()
+    receipts = (
+        db.query(models.Receipt)
+        .options(joinedload(models.Receipt.items))
+        .filter(models.Receipt.user_id == user_id)
+        .order_by(*_receipts_order())
+        .all()
     )
-    if not receipts_count:
+
+    if not receipts:
         return {
-            "total_spent": 0.0, "receipts_count": 0, "avg_receipt": 0.0, "top_store": None,
-            "by_category": {}, "by_store": {}, "by_month": {}, "recent_items": []
+            "total_spent": 0.0,
+            "receipts_count": 0,
+            "converted_count": 0,
+            "avg_receipt": 0.0,
+            "top_store": None,
+            "by_category": {},
+            "by_store": {},
+            "by_month": {},
+            "recent_items": [],
+            "base_currency": base_currency,
+            "unconverted": [],
         }
 
-    # По магазинам
-    store = func.coalesce(R.store, "Неизвестно")
-    by_store = {
-        name: round(value, 2)
-        for name, value in db.query(store, func.sum(receipt_total))
-        .filter(R.user_id == user_id)
-        .group_by(store)
-        .all()
-    }
+    attach_base_rates(db, receipts, base_currency)
+
+    total_spent = 0.0
+    counted_receipts = 0
+    by_store: Dict[str, float] = {}
+    by_month: Dict[str, float] = {}
+    by_category: Dict[str, float] = {}
+    unconverted_counts: Dict[str, int] = {}
+
+    for r in receipts:
+        if r.rate_to_base is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            unconverted_counts[cur] = unconverted_counts.get(cur, 0) + 1
+            continue
+
+        rate = r.rate_to_base
+        rec_total = (r.total or 0.0) * rate
+        total_spent += rec_total
+        counted_receipts += 1
+
+        store_name = r.store or "Неизвестно"
+        by_store[store_name] = by_store.get(store_name, 0.0) + rec_total
+
+        if r.date:
+            m = r.date[:7]
+            by_month[m] = by_month.get(m, 0.0) + rec_total
+
+        if r.items:
+            for item in r.items:
+                cat = item.category or r.category or "Прочее"
+                by_category[cat] = by_category.get(cat, 0.0) + (item.total_price or 0.0) * rate
+        else:
+            cat = r.category or "Прочее"
+            by_category[cat] = by_category.get(cat, 0.0) + rec_total
+
     top_store = max(by_store, key=by_store.get) if by_store else None
 
-    # По месяцам: date хранится как YYYY-MM-DD, месяц — первые 7 символов
-    month = func.substr(R.date, 1, 7)
-    by_month = {
-        key: round(value, 2)
-        for key, value in db.query(month, func.sum(receipt_total))
-        .filter(R.user_id == user_id, R.date.isnot(None))
-        .group_by(month)
-        .order_by(month)
-        .all()
-    }
+    recent_items: List[Dict[str, Any]] = []
+    for r in receipts:
+        # Позиции чеков без курса не показываем: их цены нельзя выразить в основной валюте
+        if r.rate_to_base is None:
+            continue
+        rate = r.rate_to_base
+        for item in r.items:
+            recent_items.append({
+                "name": item.name,
+                "price": round((item.total_price or 0.0) * rate, 2),
+                "store": r.store,
+            })
+            if len(recent_items) == 5:
+                break
+        if len(recent_items) == 5:
+            break
 
-    # По категориям: категория товара, иначе категория чека
-    category = func.coalesce(I.category, R.category, "Прочее")
-    by_category: Dict[str, float] = {
-        name: value
-        for name, value in db.query(category, func.sum(func.coalesce(I.total_price, 0.0)))
-        .join(R, I.receipt_id == R.id)
-        .filter(R.user_id == user_id)
-        .group_by(category)
-        .all()
-    }
-    # Чеки без позиций учитываем целиком по категории чека
-    receipt_category = func.coalesce(R.category, "Прочее")
-    for name, value in (
-        db.query(receipt_category, func.sum(receipt_total))
-        .filter(R.user_id == user_id, ~R.items.any())
-        .group_by(receipt_category)
-        .all()
-    ):
-        by_category[name] = by_category.get(name, 0.0) + value
-    by_category = {name: round(value, 2) for name, value in by_category.items()}
-
-    recent_rows = (
-        db.query(I.name, I.total_price, R.store)
-        .join(R, I.receipt_id == R.id)
-        .filter(R.user_id == user_id)
-        .order_by(*_receipts_order(), I.id)
-        .limit(5)
-        .all()
-    )
-    recent_items = [{"name": name, "price": price, "store": store_name} for name, price, store_name in recent_rows]
+    unconverted = [
+        {"currency": cur, "receipts": count}
+        for cur, count in sorted(unconverted_counts.items())
+    ]
 
     return {
         "total_spent": round(total_spent, 2),
-        "receipts_count": receipts_count,
-        "avg_receipt": round(total_spent / receipts_count, 2),
+        "receipts_count": len(receipts),
+        "converted_count": counted_receipts,
+        "avg_receipt": round(total_spent / counted_receipts, 2) if counted_receipts else 0.0,
         "top_store": top_store,
-        "by_category": by_category,
-        "by_store": by_store,
-        "by_month": by_month,
+        "by_category": {k: round(v, 2) for k, v in by_category.items()},
+        "by_store": {k: round(v, 2) for k, v in by_store.items()},
+        "by_month": {k: round(v, 2) for k, v in sorted(by_month.items())},
         "recent_items": recent_items,
+        "base_currency": base_currency,
+        "unconverted": unconverted,
     }
 
 
@@ -280,45 +429,53 @@ def set_user_budgets(db: Session, user_id: int, budgets_data: List[schemas.Budge
     return get_user_budgets(db, user_id)
 
 
-def get_budget_status(db: Session, user_id: int, month: str) -> schemas.BudgetStatusOut:
-    """Расчёт фактических расходов за месяц month (YYYY-MM) в сравнении с бюджетами."""
+def get_budget_status(
+    db: Session,
+    user_id: int,
+    month: str,
+    base_currency: Optional[str] = None,
+) -> schemas.BudgetStatusOut:
+    """Расчёт фактических расходов за месяц month (YYYY-MM) в сравнении с бюджетами в основной валюте."""
+    if not base_currency:
+        user = get_user_by_id(db, user_id)
+        base_currency = user.base_currency if user else DEFAULT_CURRENCY
+
     budgets = get_user_budgets(db, user_id)
 
-    R, I = models.Receipt, models.ReceiptItem
-    receipt_total = func.coalesce(R.total, 0.0)
-    month_filter = (R.user_id == user_id) & (func.substr(R.date, 1, 7) == month)
-
-    total_spent = (
-        db.query(func.coalesce(func.sum(receipt_total), 0.0))
-        .filter(month_filter)
-        .scalar()
-    ) or 0.0
-
-    category_col = func.coalesce(I.category, R.category, "Прочее")
-    by_category_raw = (
-        db.query(category_col, func.sum(func.coalesce(I.total_price, 0.0)))
-        .join(R, I.receipt_id == R.id)
-        .filter(month_filter)
-        .group_by(category_col)
+    receipts = (
+        db.query(models.Receipt)
+        .options(joinedload(models.Receipt.items))
+        .filter(
+            models.Receipt.user_id == user_id,
+            models.Receipt.date.isnot(None),
+            func.substr(models.Receipt.date, 1, 7) == month,
+        )
         .all()
     )
-    by_category: Dict[str, float] = {name: value for name, value in by_category_raw}
 
-    # Чеки без позиций учитываем целиком по категории чека
-    receipt_category = func.coalesce(R.category, "Прочее")
-    for name, value in (
-        db.query(receipt_category, func.sum(receipt_total))
-        .filter(month_filter, ~R.items.any())
-        .group_by(receipt_category)
-        .all()
-    ):
-        by_category[name] = by_category.get(name, 0.0) + value
+    attach_base_rates(db, receipts, base_currency)
 
-    # Сопоставляем траты без учёта регистра: "Кафе" -> "кафе"
+    total_spent = 0.0
     spending_lower: Dict[str, float] = {}
-    for k, v in by_category.items():
-        if k:
-            spending_lower[k.lower()] = spending_lower.get(k.lower(), 0.0) + v
+    unconverted_counts: Dict[str, int] = {}
+
+    for r in receipts:
+        if r.rate_to_base is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            unconverted_counts[cur] = unconverted_counts.get(cur, 0) + 1
+            continue
+
+        rate = r.rate_to_base
+        rec_total = (r.total or 0.0) * rate
+        total_spent += rec_total
+
+        if r.items:
+            for item in r.items:
+                cat = (item.category or r.category or "Прочее").strip().lower()
+                spending_lower[cat] = spending_lower.get(cat, 0.0) + (item.total_price or 0.0) * rate
+        else:
+            cat = (r.category or "Прочее").strip().lower()
+            spending_lower[cat] = spending_lower.get(cat, 0.0) + rec_total
 
     general_budget = next((b for b in budgets if b.category is None), None)
     total_budget_limit = general_budget.limit if general_budget else None
@@ -347,9 +504,17 @@ def get_budget_status(db: Session, user_id: int, month: str) -> schemas.BudgetSt
             )
         )
 
+    unconverted = [
+        {"currency": cur, "receipts": count}
+        for cur, count in sorted(unconverted_counts.items())
+    ]
+
     return schemas.BudgetStatusOut(
         month=month,
         total_budget=round(total_budget_limit, 2) if total_budget_limit is not None else None,
         total_spent=round(total_spent, 2),
         budgets=status_items,
+        base_currency=base_currency,
+        unconverted=unconverted,
     )
+

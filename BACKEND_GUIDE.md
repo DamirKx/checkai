@@ -144,10 +144,12 @@ server.py — FastAPI
 | [app/parser.py](app/parser.py) | Запасной парсер чека на регулярных выражениях |
 | [app/tasks.py](app/tasks.py) | Очередь фонового распознавания для `/api/analyze/async` (в памяти процесса) |
 | [ml/app/agent_parser.py](ml/app/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы. Зона ML-разработчика |
+| [app/currencies.py](app/currencies.py) | Справочник валют: KZT, RUB, USD, EUR, KGS, UZS, CNY, TRY, нормализация и проверка |
+| [app/rates.py](app/rates.py) | Получение и кеширование официальных курсов Нацбанка РК к тенге, кросс-курсы |
 | [migrations/](migrations/) | Миграции Alembic |
 | [tests/](tests/) | Автотесты API |
 
-Папка `ml/` целиком — зона ML-разработчика. Бэкенд использует из неё только `ml/app/agent_parser.py` (через `app/ocr.py`). `ml/server.py`, `ml/app/ocr.py` и `ml/app/parser.py` — отдельные копии для экспериментов ML, сервер их не использует.
+Папка `ml/` целиком — зона ML-разработчика. Бэкенд использует из неё только `ml/app/agent_parser.py` (через `app/ocr.py`) и `ml/app/currency.py` (определение валюты по тексту). `ml/server.py`, `ml/app/ocr.py` и `ml/app/parser.py` — отдельные копии для экспериментов ML, сервер их не использует.
 
 ---
 
@@ -157,14 +159,17 @@ server.py — FastAPI
 users ──< receipts ──< receipt_items
   │
   └──< budgets
+
+exchange_rates (курсы валют к тенге на даты покупок)
 ```
 
 | Таблица | Поля | Заметки |
 |---|---|---|
-| `users` | `id`, `email` (уникальный, в нижнем регистре), `hashed_password`, `full_name`, `created_at` | Удаление пользователя каскадно удаляет его чеки и бюджеты |
-| `receipts` | `id`, `user_id`, `store`, `date`, `time`, `category`, `total`, `image_path`, `created_at` | `category` — категория чека: та, на которую в нём потрачено больше всего (её считает фронт) |
-| `receipt_items` | `id`, `receipt_id`, `name`, `quantity`, `price_per_unit`, `total_price`, `category` | При редактировании чека позиции заменяются целиком |
-| `budgets` | `id`, `user_id`, `category`, `limit`, `created_at`, `updated_at` | `category = NULL` — общий лимит на месяц. Лимиты повторяются каждый месяц |
+| `users` | `id`, `email`, `hashed_password`, `full_name`, `base_currency`, `created_at` | `base_currency` — основная валюта для аналитики и бюджетов (по умолчанию `KZT`). Удаление пользователя каскадно удаляет его чеки и бюджеты |
+| `receipts` | `id`, `user_id`, `store`, `date`, `time`, `category`, `total`, `currency`, `rate_to_kzt`, `image_path`, `created_at` | `currency` — валюта чека (ISO 4217, `KZT`), `rate_to_kzt` — курс к тенге на дату чека |
+| `receipt_items` | `id`, `receipt_id`, `name`, `quantity`, `price_per_unit`, `total_price`, `category` | Суммы в валюте чека. При редактировании чека позиции заменяются целиком |
+| `budgets` | `id`, `user_id`, `category`, `limit`, `created_at`, `updated_at` | Лимиты задаются в основной валюте пользователя. `category = NULL` — общий лимит на месяц |
+| `exchange_rates` | `id`, `date`, `currency`, `rate_to_kzt`, `fetched_at` | Официальные курсы Нацбанка РК. Уникальный индекс `(date, currency)` |
 
 Форматы, которые нельзя нарушать:
 
@@ -172,7 +177,7 @@ users ──< receipts ──< receipt_items
 - **`created_at`** — UTC без часового пояса (`models.utcnow()`). Фронт сам добавляет `Z` при показе.
 - **`image_path`** — URL вида `/data/receipts/<32 hex>.<ext>`. Файл на диске называется `<32 hex>.<ext>`. Путь от клиента всегда проверяется `_resolve_image_path` — иначе можно сослаться на чужой или несуществующий файл. Старый формат `/data/receipts/<uuid>_<имя>.jpg` поддерживается только для уже сохранённых чеков.
 - **Категории** — список фронта: `Продукты, Одежда, Дом и быт, Транспорт, Кафе, Здоровье, Развлечения, Другое`. Сервер список не проверяет и принимает любую строку до 100 символов.
-- **Деньги** — `Float`, тенге.
+- **Валюты и деньги** — `Float`. Суммы и цены позиций хранятся в валюте чека. Все сводки (история, категории, аналитика, бюджеты) сервер пересчитывает в `base_currency` пользователя через `rate_to_base`. **При чтении (`GET`) в сеть за курсами не ходим никогда** (`fetch=False`), запрос к Нацбанку — только при сохранении и редактировании чека. Чеки без курса не суммируются, а группируются в `unconverted`.
 
 ---
 

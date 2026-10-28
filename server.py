@@ -23,6 +23,8 @@ from app import models
 from app import schemas
 from app import crud
 from app import auth
+from app import currencies
+from app import rates
 from app.rate_limit import limiter, get_client_ip
 from app.dates import normalize_date_time, split_date_time
 from app.ocr import init_ocr, analyze_receipt
@@ -162,6 +164,12 @@ def _run_ocr(image_path: str) -> dict:
     if not data.get("raw_lines"):
         raise HTTPException(status_code=422, detail="На изображении не удалось найти текст чека")
     data["date"], data["time"] = normalize_date_time(data.get("date"), data.get("time"))
+    cur = data.get("currency")
+    if not cur or cur not in currencies.CURRENCIES:
+        data["currency"] = "KZT"
+        data["currency_source"] = "default"
+    else:
+        data["currency_source"] = data.get("currency_source") or "default"
     return data
 
 
@@ -340,6 +348,12 @@ def health_check(db: Session = Depends(database.get_db)):
     )
 
 
+@app.get("/api/currencies", response_model=List[schemas.CurrencyOut], tags=["Currencies"])
+def get_currencies():
+    """Список поддерживаемых валют (без авторизации)."""
+    return currencies.get_currencies_list()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
@@ -405,7 +419,7 @@ def update_me(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Обновление профиля пользователя (имя, email, пароль)."""
+    """Обновление профиля пользователя (имя, email, пароль, основная валюта)."""
     if user_data.email is not None or user_data.new_password is not None:
         if not user_data.current_password:
             raise HTTPException(status_code=400, detail="Введите текущий пароль для смены email или пароля")
@@ -424,7 +438,14 @@ def update_me(
     if "full_name" in user_data.model_fields_set:
         current_user.full_name = user_data.full_name.strip() if user_data.full_name else None
 
+    base_changed = bool(user_data.base_currency) and user_data.base_currency != current_user.base_currency
+    if base_changed:
+        current_user.base_currency = user_data.base_currency
+
     db.commit()
+    if base_changed:
+        # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted
+        rates.run_in_background(crud.backfill_user_rates, current_user.id)
     db.refresh(current_user)
 
     return _token_response(current_user)
@@ -581,7 +602,8 @@ def save_receipt(
 ):
     """Сохранение чека в аккаунт текущего пользователя."""
     image_path = _resolve_image_path(receipt.image_path)
-    return crud.create_receipt(db=db, data=receipt, user_id=current_user.id, image_path=image_path)
+    saved = crud.create_receipt(db=db, data=receipt, user_id=current_user.id, image_path=image_path)
+    return crud.attach_base_rates(db, saved, current_user.base_currency)
 
 def _iso_query_date(value: Optional[str], name: str) -> Optional[str]:
     if not value:
@@ -605,7 +627,7 @@ def read_receipts(
     """Чеки текущего пользователя с поддержкой фильтров, поиска и пагинации."""
     # Даты в базе — строки YYYY-MM-DD и сравниваются как строки, поэтому другой формат дал бы тихо неверный результат
     from_date, to_date = _iso_query_date(from_date, "from"), _iso_query_date(to_date, "to")
-    return crud.get_all_receipts(
+    receipts = crud.get_all_receipts(
         db,
         user_id=current_user.id,
         skip=skip,
@@ -615,6 +637,7 @@ def read_receipts(
         category=category,
         q=q,
     )
+    return crud.attach_base_rates(db, receipts, current_user.base_currency)
 
 @app.get("/api/receipts/{receipt_id}", response_model=schemas.ReceiptOut, tags=["Receipts"])
 def read_receipt(
@@ -626,7 +649,7 @@ def read_receipt(
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
     if receipt is None:
         raise HTTPException(status_code=404, detail="Чек не найден")
-    return receipt
+    return crud.attach_base_rates(db, receipt, current_user.base_currency)
 
 @app.put("/api/receipts/{receipt_id}", response_model=schemas.ReceiptOut, tags=["Receipts"])
 def update_receipt(
@@ -639,7 +662,8 @@ def update_receipt(
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
     if receipt is None:
         raise HTTPException(status_code=404, detail="Чек не найден")
-    return crud.update_receipt(db=db, receipt=receipt, data=data)
+    updated = crud.update_receipt(db=db, receipt=receipt, data=data)
+    return crud.attach_base_rates(db, updated, current_user.base_currency)
 
 @app.get("/api/analytics", response_model=schemas.AnalyticsOut, tags=["Analytics"])
 def get_analytics(
@@ -647,7 +671,7 @@ def get_analytics(
     current_user: models.User = Depends(auth.get_current_user)
 ):
     """Аналитика расходов текущего пользователя."""
-    return crud.get_analytics(db, user_id=current_user.id)
+    return crud.get_analytics(db, user_id=current_user.id, base_currency=current_user.base_currency)
 
 @app.delete("/api/receipts/{receipt_id}", tags=["Receipts"])
 def delete_receipt(
@@ -703,7 +727,7 @@ def get_budgets_status(
         target_month = month.strip()
         if not _MONTH_REGEX.match(target_month):
             raise HTTPException(status_code=422, detail="Параметр month: укажите месяц в формате ГГГГ-ММ")
-    return crud.get_budget_status(db, user_id=current_user.id, month=target_month)
+    return crud.get_budget_status(db, user_id=current_user.id, month=target_month, base_currency=current_user.base_currency)
 
 
 if __name__ == "__main__":

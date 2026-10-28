@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.dates import normalize_date_time
+from app.currencies import normalize_currency, DEFAULT_CURRENCY
 
 import re
 
@@ -36,9 +37,15 @@ class ReceiptCreate(BaseModel):
     time: Optional[str] = None
     category: Optional[str] = Field(default="Продукты", max_length=100)
     total: Optional[float] = 0.0
+    currency: str = DEFAULT_CURRENCY
     # Путь, который вернул /api/analyze, например /data/receipts/<uuid>.jpg
     image_path: Optional[str] = Field(default=None, max_length=500)
     items: List[ItemSchema] = []
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _validate_currency(cls, v: Any) -> str:
+        return normalize_currency(v)
 
     @model_validator(mode="after")
     def _normalize_date_time(self):
@@ -52,7 +59,16 @@ class ReceiptUpdate(BaseModel):
     time: Optional[str] = None
     category: Optional[str] = Field(default="Продукты", max_length=100)
     total: Optional[float] = 0.0
+    # None — оставить текущую валюту чека (клиент, который не знает о валютах, её не сбросит)
+    currency: Optional[str] = None
     items: List[ItemSchema] = []
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _validate_currency(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_currency(v)
 
     @model_validator(mode="after")
     def _normalize_date_time(self):
@@ -70,6 +86,10 @@ class ReceiptOut(BaseModel):
     time: Optional[str]
     category: Optional[str]
     total: Optional[float]
+    currency: str = DEFAULT_CURRENCY
+    rate_to_kzt: Optional[float] = None
+    base_currency: str = DEFAULT_CURRENCY
+    rate_to_base: Optional[float] = None
     image_path: Optional[str] = None
     created_at: datetime
     items: List[ItemSchema] = []
@@ -103,6 +123,14 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     new_password: Optional[str] = None
     current_password: Optional[str] = None
+    base_currency: Optional[str] = None
+
+    @field_validator("base_currency", mode="before")
+    @classmethod
+    def _validate_base_currency(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_currency(v)
 
     @field_validator("email")
     @classmethod
@@ -142,6 +170,7 @@ class UserOut(BaseModel):
     id: int
     email: str
     full_name: Optional[str] = None
+    base_currency: str = DEFAULT_CURRENCY
     created_at: datetime
 
 
@@ -159,12 +188,16 @@ class RefreshTokenInput(BaseModel):
 class AnalyticsOut(BaseModel):
     total_spent: float
     receipts_count: int
+    # Сколько чеков вошло в суммы (остальные — в unconverted)
+    converted_count: int = 0
     avg_receipt: float
     top_store: Optional[str]
     by_category: Dict[str, float]
     by_store: Dict[str, float]
     by_month: Dict[str, float]
     recent_items: List[Dict[str, Any]]
+    base_currency: str = DEFAULT_CURRENCY
+    unconverted: List[Dict[str, Any]] = []
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -271,4 +304,14 @@ class BudgetStatusOut(BaseModel):
     total_budget: Optional[float] = None
     total_spent: float
     budgets: List[BudgetStatusItem]
+    base_currency: str = DEFAULT_CURRENCY
+    unconverted: List[Dict[str, Any]] = []
+
+
+class CurrencyOut(BaseModel):
+    code: str
+    symbol: str
+    name: str
+    digits: int
+
 
