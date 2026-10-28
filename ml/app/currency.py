@@ -1,54 +1,96 @@
-"""Определение валюты чека по распознанным строкам OCR."""
 import re
-from typing import List, Tuple, Optional
+from collections import Counter
+from typing import List, Optional, Tuple
 
-# Символы и маркеры валют
-_SYMBOL_PATTERNS = [
-    ("KZT", re.compile(r"(?:₸|\bтг\b|\bтнг\b|\bтенге\b|\bKZT\b)", re.IGNORECASE)),
-    ("RUB", re.compile(r"(?:₽|\bруб(?:\.|\b)|\bRUB\b|\bRUR\b|(?<=\d)\s*р\.(?!\w))", re.IGNORECASE)),
-    ("USD", re.compile(r"(?:\$|\bUSD\b)", re.IGNORECASE)),
-    ("EUR", re.compile(r"(?:€|\bEUR\b)", re.IGNORECASE)),
-    ("KGS", re.compile(r"(?:\bсом\b|\bKGS\b)", re.IGNORECASE)),
-    ("UZS", re.compile(r"(?:\bсум\b|\bсўм\b|\bUZS\b)", re.IGNORECASE)),
-    ("CNY", re.compile(r"(?:¥|元|\bCNY\b|\bRMB\b)", re.IGNORECASE)),
-    ("TRY", re.compile(r"(?:₺|\bTL\b|\bTRY\b)", re.IGNORECASE)),
-]
 
-# Маркеры страны чека
-_KZ_COUNTRY_RE = re.compile(
-    r"(?:\bБИН\b|\bИИН\b|\bРНМ\b|\bЗНМ\b|НДС\s*12\s*%|ҚҚС|[әғқңөұүһі])",
-    re.IGNORECASE,
-)
-_RU_COUNTRY_RE = re.compile(
-    r"(?:\bИНН\s*\d{10,12}\b|\bФН\b|\bФД\b|\bФП\b|НДС\s*20\s*%|\bОФД\b|Кассовый\s+чек)",
-    re.IGNORECASE,
-)
+SUPPORTED = {
+    "KZT", "RUB", "USD", "EUR",
+    "KGS", "UZS", "CNY", "TRY"
+}
+
+PATTERNS = {
+    "KZT": [
+        r"₸", r"\bтг\b", r"\bтнг\b",
+        r"\bтенге\b", r"\bKZT\b"
+    ],
+    "RUB": [
+        r"₽", r"\bруб(?:\.|ля|лей)?\b",
+        r"\bRUB\b", r"\bRUR\b",
+        r"\d[\s]*р\.(?!\s*/)"
+    ],
+    "USD": [r"\$", r"\bUSD\b"],
+    "EUR": [r"€", r"\bEUR\b"],
+    "KGS": [r"\bсом\b", r"\bKGS\b"],
+    "UZS": [r"\bсум\b", r"\bсўм\b", r"\bUZS\b"],
+    "CNY": [r"¥", r"元", r"\bCNY\b", r"\bRMB\b"],
+    "TRY": [r"₺", r"\bTL\b", r"\bTRY\b"],
+}
 
 
 def detect_currency(lines: List[str]) -> Tuple[Optional[str], str]:
-    """Валюта чека по OCR-строкам.
-    
-    Возвращает (код ISO или None, источник: 'symbol' | 'country' | 'default').
     """
-    text = "\n".join(lines)
-    if not text.strip():
-        return None, "default"
+    Определяет валюту по OCR-строкам.
 
-    # 1. Поиск по символам и словам валют (самая частая)
-    scores: dict = {}
-    for code, pattern in _SYMBOL_PATTERNS:
-        matches = len(pattern.findall(text))
-        if matches > 0:
-            scores[code] = matches
+    Возвращает:
+        (currency, source)
 
-    if scores:
-        top_currency = max(scores, key=scores.get)
-        return top_currency, "symbol"
+    source:
+        symbol  - символ или название валюты
+        country - признаки страны
+        default - определить не удалось
+    """
+    text = "\n".join(str(line) for line in lines)
+    counts = Counter()
 
-    # 2. Поиск по маркерам страны
-    if _KZ_COUNTRY_RE.search(text):
+    # 1. Поиск символов и обозначений валют
+    for currency, patterns in PATTERNS.items():
+        for pattern in patterns:
+            matches = re.findall(
+                pattern,
+                text,
+                flags=re.IGNORECASE
+            )
+            counts[currency] += len(matches)
+
+    if any(count > 0 for count in counts.values()):
+        currency = counts.most_common(1)[0][0]
+        if currency in SUPPORTED:
+            return currency, "symbol"
+
+    # 2. Определение по стране
+
+    # Казахстан
+    kz_patterns = [
+        r"\bБИН\b",
+        r"\bИИН\b",
+        r"\bРНМ\b",
+        r"\bЗНМ\b",
+        r"НДС\s*12\s*%",
+        r"ҚҚС",
+        r"[әғқңөұүһі]"
+    ]
+
+    if any(
+        re.search(p, text, re.IGNORECASE)
+        for p in kz_patterns
+    ):
         return "KZT", "country"
-    if _RU_COUNTRY_RE.search(text):
+
+    # Россия
+    ru_patterns = [
+        r"\bИНН\s*:?\s*\d{10}(?:\d{2})?\b",
+        r"\bФН\b",
+        r"\bФД\b",
+        r"\bФП\b",
+        r"НДС\s*20\s*%",
+        r"\bОФД\b",
+        r"Кассовый чек"
+    ]
+
+    if any(
+        re.search(p, text, re.IGNORECASE)
+        for p in ru_patterns
+    ):
         return "RUB", "country"
 
     # 3. Ничего не найдено
