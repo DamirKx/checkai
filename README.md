@@ -11,7 +11,7 @@
 - [Архитектура решения](#архитектура-решения)
 - [Стек технологий](#стек-технологий)
 - [Структура репозитория](#структура-репозитория)
-- [Установка и запуск (Docker)](#установка-и-запуск-docker)
+- [Установка и запуск](#установка-и-запуск)
 - [Веб-интерфейс](#веб-интерфейс)
 - [Спецификация API](#спецификация-api)
 - [Формат выходных данных](#формат-выходных-данных)
@@ -114,57 +114,94 @@ CheckAI/
 
 ---
 
-## Установка и запуск (Docker)
+## Установка и запуск
 
-### Требования
+Полная версия проекта (сайт, бэкенд, ML) — в ветке `main`. Перед запуском обновите её:
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows / macOS / Linux)
-
-### 1. Клонирование репозитория
-
-```bash
-git clone https://github.com/DamirKx/checkai.git
-cd checkai
+```powershell
+git checkout main
+git pull
 ```
 
-### 2. Сборка и запуск контейнеров
+Два способа запуска: **Docker** (ничего не нужно ставить, кроме Docker Desktop) и **без Docker** (быстрее для разработки).
 
-```bash
-docker compose up -d --build
+### Кому какой режим
+
+| Роль | Команда | Что поднимается | RAM |
+|---|---|---|---|
+| Бэкенд, фронтенд | `uvicorn server:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `app/parser.py`, Ollama не нужна | ~0,5 ГБ |
+| ML | `docker compose --profile full up -d` или без Docker с установленной Ollama | Сайт + Ollama (Qwen 2.5:3b) | ~4–5 ГБ |
+| QA, демонстрация | `docker compose --profile full up -d --build` | Всё, как у пользователя | ~4–5 ГБ |
+
+Без Ollama сайт, аккаунты, история и валюты работают, а распознавание чека переключается на запасной парсер (точность ниже).
+
+### Подготовка (один раз)
+
+Создайте файл `.env` с ключом для подписи токенов:
+
+```powershell
+copy .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Эта команда автоматически:
-- Скачает Python 3.10 и все зависимости
-- Установит PaddleOCR и PaddlePaddle
-- Поднимет сервер Ollama для работы нейросети
+Вставьте полученную строку в `.env` после `SECRET_KEY=`.
 
-### 3. Загрузка языковой модели
+### Способ А. Docker
 
-```bash
+Нужен запущенный [Docker Desktop](https://www.docker.com/products/docker-desktop/). Ollama отдельно ставить не нужно.
+
+```powershell
+docker compose --profile full up -d --build
+# Первый раз: скачать языковую модель (~2 ГБ)
 docker compose exec ollama ollama pull qwen2.5:3b
 ```
 
-### 4. Готово!
+Откройте `http://localhost:8000`. Остановить — `docker compose --profile full down`.
 
-Откройте браузер и перейдите по адресу:
+- Без `--profile full` Ollama не запускается — поднимается только сайт.
+- Папка `ml/` попадает в образ только при сборке: после `git pull` запускайте с `--build`. Папки `app/` и `frontend/` подключены к контейнеру напрямую — правки видны после перезапуска или `F5`.
 
-```
-http://localhost:8000
-```
+### Способ Б. Без Docker
 
-### Запуск без Docker
+Нужен Python 3.11+.
 
-Нужны Python 3.10+ и установленная [Ollama](https://ollama.com/download) с моделью `qwen2.5:3b`. Без Ollama интерфейс, аккаунты и история работают, но распознавание чека вернёт ошибку.
+**Один раз:** установите [Ollama](https://ollama.com/download/windows) (в PowerShell — `irm https://ollama.com/install.ps1 | iex`), откройте новый терминал и скачайте модель; затем подготовьте окружение:
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows (Linux/macOS: source .venv/bin/activate)
-pip install -r requirements.txt
+```powershell
 ollama pull qwen2.5:3b
-uvicorn server:app --host 127.0.0.1 --port 8000
+
+python -m venv .venv
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Остановить сервер — `Ctrl+C` в терминале.
+**Каждый раз:**
+
+```powershell
+.venv\Scripts\activate
+uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Откройте `http://localhost:8000`, Swagger — `http://localhost:8000/docs`. Остановить — `Ctrl+C`. Ollama на Windows работает в фоне (значок в трее); если её нет — запустите из меню «Пуск».
+
+После `git pull` выполните `pip install -r requirements.txt`, если менялись зависимости.
+
+### Проверка, что всё работает
+
+1. `http://localhost:8000/api/health` — должно быть `"status": "healthy"`. Без Docker поле `ollama` пока показывает `unavailable`, даже когда Ollama работает: проверка обращается к адресу контейнера.
+2. Загрузите фото чека. Первый чек обрабатывается дольше (до минуты) — загружаются модели.
+3. В логе сервера не должно быть строки «Ollama/LLM недоступна… Используется встроенный парсер». Если она есть — Ollama не запущена или не скачана модель.
+
+### Частые проблемы
+
+| Проблема | Решение |
+|---|---|
+| Команда `ollama` не найдена | Откройте новое окно терминала |
+| `Set SECRET_KEY in .env` при запуске Docker | Заполните `SECRET_KEY` в `.env` |
+| Распознавание слабое, позиции не находятся | Qwen не используется — см. пункт 3 проверки |
+| После `git pull` в Docker старое поведение | Запустите с `--build` |
+| Порт 8000 занят | Укажите другой: `--port 8001` |
+| Тесты пишут в рабочую базу | Перед тестами: `$env:DATABASE_URL="sqlite:///data/test.db"` (подробнее — BACKEND_GUIDE, раздел «Тесты») |
 
 ---
 
@@ -376,14 +413,14 @@ Access-токен живёт 60 минут, refresh-токен — 30 дней. 
 ## Полезные команды
 
 ```bash
-# Запуск контейнеров
-docker compose up -d
+# Запуск контейнеров (с Ollama)
+docker compose --profile full up -d
 
 # Остановка контейнеров
-docker compose down
+docker compose --profile full down
 
 # Пересборка после изменений в коде
-docker compose up -d --build
+docker compose --profile full up -d --build
 
 # Просмотр логов сервера
 docker compose logs web --tail 30

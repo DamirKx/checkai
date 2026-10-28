@@ -1,7 +1,7 @@
 # CheckAI — руководство бэкенд-разработчика
 
 Как устроен сервер, как его запустить, где что лежит и по каким правилам писать код.
-Короткая шпаргалка по запуску для всех ролей — в [TEAM_GUIDE.md](TEAM_GUIDE.md), контракт API для фронта — в [README.md](README.md#спецификация-api), задачи — в [ROADMAP.md](ROADMAP.md).
+Как запускать проект под каждую роль — в [README.md](README.md#установка-и-запуск), контракт API для фронта — в [README.md](README.md#спецификация-api), задачи — в [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -433,7 +433,7 @@ docker compose down                  # остановить
 | `/api/budgets/status` считает иначе, чем фронт: не учитывает чеки без даты (фронт относит их к месяцу сохранения), месяц по умолчанию берёт по UTC | `get_budget_status` в [app/crud.py](app/crud.py) | Открыто |
 | `/api/analyze-test` не ограничен по частоте, хотя запускает OCR | `RATE_LIMIT_RULES` в [server.py](server.py) | Открыто |
 | Задачи очереди старше часа удаляются, даже если ещё не выполнены | `cleanup_old_tasks` в [app/tasks.py](app/tasks.py) | Открыто |
-| В git лежат личные фото чеков в `data/receipts/` и `images_result.json` | — | Открыто |
+| Личные фото чеков из `data/receipts/` и `images_result.json` удалены из репозитория, но остаются в истории git | — | Открыто |
 | В README указан Python 3.10 и сказано, что без Ollama распознавание не работает — устарело | [README.md](README.md) | Открыто |
 
 ---
