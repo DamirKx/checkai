@@ -1,17 +1,52 @@
 """Получение и кеширование официальных курсов валют Национального банка РК."""
 import logging
+import threading
+import time
 from datetime import date, datetime, timedelta
-from typing import Dict, Optional, Any
+from typing import Callable, Dict, Optional, Any
 from xml.etree import ElementTree
 
 import httpx
 from sqlalchemy.orm import Session
 
-from app import models
+from app import database, models
 
 logger = logging.getLogger("checkai.rates")
 
 NBK_URL = "https://nationalbank.kz/rss/get_rates.cfm?fdate={day:%d.%m.%Y}"
+
+# Сколько секунд в сумме можно ждать Нацбанк за один вызов ensure_rates (все дни назад вместе)
+FETCH_BUDGET_SECONDS = 8.0
+# После ошибки сети не повторяем запрос за тот же день столько секунд — чтобы без интернета
+# каждое сохранение чека не ждало таймаут заново
+FAILURE_TTL_SECONDS = 300.0
+# В тестах выключают (False), чтобы фоновые задачи выполнялись сразу и предсказуемо
+RUN_IN_BACKGROUND = True
+
+_failed_until: Dict[str, float] = {}
+_failed_lock = threading.Lock()
+
+
+def reset_failures() -> None:
+    """Сбрасывает память о неудачных загрузках (для тестов)."""
+    with _failed_lock:
+        _failed_until.clear()
+
+
+def _recently_failed(day_str: str) -> bool:
+    with _failed_lock:
+        until = _failed_until.get(day_str)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            del _failed_until[day_str]
+            return False
+        return True
+
+
+def _mark_failed(day_str: str) -> None:
+    with _failed_lock:
+        _failed_until[day_str] = time.monotonic() + FAILURE_TTL_SECONDS
 
 
 def _fetch_day(day: date) -> Dict[str, float]:
@@ -72,6 +107,16 @@ def parse_day(day: Any) -> date:
     return res
 
 
+def has_rates(db: Session, day: Any) -> bool:
+    """Есть ли в exchange_rates хотя бы один курс за день."""
+    day_str = parse_day(day).strftime("%Y-%m-%d")
+    return (
+        db.query(models.ExchangeRate.id)
+        .filter(models.ExchangeRate.date == day_str)
+        .first()
+    ) is not None
+
+
 def ensure_rates(db: Session, day: Any) -> bool:
     """Если в exchange_rates нет ни одной строки за day — скачать всю ленту за этот день и сохранить.
     
@@ -82,30 +127,32 @@ def ensure_rates(db: Session, day: Any) -> bool:
     target_date = parse_day(day)
     day_str = target_date.strftime("%Y-%m-%d")
 
-    # Проверяем, есть ли уже сохранённые курсы за этот день
-    existing_count = (
-        db.query(models.ExchangeRate.id)
-        .filter(models.ExchangeRate.date == day_str)
-        .count()
-    )
-    if existing_count > 0:
+    if has_rates(db, day_str):
         return True
+    if _recently_failed(day_str):
+        return False
 
     # Скачиваем курсы с fallback до 7 дней назад (на случай выходных/праздников)
     rates: Dict[str, float] = {}
     curr_date = target_date
+    deadline = time.monotonic() + FETCH_BUDGET_SECONDS
     for _ in range(7):
+        if time.monotonic() >= deadline:
+            logger.warning("Превышено время ожидания курсов валют за %s", target_date)
+            break
         try:
             rates = _fetch_day(curr_date)
             if rates:
                 break
         except Exception as e:
             logger.warning("Ошибка при загрузке курсов валют за %s: %s", curr_date, e)
+            _mark_failed(day_str)
             return False
         curr_date -= timedelta(days=1)
 
     if not rates:
         logger.warning("Не удалось получить курсы валют за %s (проверено 7 дней)", target_date)
+        _mark_failed(day_str)
         return False
 
     try:
@@ -126,6 +173,9 @@ def ensure_rates(db: Session, day: Any) -> bool:
         return True
     except Exception as e:
         db.rollback()
+        # Параллельный запрос мог уже сохранить курсы за этот день (уникальный индекс)
+        if has_rates(db, day_str):
+            return True
         logger.exception("Ошибка сохранения курсов валют в базу: %s", e)
         return False
 
@@ -165,3 +215,21 @@ def rate_to_kzt(
     if row is not None:
         return float(row[0])
     return None
+
+
+def run_in_background(fn: Callable[..., Any], *args: Any) -> None:
+    """Запускает fn(db, *args) в отдельном потоке со своей сессией БД.
+
+    Ошибки только пишутся в лог. При RUN_IN_BACKGROUND = False выполняется сразу (для тестов).
+    """
+    def _worker():
+        try:
+            with database.SessionLocal() as db:
+                fn(db, *args)
+        except Exception:
+            logger.exception("Ошибка фоновой задачи курсов валют")
+
+    if RUN_IN_BACKGROUND:
+        threading.Thread(target=_worker, name="currency-rates", daemon=True).start()
+    else:
+        _worker()

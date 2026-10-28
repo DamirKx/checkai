@@ -413,30 +413,6 @@ def get_me(current_user: models.User = Depends(auth.get_current_user)):
     """Получение информации о текущем пользователе по JWT токену."""
     return current_user
 
-def _backfill_user_rates_background(user_id: int):
-    """Фоновая дозагрузка курсов Нацбанка РК на даты чеков пользователя при смене основной валюты."""
-    def _worker():
-        try:
-            with database.SessionLocal() as db:
-                receipt_dates = [
-                    d[0] for d in db.query(models.Receipt.date)
-                    .filter(models.Receipt.user_id == user_id, models.Receipt.date.isnot(None))
-                    .distinct()
-                    .all()
-                    if d[0]
-                ]
-                for date_str in receipt_dates:
-                    try:
-                        rates.ensure_rates(db, date_str)
-                    except Exception:
-                        pass
-                    time.sleep(0.3)
-        except Exception:
-            logger.exception("Ошибка фоновой дозагрузки курсов валют")
-
-    threading.Thread(target=_worker, name="currency-backfill", daemon=True).start()
-
-
 @app.patch("/api/auth/me", response_model=schemas.TokenOut, tags=["Auth"])
 def update_me(
     user_data: schemas.UserUpdate,
@@ -462,13 +438,14 @@ def update_me(
     if "full_name" in user_data.model_fields_set:
         current_user.full_name = user_data.full_name.strip() if user_data.full_name else None
 
-    if "base_currency" in user_data.model_fields_set and user_data.base_currency:
-        if user_data.base_currency != current_user.base_currency:
-            current_user.base_currency = user_data.base_currency
-            if current_user.base_currency != "KZT":
-                _backfill_user_rates_background(current_user.id)
+    base_changed = bool(user_data.base_currency) and user_data.base_currency != current_user.base_currency
+    if base_changed:
+        current_user.base_currency = user_data.base_currency
 
     db.commit()
+    if base_changed:
+        # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted
+        rates.run_in_background(crud.backfill_user_rates, current_user.id)
     db.refresh(current_user)
 
     return _token_response(current_user)

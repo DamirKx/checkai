@@ -76,7 +76,7 @@
 ```
 `currency_source`: `"symbol"` — нашли символ или слово на чеке; `"country"` — валюту не нашли, определили по стране (БИН, ИНН…); `"default"` — ничего не нашли, подставили `KZT`.
 
-**`POST /api/receipts/save`, `PUT /api/receipts/{id}`** — принимают `currency` (по умолчанию `"KZT"`). Неизвестная валюта → `422` «Валюта не поддерживается».
+**`POST /api/receipts/save`, `PUT /api/receipts/{id}`** — принимают `currency`. В `POST` по умолчанию `"KZT"`, в `PUT` без поля валюта чека не меняется. Неизвестная валюта → `422` «Валюта не поддерживается».
 
 **Чек в ответах** (`/api/receipts`, `/api/receipts/{id}`, ответ сохранения):
 ```json
@@ -94,6 +94,7 @@
 ```json
 {"base_currency": "KZT", "unconverted": [{"currency": "USD", "receipts": 2}]}
 ```
+В `/api/analytics` ещё `converted_count` — сколько чеков вошло в суммы (`receipts_count` — все чеки).
 Лимиты бюджетов (`/api/budgets`) — в основной валюте пользователя.
 
 ---

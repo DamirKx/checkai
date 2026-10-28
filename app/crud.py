@@ -1,4 +1,5 @@
-from datetime import date
+import time
+from datetime import date, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -53,8 +54,30 @@ def receipt_day(r: models.Receipt) -> str:
     if r.date:
         return r.date[:10]
     if r.created_at:
-        return r.created_at.strftime("%Y-%m-%d")
+        # created_at хранится в UTC, а курс при сохранении берётся на местное «сегодня»
+        return r.created_at.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")
     return date.today().strftime("%Y-%m-%d")
+
+
+def _rate_day(receipt_date: Optional[str]) -> str:
+    """День курса для сохраняемого чека: дата покупки, без неё — сегодня."""
+    return receipt_date[:10] if receipt_date else date.today().strftime("%Y-%m-%d")
+
+
+def _resolve_rate(db: Session, cur: str, receipt_date: Optional[str]) -> Optional[float]:
+    """Курс чека к тенге при сохранении.
+
+    Для KZT курс всегда 1.0, поэтому ленту на дату (нужна для смены основной валюты)
+    докачиваем в фоне и не заставляем пользователя ждать Нацбанк.
+    """
+    if cur == "KZT":
+        return 1.0
+    return rates.rate_to_kzt(db, cur, _rate_day(receipt_date), fetch=True)
+
+
+def _ensure_rates_later(cur: str, receipt_date: Optional[str]) -> None:
+    if cur == "KZT":
+        rates.run_in_background(rates.ensure_rates, _rate_day(receipt_date))
 
 
 def attach_base_rates(
@@ -73,26 +96,32 @@ def attach_base_rates(
     receipt_list: List[models.Receipt] = [receipts] if is_single else list(receipts)
 
     base = base or DEFAULT_CURRENCY
-    base_rates_cache: Dict[str, Optional[float]] = {}
+    rates_cache: Dict[tuple, Optional[float]] = {}
+
+    def cached_rate(cur: str, day: str) -> Optional[float]:
+        if (cur, day) not in rates_cache:
+            rates_cache[(cur, day)] = rates.rate_to_kzt(db, cur, day, fetch=False)
+        return rates_cache[(cur, day)]
 
     for r in receipt_list:
         cur = r.currency or DEFAULT_CURRENCY
-        if r.rate_to_kzt is None and cur == "KZT":
-            r.rate_to_kzt = 1.0
+        day = receipt_day(r)
+        # Курс чека не сохранился (например, не было сети), но мог появиться в exchange_rates позже.
+        # В объект не записываем: при чтении базу не меняем, это делает backfill_user_rates.
+        rate_kzt = r.rate_to_kzt
+        if rate_kzt is None:
+            rate_kzt = 1.0 if cur == "KZT" else cached_rate(cur, day)
 
         r.base_currency = base
         if cur == base:
             r.rate_to_base = 1.0
-        elif r.rate_to_kzt is None:
+        elif rate_kzt is None:
             r.rate_to_base = None
         elif base == "KZT":
-            r.rate_to_base = r.rate_to_kzt
+            r.rate_to_base = rate_kzt
         else:
-            day = receipt_day(r)
-            if day not in base_rates_cache:
-                base_rates_cache[day] = rates.rate_to_kzt(db, base, day, fetch=False)
-            base_rate = base_rates_cache[day]
-            r.rate_to_base = (r.rate_to_kzt / base_rate) if base_rate else None
+            base_rate = cached_rate(base, day)
+            r.rate_to_base = (rate_kzt / base_rate) if base_rate else None
 
     return receipt_list[0] if is_single else receipt_list
 
@@ -104,7 +133,7 @@ def create_receipt(
     image_path: Optional[str] = None,
 ) -> models.Receipt:
     cur = data.currency or DEFAULT_CURRENCY
-    rate = rates.rate_to_kzt(db, cur, data.date, fetch=True)
+    rate = _resolve_rate(db, cur, data.date)
 
     receipt = models.Receipt(
         user_id=user_id,
@@ -130,6 +159,7 @@ def create_receipt(
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
+    _ensure_rates_later(cur, data.date)
     return receipt
 
 
@@ -197,10 +227,12 @@ def update_receipt(
     receipt: models.Receipt,
     data: schemas.ReceiptUpdate,
 ) -> models.Receipt:
-    cur = data.currency or DEFAULT_CURRENCY
-    # Курс обновляется только если изменились валюта или дата чека
-    if cur != receipt.currency or data.date != receipt.date:
-        receipt.rate_to_kzt = rates.rate_to_kzt(db, cur, data.date, fetch=True)
+    # Без currency в запросе валюта чека не меняется
+    cur = data.currency or receipt.currency or DEFAULT_CURRENCY
+    # Курс берётся заново, если изменились валюта или дата или его не удалось получить раньше
+    rate_changed = cur != receipt.currency or data.date != receipt.date
+    if rate_changed or receipt.rate_to_kzt is None:
+        receipt.rate_to_kzt = _resolve_rate(db, cur, data.date)
 
     receipt.currency = cur
     receipt.store = data.store
@@ -221,7 +253,28 @@ def update_receipt(
     ]
     db.commit()
     db.refresh(receipt)
+    if rate_changed:
+        _ensure_rates_later(cur, data.date)
     return receipt
+
+
+def backfill_user_rates(db: Session, user_id: int) -> None:
+    """Докачивает курсы на дни чеков пользователя и проставляет rate_to_kzt чекам, где его нет.
+
+    Запускается в фоне при смене основной валюты: запросы к Нацбанку идут по одному с паузой.
+    """
+    receipts = db.query(models.Receipt).filter(models.Receipt.user_id == user_id).all()
+    for day in sorted({receipt_day(r) for r in receipts}):
+        if rates.has_rates(db, day):
+            continue
+        rates.ensure_rates(db, day)
+        time.sleep(0.3)
+
+    for r in receipts:
+        if r.rate_to_kzt is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            r.rate_to_kzt = 1.0 if cur == "KZT" else rates.rate_to_kzt(db, cur, receipt_day(r), fetch=False)
+    db.commit()
 
 def delete_receipt(db: Session, receipt: models.Receipt) -> None:
     db.delete(receipt)
@@ -252,6 +305,7 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
         return {
             "total_spent": 0.0,
             "receipts_count": 0,
+            "converted_count": 0,
             "avg_receipt": 0.0,
             "top_store": None,
             "by_category": {},
@@ -301,7 +355,10 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
 
     recent_items: List[Dict[str, Any]] = []
     for r in receipts:
-        rate = r.rate_to_base if r.rate_to_base is not None else 1.0
+        # Позиции чеков без курса не показываем: их цены нельзя выразить в основной валюте
+        if r.rate_to_base is None:
+            continue
+        rate = r.rate_to_base
         for item in r.items:
             recent_items.append({
                 "name": item.name,
@@ -320,7 +377,8 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
 
     return {
         "total_spent": round(total_spent, 2),
-        "receipts_count": counted_receipts,
+        "receipts_count": len(receipts),
+        "converted_count": counted_receipts,
         "avg_receipt": round(total_spent / counted_receipts, 2) if counted_receipts else 0.0,
         "top_store": top_store,
         "by_category": {k: round(v, 2) for k, v in by_category.items()},

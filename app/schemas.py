@@ -59,12 +59,15 @@ class ReceiptUpdate(BaseModel):
     time: Optional[str] = None
     category: Optional[str] = Field(default="Продукты", max_length=100)
     total: Optional[float] = 0.0
-    currency: str = DEFAULT_CURRENCY
+    # None — оставить текущую валюту чека (клиент, который не знает о валютах, её не сбросит)
+    currency: Optional[str] = None
     items: List[ItemSchema] = []
 
     @field_validator("currency", mode="before")
     @classmethod
-    def _validate_currency(cls, v: Any) -> str:
+    def _validate_currency(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
         return normalize_currency(v)
 
     @model_validator(mode="after")
@@ -185,6 +188,8 @@ class RefreshTokenInput(BaseModel):
 class AnalyticsOut(BaseModel):
     total_spent: float
     receipts_count: int
+    # Сколько чеков вошло в суммы (остальные — в unconverted)
+    converted_count: int = 0
     avg_receipt: float
     top_store: Optional[str]
     by_category: Dict[str, float]
