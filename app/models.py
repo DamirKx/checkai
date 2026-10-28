@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -15,6 +15,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
+    base_currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
     created_at = Column(DateTime, default=utcnow)
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
@@ -30,6 +31,8 @@ class Receipt(Base):
     time = Column(String(10), nullable=True)
     category = Column(String(100), nullable=True, default="Продукты")
     total = Column(Float, nullable=True, default=0.0)
+    currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
+    rate_to_kzt = Column(Float, nullable=True)
     image_path = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     
@@ -59,3 +62,17 @@ class Budget(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     user = relationship("User", back_populates="budgets")
+
+
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    __table_args__ = (
+        UniqueConstraint("date", "currency", name="uq_exchange_rates_date_currency"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    currency = Column(String(3), nullable=False)
+    rate_to_kzt = Column(Float, nullable=False)
+    fetched_at = Column(DateTime, default=utcnow, nullable=False)
+
