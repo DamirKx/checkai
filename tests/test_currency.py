@@ -18,6 +18,15 @@ class TestCurrencyAPI(unittest.TestCase):
         database.init_db()
 
     def setUp(self):
+        # Тесты не ходят в интернет: по умолчанию лента Нацбанка пустая, нужные курсы тест задаёт сам
+        fetch_patcher = patch("app.rates._fetch_day", return_value={})
+        fetch_patcher.start()
+        self.addCleanup(fetch_patcher.stop)
+        # Фоновые задачи курсов выполняются сразу, чтобы результат был виден в том же тесте
+        self._run_in_background = rates.RUN_IN_BACKGROUND
+        rates.RUN_IN_BACKGROUND = False
+        rates.reset_failures()
+
         self.db: Session = database.SessionLocal()
         # Очищаем тестовых пользователей и курсы
         test_emails = ["test_currency_a@example.com", "test_currency_b@example.com"]
@@ -53,6 +62,7 @@ class TestCurrencyAPI(unittest.TestCase):
         self.headers_b = {"Authorization": f"Bearer {token_b}"}
 
     def tearDown(self):
+        rates.RUN_IN_BACKGROUND = self._run_in_background
         test_emails = ["test_currency_a@example.com", "test_currency_b@example.com"]
         for email in test_emails:
             u = self.db.query(models.User).filter(models.User.email == email).first()
@@ -222,7 +232,8 @@ class TestCurrencyAPI(unittest.TestCase):
 
         # Сумма должна быть 10 000 + 20 * 500 = 20 000 KZT
         self.assertEqual(data["total_spent"], 20000.0)
-        self.assertEqual(data["receipts_count"], 2)
+        self.assertEqual(data["receipts_count"], 3)
+        self.assertEqual(data["converted_count"], 2)
         self.assertEqual(data["base_currency"], "KZT")
 
         # Чек без курса должен быть в unconverted
@@ -258,3 +269,106 @@ class TestCurrencyAPI(unittest.TestCase):
 
         r_b = self.client.get(f"/api/receipts/{rec_id}", headers=self.headers_b)
         self.assertEqual(r_b.status_code, 404)
+
+    def test_requires_token(self):
+        """Эндпоинты чеков и аналитики без токена -> 401."""
+        self.assertEqual(self.client.get("/api/receipts").status_code, 401)
+        self.assertEqual(self.client.get("/api/analytics").status_code, 401)
+        self.assertEqual(self.client.post("/api/receipts/save", json={"currency": "USD"}).status_code, 401)
+
+    def test_save_kzt_does_not_wait_for_bank(self):
+        """Чек в KZT: курс 1.0 сразу, лента Нацбанка докачивается в фоне, а не в запросе."""
+        with patch("app.rates.run_in_background") as bg, patch("app.rates._fetch_day") as mock_fetch:
+            r = self.client.post("/api/receipts/save", json={"date": "2026-10-20", "total": 100.0}, headers=self.headers_a)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["rate_to_kzt"], 1.0)
+        mock_fetch.assert_not_called()
+        bg.assert_called_once_with(rates.ensure_rates, "2026-10-20")
+
+    @patch("app.rates._fetch_day")
+    def test_put_without_currency_keeps_currency(self, mock_fetch):
+        """PUT без currency не сбрасывает валюту чека на KZT."""
+        mock_fetch.return_value = {"USD": 480.0}
+        r = self.client.post("/api/receipts/save", json={"date": "2026-10-10", "currency": "USD", "total": 10.0}, headers=self.headers_a)
+        rec_id = r.json()["id"]
+
+        r_put = self.client.put(f"/api/receipts/{rec_id}", json={"date": "2026-10-10", "total": 12.0, "store": "Shop"}, headers=self.headers_a)
+        self.assertEqual(r_put.status_code, 200)
+        self.assertEqual(r_put.json()["currency"], "USD")
+        self.assertEqual(r_put.json()["rate_to_kzt"], 480.0)
+
+    @patch("app.rates._fetch_day")
+    def test_failed_fetch_is_not_repeated_immediately(self, mock_fetch):
+        """После ошибки сети повторное сохранение за тот же день не ждёт Нацбанк снова."""
+        mock_fetch.side_effect = Exception("No network")
+        for _ in range(2):
+            r = self.client.post("/api/receipts/save", json={"date": "2026-10-08", "currency": "USD", "total": 5.0}, headers=self.headers_a)
+            self.assertEqual(r.status_code, 200)
+            self.assertIsNone(r.json()["rate_to_kzt"])
+        self.assertEqual(mock_fetch.call_count, 1)
+
+    @patch("app.rates._fetch_day")
+    def test_put_retries_missing_rate(self, mock_fetch):
+        """Чек без курса: PUT без смены валюты и даты запрашивает курс заново."""
+        mock_fetch.side_effect = Exception("No network")
+        r = self.client.post("/api/receipts/save", json={"date": "2026-10-07", "currency": "USD", "total": 10.0}, headers=self.headers_a)
+        rec_id = r.json()["id"]
+        self.assertIsNone(r.json()["rate_to_kzt"])
+
+        rates.reset_failures()
+        mock_fetch.side_effect = None
+        mock_fetch.return_value = {"USD": 470.0}
+        r_put = self.client.put(f"/api/receipts/{rec_id}", json={"date": "2026-10-07", "currency": "USD", "total": 10.0}, headers=self.headers_a)
+        self.assertEqual(r_put.json()["rate_to_kzt"], 470.0)
+        self.assertEqual(r_put.json()["rate_to_base"], 470.0)
+
+    @patch("app.rates._fetch_day")
+    def test_read_uses_rate_that_appeared_later(self, mock_fetch):
+        """Курс чека не сохранился, но позже появился в exchange_rates -> при чтении чек пересчитан."""
+        mock_fetch.side_effect = Exception("No network")
+        r = self.client.post("/api/receipts/save", json={"date": "2026-10-06", "currency": "USD", "total": 10.0}, headers=self.headers_a)
+        rec_id = r.json()["id"]
+
+        self.db.add(models.ExchangeRate(date="2026-10-06", currency="USD", rate_to_kzt=460.0))
+        self.db.commit()
+
+        r_get = self.client.get(f"/api/receipts/{rec_id}", headers=self.headers_a)
+        self.assertIsNone(r_get.json()["rate_to_kzt"])
+        self.assertEqual(r_get.json()["rate_to_base"], 460.0)
+        self.assertEqual(self.client.get("/api/analytics", headers=self.headers_a).json()["total_spent"], 4600.0)
+
+    @patch("app.rates._fetch_day")
+    def test_base_currency_change_backfills_missing_rates(self, mock_fetch):
+        """Смена основной валюты докачивает курсы и проставляет rate_to_kzt чекам без курса, в т.ч. без даты."""
+        mock_fetch.side_effect = Exception("No network")
+        r1 = self.client.post("/api/receipts/save", json={"date": "2026-10-05", "currency": "USD", "total": 10.0}, headers=self.headers_a)
+        r2 = self.client.post("/api/receipts/save", json={"currency": "KZT", "total": 1000.0}, headers=self.headers_a)
+        self.assertEqual(r2.status_code, 200)
+
+        rates.reset_failures()
+        mock_fetch.side_effect = None
+        mock_fetch.return_value = {"USD": 500.0}
+        r_patch = self.client.patch("/api/auth/me", json={"base_currency": "USD"}, headers=self.headers_a)
+        self.assertEqual(r_patch.status_code, 200)
+
+        self.db.expire_all()
+        saved = self.db.get(models.Receipt, r1.json()["id"])
+        self.assertEqual(saved.rate_to_kzt, 500.0)
+
+        data = self.client.get("/api/analytics", headers=self.headers_a).json()
+        self.assertEqual(data["base_currency"], "USD")
+        self.assertEqual(data["unconverted"], [])
+        self.assertAlmostEqual(data["total_spent"], 12.0, places=2)  # 10 $ + 1000 ₸ / 500
+
+    @patch("app.rates._fetch_day")
+    def test_analytics_counts_and_recent_items_skip_unconverted(self, mock_fetch):
+        """receipts_count — все чеки, converted_count — учтённые; позиции чеков без курса не в recent_items."""
+        mock_fetch.side_effect = Exception("No network")
+        self.client.post("/api/receipts/save", json={"date": "2026-10-04", "currency": "USD", "total": 5.0, "items": [{"name": "Coffee", "total_price": 5.0}]}, headers=self.headers_a)
+        self.client.post("/api/receipts/save", json={"date": "2026-10-03", "currency": "KZT", "total": 700.0, "items": [{"name": "Хлеб", "total_price": 700.0}]}, headers=self.headers_a)
+
+        data = self.client.get("/api/analytics", headers=self.headers_a).json()
+        self.assertEqual(data["receipts_count"], 2)
+        self.assertEqual(data["converted_count"], 1)
+        self.assertEqual(data["avg_receipt"], 700.0)
+        self.assertEqual([i["name"] for i in data["recent_items"]], ["Хлеб"])
