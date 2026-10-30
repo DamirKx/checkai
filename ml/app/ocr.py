@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import tempfile
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from paddleocr import PaddleOCR
 
@@ -12,6 +12,9 @@ from app.parser import parse_receipt as parse_receipt_regex
 # Наш новый локальный AI Agent
 from app.agent_parser import parse_receipt_with_correction
 from app.currency import detect_currency, SUPPORTED
+
+# Подключаем модуль распределения по категориям
+from app.categorize import categorize_items
 
 
 
@@ -56,9 +59,9 @@ def ocr_image(
     Выполняет OCR изображения.
 
     image_input может быть:
-    - путем к изображению;
-    - bytes;
-    - bytearray.
+- путем к изображению;
+- bytes;
+- bytearray.
 
     Возвращает список распознанных строк.
     """
@@ -138,7 +141,8 @@ def ocr_image(
 
 def analyze_receipt(
     image_input,
-    ocr: PaddleOCR = None
+    ocr: PaddleOCR = None,
+    categories: Optional[List[dict]] = None
 ) -> Dict[str, Any]:
     """
     Главная функция ML-сервиса.
@@ -155,14 +159,17 @@ def analyze_receipt(
         ↓
     Self-Correction
         ↓
+    Categorization (Categories / Keywords)
+        ↓
     JSON
 
     Принимает:
-    - путь к изображению;
-    - bytes изображения.
+- путь к изображению;
+- bytes изображения;
+- список пользовательских категорий (опционально).
 
     Возвращает:
-    - dict с результатом анализа.
+- dict с результатом анализа.
     """
 
     if ocr is None:
@@ -183,9 +190,10 @@ def analyze_receipt(
         ocr_text
     )
 
-    # 4. Сохраняем исходные OCR-строки.
-    # Это пригодится для отладки
-    # и научного сравнения.
+    # 4. Распределяем товары по категориям
+    categorize_items(parsed.get("items", []), categories or [])
+
+    # 5. Определяем валюту и сохраняем исходные OCR-строки.
     currency, currency_source = resolve_currency(lines, parsed)
 
     parsed["currency"] = currency
@@ -197,7 +205,8 @@ def analyze_receipt(
 
 def analyze_receipt_comparison(
     image_input,
-    ocr: PaddleOCR = None
+    ocr: PaddleOCR = None,
+    categories: Optional[List[dict]] = None
 ) -> Dict[str, Any]:
     """
     Сравнение двух подходов:
@@ -236,6 +245,9 @@ def analyze_receipt_comparison(
     ai_result = parse_receipt_with_correction(
         ocr_text
     )
+
+    # Распределяем по категориям для AI-результата
+    categorize_items(ai_result.get("items", []), categories or [])
 
     currency, currency_source = resolve_currency(lines, ai_result)
     ai_result["currency"] = currency
@@ -290,10 +302,11 @@ if __name__ == "__main__":
     print("-" * 60)
 
     print(
-        f"{'Товар':<28} | "
-        f"{'Кол':<4} | "
-        f"{'Цена':>9} | "
-        f"{'Сумма':>10}"
+        f"{'Товар':<24} | "
+        f"{'Категория':<12} | "
+        f"{'Кол':<3} | "
+        f"{'Цена':>8} | "
+        f"{'Сумма':>8}"
     )
 
     print("-" * 60)
@@ -310,8 +323,12 @@ if __name__ == "__main__":
             )
         )
 
-        if len(name) > 28:
-            name = name[:26] + ".."
+        if len(name) > 24:
+            name = name[:22] + ".."
+
+        category = str(item.get("category") or "Без кат.")
+        if len(category) > 12:
+            category = category[:10] + ".."
 
         quantity = item.get(
             "quantity",
@@ -349,10 +366,11 @@ if __name__ == "__main__":
             total_text = "--"
 
         print(
-            f"{name:<28} | "
-            f"{str(quantity):<4} | "
-            f"{price_text:>9} | "
-            f"{total_text:>10}"
+            f"{name:<24} | "
+            f"{category:<12} | "
+            f"{str(quantity):<3} | "
+            f"{price_text:>8} | "
+            f"{total_text:>8}"
         )
 
     print("-" * 60)

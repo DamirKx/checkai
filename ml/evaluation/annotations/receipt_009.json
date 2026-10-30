@@ -4,7 +4,36 @@
   "store": "MR D.I.Y. (JOHOR) SDN BHD",
   "date": null,
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "CHOPPING BOARD 35.5x25.5CM 803M#",
+      "quantity": 1,
+      "price": 19.0,
+      "total": 19.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "AIR PRESSURE SPRAYER SX-575-1 1.5L",
+      "quantity": 1,
+      "price": 8.02,
+      "total": 8.02,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "WAXCO WINDSHILED CLEANER 120ML",
+      "quantity": 1,
+      "price": 3.02,
+      "total": 3.02,
+      "category": "Транспорт"
+    },
+    {
+      "name": "BOPP TAPE 48MM*100M CLEAR",
+      "quantity": 1,
+      "price": 3.88,
+      "total": 3.88,
+      "category": "Дом и быт"
+    }
+  ],
   "total": 33.9,
-  "items_annotated": false
+  "items_annotated": true
 }

@@ -4,7 +4,64 @@
   "store": "SOON HUAT MACHINERY ENTERPRISE",
   "date": "2019-01-11",
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "REPAIR ENGINE POWER SPRAYER (1UNIT)",
+      "quantity": 1,
+      "price": 80.0,
+      "total": 80.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "GIANT 606 OVERFLOW ASSY",
+      "quantity": 1,
+      "price": 160.0,
+      "total": 160.0,
+      "category": null
+    },
+    {
+      "name": "ENGINE OIL",
+      "quantity": 1,
+      "price": 17.0,
+      "total": 17.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "GREASE FOR TOOLS 40ML (AKODA)",
+      "quantity": 1,
+      "price": 10.0,
+      "total": 10.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "EY20 PLUG CHAMPION",
+      "quantity": 1,
+      "price": 6.0,
+      "total": 6.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "STARTER TALI",
+      "quantity": 1,
+      "price": 8.0,
+      "total": 8.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "EY20 STARTER HANDLE",
+      "quantity": 1,
+      "price": 10.0,
+      "total": 10.0,
+      "category": "Транспорт"
+    },
+    {
+      "name": "HD40 1L COTIN",
+      "quantity": 2,
+      "price": 18.0,
+      "total": 36.0,
+      "category": "Транспорт"
+    }
+  ],
   "total": 327.0,
-  "items_annotated": false
+  "items_annotated": true
 }

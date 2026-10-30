@@ -8,13 +8,15 @@
       "name": "Бургер с говядиной",
       "quantity": 1,
       "price": 2450,
-      "total": 2450
+      "total": 2450,
+      "category": "Кафе"
     },
     {
       "name": "Чай термос",
       "quantity": 1,
       "price": 1500,
-      "total": 1500
+      "total": 1500,
+      "category": "Кафе"
     }
   ],
   "total": 4345,

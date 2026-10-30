@@ -1,9 +1,25 @@
+import copy
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from app.ocr import analyze_receipt_comparison, init_ocr
+from app.categorize import categorize_items, normalize_item_name
+from app.currency import detect_currency, SUPPORTED
+
+# Стандартные категории из п. 0.3 контракта для оценки качества категоризации
+EVAL_CATEGORIES = [
+    {"id": 1, "name": "Продукты", "description": "Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости", "position": 0},
+    {"id": 2, "name": "Одежда", "description": "Одежда, обувь, аксессуары", "position": 1},
+    {"id": 3, "name": "Дом и быт", "description": "Бытовая химия, хозтовары, посуда, мелочи для дома", "position": 2},
+    {"id": 4, "name": "Транспорт", "description": "Топливо, такси, проезд, парковка", "position": 3},
+    {"id": 5, "name": "Кафе", "description": "Готовая еда и напитки вне дома: кафе, рестораны, кофейни, доставка еды", "position": 4},
+    {"id": 6, "name": "Здоровье", "description": "Аптека, лекарства, витамины, медицинские услуги", "position": 5},
+    {"id": 7, "name": "Развлечения", "description": "Кино, театр, концерты, игры, подписки", "position": 6},
+    {"id": 8, "name": "Другое", "description": "Всё, что не подошло в другие категории", "position": 7},
+]
 
 # Папки с фотографиями и эталонной разметкой
 BASE_DIR = Path(__file__).resolve().parent
@@ -75,7 +91,38 @@ def get_item_total(item):
     return price * quantity
 
 
-from app.currency import detect_currency, SUPPORTED
+def _eval_categories_on_matched(matched_pairs):
+    """Считает точность категорий на сопоставленных позициях чека:
+    1) только ключевые слова (USE_AI_PARSER=0)
+    2) Qwen + ключевые слова (USE_AI_PARSER=1)
+    Возвращает (kw_correct, ai_correct, total_annotated).
+    """
+    annotated_pairs = [
+        (exp_item, pred_item)
+        for exp_item, pred_item in matched_pairs
+        if "category" in exp_item
+    ]
+    if not annotated_pairs:
+        return 0, 0, 0
+
+    kw_items = [copy.deepcopy(pred_item) for _, pred_item in annotated_pairs]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "0"}):
+        categorize_items(kw_items, EVAL_CATEGORIES)
+
+    ai_items = [copy.deepcopy(pred_item) for _, pred_item in annotated_pairs]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}):
+        categorize_items(ai_items, EVAL_CATEGORIES)
+
+    kw_correct = 0
+    ai_correct = 0
+    for idx, (exp_item, _) in enumerate(annotated_pairs):
+        exp_cat = exp_item.get("category")
+        if kw_items[idx].get("category") == exp_cat:
+            kw_correct += 1
+        if ai_items[idx].get("category") == exp_cat:
+            ai_correct += 1
+
+    return kw_correct, ai_correct, len(annotated_pairs)
 
 
 def evaluate_parser(predicted, expected):
@@ -134,6 +181,9 @@ def evaluate_parser(predicted, expected):
         "item_precision": None,
         "items_sum": None,
         "sum_matches_total": None,
+        "cat_kw_correct": 0,
+        "cat_ai_correct": 0,
+        "cat_total": 0,
     }
 
     if not items_annotated:
@@ -144,12 +194,15 @@ def evaluate_parser(predicted, expected):
 
     matched = 0
     used = set()
+    matched_pairs = []
 
-    # Сопоставляем товары по сумме и количеству
+    # Сопоставляем товары по сумме и количеству (а при несовпадении цены в OCR — по нормализованному названию)
     for expected_item in expected_items:
         expected_sum = get_item_total(expected_item)
         expected_qty = get_number(expected_item.get("quantity", 1))
+        expected_norm = normalize_item_name(expected_item.get("name", ""))
 
+        found_idx = None
         for index, predicted_item in enumerate(predicted_items):
             if index in used or not isinstance(predicted_item, dict):
                 continue
@@ -163,9 +216,28 @@ def evaluate_parser(predicted, expected):
                 and abs(expected_sum - predicted_sum) < 0.01
                 and expected_qty == predicted_qty
             ):
-                matched += 1
-                used.add(index)
+                found_idx = index
                 break
+
+        # Если по цене не совпало (например, ошибка распознавания цены в SROIE), сопоставляем по названию для оценки категории
+        cat_pair_idx = found_idx
+        if cat_pair_idx is None and expected_norm:
+            for index, predicted_item in enumerate(predicted_items):
+                if not isinstance(predicted_item, dict):
+                    continue
+                pred_norm = normalize_item_name(predicted_item.get("name", ""))
+                if pred_norm and (expected_norm in pred_norm or pred_norm in expected_norm):
+                    cat_pair_idx = index
+                    break
+
+        if found_idx is not None:
+            matched += 1
+            used.add(found_idx)
+
+        if cat_pair_idx is not None:
+            matched_pairs.append((expected_item, predicted_items[cat_pair_idx]))
+
+    cat_kw_correct, cat_ai_correct, cat_total = _eval_categories_on_matched(matched_pairs)
 
     expected_count = len(expected_items)
     predicted_count = len(predicted_items)
@@ -214,6 +286,9 @@ def evaluate_parser(predicted, expected):
         "item_precision": precision,
         "items_sum": items_sum,
         "sum_matches_total": sum_matches_total,
+        "cat_kw_correct": cat_kw_correct,
+        "cat_ai_correct": cat_ai_correct,
+        "cat_total": cat_total,
     })
 
     return metrics
@@ -255,6 +330,15 @@ def print_receipt_metrics(name, metrics):
         f"  Сумма совпадает с итогом: "
         f"{format_status(metrics['sum_matches_total'])}"
     )
+    if metrics.get("cat_total"):
+        print(
+            f"  Категории (только ключевые слова): "
+            f"{metrics['cat_kw_correct']}/{metrics['cat_total']}"
+        )
+        print(
+            f"  Категории (Qwen + ключевые слова): "
+            f"{metrics['cat_ai_correct']}/{metrics['cat_total']}"
+        )
 
 
 def calculate_accuracy(results, key):
@@ -314,6 +398,12 @@ def print_summary(name, results):
         item_results, "sum_matches_total"
     )
 
+    cat_kw_correct = sum(r.get("cat_kw_correct", 0) for r in item_results)
+    cat_ai_correct = sum(r.get("cat_ai_correct", 0) for r in item_results)
+    cat_total = sum(r.get("cat_total", 0) for r in item_results)
+    cat_kw_acc = cat_kw_correct / cat_total if cat_total else None
+    cat_ai_acc = cat_ai_correct / cat_total if cat_total else None
+
     print("\n" + "=" * 45)
     print(f"ОБЩАЯ СТАТИСТИКА: {name}")
     print("=" * 45)
@@ -336,6 +426,14 @@ def print_summary(name, results):
         f"Совпадение суммы товаров с итогом: "
         f"{format_percent(sum_acc)} ({sum_count} чеков)"
     )
+    print(
+        f"Доля позиций с верной категорией (только ключевые слова): "
+        f"{format_percent(cat_kw_acc)} ({cat_kw_correct}/{cat_total})"
+    )
+    print(
+        f"Доля позиций с верной категорией (Qwen + ключевые слова): "
+        f"{format_percent(cat_ai_acc)} ({cat_ai_correct}/{cat_total})"
+    )
 
 
 def main():
@@ -356,8 +454,7 @@ def main():
 
     print(f"Сохранённых результатов: {len(cache)}")
 
-    # Инициализируем PaddleOCR только один раз
-    ocr = init_ocr()
+    ocr = None
 
     for annotation_path in annotations:
         with open(annotation_path, encoding="utf-8") as f:
@@ -387,11 +484,16 @@ def main():
             print(f"Пропускаем {receipt_id}: результат уже сохранён")
             result = cache[receipt_id]
         else:
-            print(f"\\nПроверяем: {receipt_id}", flush=True)
+            print(f"\nПроверяем: {receipt_id}", flush=True)
+
+            if ocr is None:
+                from app.ocr import init_ocr
+                ocr = init_ocr()
 
             try:
+                from app.ocr import analyze_receipt_comparison
                 result = analyze_receipt_comparison(
-                    str(image_path), ocr=ocr
+                    str(image_path), ocr=ocr, categories=EVAL_CATEGORIES
                 )
             except Exception as error:
                 print(f"Ошибка распознавания: {error}")

@@ -137,6 +137,13 @@ def analyze_receipt(
 
     parsed["currency"] = currency or "KZT"
     parsed["currency_source"] = source
+
+    try:
+        from ml.app.categorize import categorize_items
+        categorize_items(parsed.get("items") or [], categories or [])
+    except Exception as e:
+        logger.debug("Ошибка в categorize_items: %s", e)
+
     parsed["raw_lines"] = lines
     return parsed
 
