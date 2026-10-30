@@ -89,7 +89,7 @@
             <div class="eyebrow">Чек распознан — проверьте и поправьте, если нужно</div>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
             <div id="resultEditor"></div>
-            <div class="notice">Категории предложены по названию товара. Распознавание иногда ошибается — проверьте названия, цены и итог.</div>
+            <div class="notice">Категории определены автоматически, распознавание иногда ошибается — проверьте названия, цены, итог и категории. Если товар попал не туда, в разделе «Категории» его можно перенести и запомнить.</div>
             <div class="button-row" style="margin-top:18px">
               <button class="btn" id="saveReceiptBtn" type="button">Сохранить в историю</button>
               <button class="btn soft" id="downloadBtn" type="button">Скачать JSON</button>
@@ -120,12 +120,24 @@
 
     <section class="page" id="page-categories" aria-labelledby="categoriesTitle">
       <div class="page-head">
-        <div><h1 id="categoriesTitle">Категории</h1></div>
-        <div class="filterbar"><select class="periodFilter" id="categoriesPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select></div>
+        <div><h1 id="categoriesTitle">Категории</h1>
+          <p><span class="hover-only">Перетащите товар на другую категорию, чтобы исправить распознавание.</span><span class="touch-only">Откройте категорию и выберите «Переместить в…», чтобы исправить распознавание.</span></p></div>
+        <div class="filterbar" id="categoriesControls">
+          <select class="periodFilter" id="categoriesPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
+          <button class="btn soft small" id="addCategoryBtn" type="button">＋ Добавить категорию</button>
+        </div>
       </div>
-      <p class="currency-note" id="categoriesSkipped" hidden></p>
-      <div class="category-grid" id="categoryGrid"></div>
-      <div class="notice">Категории берутся из сохранённых чеков. Поменять категорию товара можно в подробностях чека — кнопка «Редактировать».</div>
+      <div class="card empty" id="categoriesGuest" hidden>Категории хранятся в аккаунте. <button class="text-btn" id="categoriesLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы настроить их под себя.</div>
+      <div id="categoriesBody">
+        <label class="remember-toggle"><input type="checkbox" id="rememberMoves" checked> Запоминать перенос: такие же товары в новых чеках сразу попадут в выбранную категорию</label>
+        <p class="currency-note" id="categoriesSkipped" hidden></p>
+        <div class="category-grid" id="categoryGrid"></div>
+        <section class="card rules-card" aria-labelledby="rulesTitle">
+          <h3 id="rulesTitle">Запомненные правила</h3>
+          <p>При распознавании правило важнее ИИ: товар с таким названием сразу попадает в указанную категорию.</p>
+          <div id="rulesList"></div>
+        </section>
+      </div>
     </section>
 
     <section class="page" id="page-analysis" aria-labelledby="analysisTitle">
@@ -240,6 +252,35 @@
           <button class="btn soft" id="rmEditCancel" type="button">Отмена</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="categoryModal" hidden>
+    <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
+      <button class="icon-btn modal-close" id="categoryModalClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="categoryModalTitle">Новая категория</h2>
+      <form class="auth-form category-form" id="categoryForm" novalidate>
+        <label>Название<input id="categoryName" maxlength="50" autocomplete="off" required></label>
+        <label>Иконка<input id="categoryIcon" autocomplete="off" placeholder="◌" aria-describedby="categoryIconHint"><span class="hint" id="categoryIconHint">Эмодзи или символ — свой или один из готовых ниже</span></label>
+        <div class="icon-picks" id="categoryIconPicks" role="group" aria-label="Готовые иконки"></div>
+        <label>Описание<textarea id="categoryDesc" maxlength="300" rows="3" aria-describedby="categoryDescHint"></textarea><span class="hint" id="categoryDescHint">Перечислите, что сюда относится, — по описанию ИИ раскладывает товары. Например: крем, шампунь, тушь, помада</span></label>
+        <div class="auth-error" id="categoryError" role="alert" hidden></div>
+        <div class="button-row"><button class="btn" id="categorySave" type="submit">Сохранить</button><button class="btn soft" id="categoryCancel" type="button">Отмена</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="deleteCategoryModal" hidden>
+    <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="deleteCategoryTitle" aria-describedby="deleteCategoryText">
+      <button class="icon-btn modal-close" id="deleteCategoryClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="deleteCategoryTitle">Удалить категорию?</h2>
+      <form class="auth-form" id="deleteCategoryForm">
+        <p id="deleteCategoryText"></p>
+        <div class="radio-row" id="deleteMoveRow"><label><input type="radio" name="deleteMode" value="move" checked> Перенести позиции в</label><select class="field" id="deleteMoveTo" aria-label="Категория, в которую перенести позиции"></select></div>
+        <div class="radio-row" id="deleteNoneRow"><label><input type="radio" name="deleteMode" value="none"> Оставить позиции без категории</label></div>
+        <div class="auth-error" id="deleteCategoryError" role="alert" hidden></div>
+        <div class="button-row"><button class="btn danger" id="deleteCategorySubmit" type="submit">Удалить</button><button class="btn soft" id="deleteCategoryCancel" type="button">Отмена</button></div>
+      </form>
     </div>
   </div>
 
