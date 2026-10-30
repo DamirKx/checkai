@@ -4,7 +4,43 @@
   "store": "MR D.I.Y. (M) SDN BHD",
   "date": null,
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "KILAT'AUTO FCO WASH & SHINE ES1000 1L",
+      "quantity": 1,
+      "price": 3.11,
+      "total": 3.11,
+      "category": "Транспорт"
+    },
+    {
+      "name": "KILAT' ECO AUTO WASH & WAX EW-1000-11",
+      "quantity": 1,
+      "price": 4.62,
+      "total": 4.62,
+      "category": "Транспорт"
+    },
+    {
+      "name": "WD40 277ml M00 2572",
+      "quantity": 1,
+      "price": 11.23,
+      "total": 11.23,
+      "category": "Транспорт"
+    },
+    {
+      "name": "KLEENSO AJAIB 99 SERAI WANGI 900G",
+      "quantity": 1,
+      "price": 7.45,
+      "total": 7.45,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "HANDKERCHIEF 71386#2PCS",
+      "quantity": 1,
+      "price": 4.5,
+      "total": 4.5,
+      "category": "Одежда"
+    }
+  ],
   "total": 30.9,
-  "items_annotated": false
+  "items_annotated": true
 }

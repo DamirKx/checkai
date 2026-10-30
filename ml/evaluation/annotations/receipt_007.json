@@ -4,7 +4,15 @@
   "store": "BOOK TA .K (TAMAN DAYA) SDN BHD",
   "date": "2018-12-25",
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "KF MODELLING CLAY KIDDY FISH",
+      "quantity": 1,
+      "price": 9.0,
+      "total": 9.0,
+      "category": "Развлечения"
+    }
+  ],
   "total": 9.0,
-  "items_annotated": false
+  "items_annotated": true
 }

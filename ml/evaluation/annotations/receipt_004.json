@@ -8,7 +8,8 @@
       "name": "Ремонт домофона",
       "quantity": 1,
       "price": 1500,
-      "total": 1500
+      "total": 1500,
+      "category": "Дом и быт"
     }
   ],
   "total": 1500,

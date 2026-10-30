@@ -4,7 +4,15 @@
   "store": "S.H.H. MOTOR (SUNGAI RENGIT) SDN. BHD.",
   "date": null,
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "CROCS 300X17 TUBES",
+      "quantity": 1,
+      "price": 20.0,
+      "total": 20.0,
+      "category": "Одежда"
+    }
+  ],
   "total": 20.0,
-  "items_annotated": false
+  "items_annotated": true
 }

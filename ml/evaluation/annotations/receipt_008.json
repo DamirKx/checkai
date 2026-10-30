@@ -4,7 +4,22 @@
   "store": "INDAH GIFT & HOME DECO",
   "date": "2018-10-19",
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "ST-PRIVILEGE CARD/GD INDAH",
+      "quantity": 1,
+      "price": 10.0,
+      "total": 10.0,
+      "category": null
+    },
+    {
+      "name": "GF-TABLE LAMP/STITCH<i>",
+      "quantity": 1,
+      "price": 55.9,
+      "total": 55.9,
+      "category": "Дом и быт"
+    }
+  ],
   "total": 60.3,
-  "items_annotated": false
+  "items_annotated": true
 }

@@ -8,25 +8,29 @@
       "name": "Кирпич пустотелый одинарный М-150",
       "quantity": 800,
       "price": 10.22,
-      "total": 8176
+      "total": 8176,
+      "category": "Дом и быт"
     },
     {
       "name": "Цемент ПЦ-400 Д20 (мешках)",
       "quantity": 1,
       "price": 5400,
-      "total": 5400
+      "total": 5400,
+      "category": "Дом и быт"
     },
     {
       "name": "Щебень фракция 20x40",
       "quantity": 5,
       "price": 480,
-      "total": 2400
+      "total": 2400,
+      "category": "Дом и быт"
     },
     {
       "name": "Гвозди жидкие 310 мл",
       "quantity": 4,
       "price": 163,
-      "total": 652
+      "total": 652,
+      "category": "Дом и быт"
     }
   ],
   "total": 16628,

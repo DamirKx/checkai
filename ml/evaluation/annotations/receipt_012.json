@@ -4,7 +4,15 @@
   "store": "ABC HO TRADING",
   "date": "2019-01-09",
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "Plastic",
+      "quantity": 2,
+      "price": 15.5,
+      "total": 31.0,
+      "category": "Дом и быт"
+    }
+  ],
   "total": 31.0,
-  "items_annotated": false
+  "items_annotated": true
 }

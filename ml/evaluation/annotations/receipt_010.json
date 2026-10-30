@@ -4,7 +4,15 @@
   "store": "YONGFATT ENTERPRISE",
   "date": "2018-12-25",
   "currency": "MYR",
-  "items": [],
+  "items": [
+    {
+      "name": "ELEGANT SCH TR BAG 15",
+      "quantity": 1,
+      "price": 80.91,
+      "total": 80.91,
+      "category": "Одежда"
+    }
+  ],
   "total": 80.9,
-  "items_annotated": false
+  "items_annotated": true
 }
