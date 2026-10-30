@@ -1,18 +1,6 @@
 'use strict';
 
 // --- Справочники ---
-const CATEGORIES = [['Продукты', '🥕'], ['Одежда', '🧥'], ['Дом и быт', '🏠'], ['Транспорт', '🚌'], ['Кафе', '☕'], ['Здоровье', '✚'], ['Развлечения', '🎟'], ['Другое', '◌']];
-const CATEGORY_ICON = Object.fromEntries(CATEGORIES);
-const keys = {
-  'Продукты': ['картоф', 'молок', 'хлеб', 'яйц', 'сыр', 'мяс', 'рыб', 'куриц', 'овощ', 'фрукт', 'масло', 'рис', 'греч', 'сахар', 'мук', 'сок', 'вода', 'чай', 'кофе', 'макарон', 'йогурт', 'колбас', 'кефир', 'печен', 'шоколад', 'помидор', 'огур', 'яблок', 'банан', 'лук', 'закусоч'],
-  'Одежда': ['кофт', 'футбол', 'брюк', 'джинс', 'куртк', 'пальто', 'плать', 'юбк', 'обув', 'ботин', 'кроссов', 'носк', 'шапк', 'одеж', 'рубаш', 'бель'],
-  'Дом и быт': ['моющ', 'порош', 'шампун', 'мыло', 'бумаг', 'пакет', 'посуда', 'лампоч', 'бытов', 'губк', 'салфет'],
-  'Транспорт': ['бензин', 'дизел', 'такси', 'проезд', 'метро', 'автобус', 'парков', 'топлив'],
-  'Кафе': ['ресторан', 'кафе', 'обед', 'ужин', 'ланч', 'доставка еды', 'американо', 'капучино', 'эспрессо', 'бургер', 'пицца'],
-  'Здоровье': ['аптек', 'лекар', 'витамин', 'таблет', 'медицин', 'клиник', 'бинт'],
-  'Развлечения': ['кино', 'театр', 'музей', 'игра', 'подписк', 'концерт', 'билет'],
-};
-
 // Должно совпадать с MAX_UPLOAD_MB и ALLOWED_EXTENSIONS на сервере (server.py)
 const MAX_UPLOAD_MB = 10;
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff'];
@@ -127,22 +115,32 @@ const fmtPurchase = r => {
 };
 // Для фильтров по периодам берём дату покупки, а если её нет — дату сохранения
 const receiptIso = r => { const d = parseDate(r.date); return d && !Number.isNaN(+d) ? d.toISOString() : r.created_at; };
-const guessCategory = name => {
-  const n = String(name || '').toLowerCase();
-  for (const [cat, words] of Object.entries(keys)) if (words.some(w => n.includes(w))) return cat;
-  return 'Другое';
-};
-// Категорию хранит сервер; угадываем по названию только у старых чеков без неё
-const categoryOf = it => it.category || guessCategory(it.name);
-// Базовые категории + те, что пришли с сервера и которых нет в списке
-const categoryNames = (extra = []) => {
-  const names = CATEGORIES.map(([n]) => n);
-  extra.forEach(c => { if (c && !names.includes(c)) names.splice(names.length - 1, 0, c); });
-  return names;
-};
+// --- Категории ---
+// Категории пользователя приходят с сервера (у гостя — стандартные, без id).
+// «Без категории» — позиция с category_id = null: это не категория, её нельзя изменить или удалить
+const UNCATEGORIZED = { id: null, name: 'Без категории', icon: '○', description: null };
+const CATEGORY_ICONS = ['💄', '🐶', '🎁', '📚', '💊', '🏋', '✈', '🎮', '🧸', '🍷', '🚗', '💡', '📱', '🧾', '🏠', '◌'];
+// Ограничения — те же, что на сервере (CATEGORIES_TASKS.md, п. 0.4)
+const CATEGORY_NAME_MAX = 50, CATEGORY_DESC_MAX = 300, CATEGORY_ICON_MAX = 8;
+// Откуда у позиции категория после распознавания
+const CATEGORY_SOURCE_TEXT = { rule: 'по вашему правилу', ai: 'определил ИИ', keywords: 'по ключевым словам' };
+const categoryById = id => categories.find(c => c.id === id) || UNCATEGORIZED;
+// Категория позиции: по id, а у гостя — по названию
+const itemCategory = it => it.category_id != null ? categoryById(it.category_id)
+  : categories.find(c => c.name === it.category) || UNCATEGORIZED;
+// Ключ категории для сумм и значений в списках: id, у гостя — название, '' — «Без категории»
+const catKey = c => c.id != null ? String(c.id) : c === UNCATEGORIZED ? '' : 'name:' + c.name;
+const categoryByKey = key => key === '' ? UNCATEGORIZED
+  : String(key).startsWith('name:') ? categories.find(c => c.name === key.slice(5)) || UNCATEGORIZED
+  : categoryById(Number(key));
+const categoryLabel = c => `${c.icon} ${c.name}`;
+// Варианты для списка категорий; current — ключ выбранной
+const categoryOptions = (current, exclude) => [...categories, UNCATEGORIZED]
+  .filter(c => catKey(c) !== exclude)
+  .map(c => `<option value="${esc(catKey(c))}" ${catKey(c) === current ? 'selected' : ''}>${esc(categoryLabel(c))}</option>`).join('');
 const itemsSum = items => round2((items || []).reduce((s, i) => s + num(i.total_price), 0));
 
-let receipts = [], lastResult = null, selectedFile = null, currentUser = null, pendingSave = false, authMode = 'login';
+let categories = [], categoryRules = [], receipts = [], lastResult = null, selectedFile = null, currentUser = null, pendingSave = false, authMode = 'login';
 let analyzing = false, historyShown = HISTORY_PAGE;
 // Лимиты расходов: total — общий на месяц, categories — {категория: лимит}; budgetsLocal — сервер их пока не хранит
 let budgets = { total: null, categories: {} }, budgetsLocal = false;
@@ -315,11 +313,12 @@ function setUser(user) {
   $('navProfile').hidden = false;
   $('drawerFoot').textContent = 'Чеки сохраняются в вашем аккаунте';
   renderAccountMenu(); renderProfile(); fillProfileForm();
-  closeBudgetEditor(); loadBudgets();
+  closeBudgetEditor(); loadBudgets(); loadCategories(); loadRules();
 }
 function setGuest() {
-  currentUser = null; receipts = []; budgets = emptyBudgets(); budgetsLocal = false;
-  closeAccountMenu(); closeReceipt(); closeBudgetEditor();
+  currentUser = null; receipts = []; budgets = emptyBudgets(); budgetsLocal = false; categoryRules = [];
+  closeAccountMenu(); closeReceipt(); closeBudgetEditor(); closeCategoryModals();
+  loadCategories();
   $('loginBtn').hidden = false;
   $('userChip').hidden = true;
   $('navProfile').hidden = true;
@@ -459,31 +458,32 @@ function toDraft(src) {
     currency: curOf(src),
     // Откуда распознавание взяло валюту: symbol | country | default (у сохранённых чеков нет)
     currency_source: src.currency_source || null,
-    category: src.category || null,
     image_path: src.image_path || null,
     items: (src.items || []).map(it => {
       const quantity = it.quantity == null ? 1 : num(it.quantity);
       const total = it.total_price == null ? round2(quantity * num(it.price_per_unit)) : round2(it.total_price);
       const price = it.price_per_unit == null ? round2(quantity ? total / quantity : total) : round2(it.price_per_unit);
-      return { name: it.name || '', quantity, price_per_unit: price, total_price: total, category: categoryOf(it) };
+      // category — название: у гостя id нет, сервер найдёт категорию по названию при сохранении
+      return { name: it.name || '', quantity, price_per_unit: price, total_price: total,
+        category_id: it.category_id ?? null, category: it.category ?? null, category_source: it.category_source ?? null };
     }),
   };
-}
-// Категория чека — та, на которую в нём больше всего потрачено
-function mainCategory(items, fallback) {
-  const sums = {};
-  items.forEach(i => { sums[i.category] = (sums[i.category] || 0) + num(i.total_price); });
-  return Object.entries(sums).sort((a, b) => b[1] - a[1])[0]?.[0] || fallback || null;
 }
 function toPayload(draft) {
   const items = draft.items
     .filter(i => i.name.trim())
-    .map(i => ({ name: i.name.trim(), quantity: num(i.quantity), price_per_unit: round2(i.price_per_unit), total_price: round2(i.total_price), category: i.category || null }));
+    .map(i => {
+      const item = { name: i.name.trim(), quantity: num(i.quantity), price_per_unit: round2(i.price_per_unit), total_price: round2(i.total_price) };
+      // Есть id — отправляем его; нет (гость) — название, сервер найдёт категорию пользователя
+      if (i.category_id != null) item.category_id = i.category_id;
+      else item.category = i.category || null;
+      return item;
+    });
+  // Категорию чека сервер вычисляет сам — по позиции с наибольшей суммой
   return {
     store: draft.store.trim() || null,
     date: draft.date || null,
     time: draft.time || null,
-    category: mainCategory(items, draft.category),
     total: round2(draft.total),
     currency: draft.currency,
     image_path: draft.image_path,
@@ -517,7 +517,7 @@ function mountEditor(root, draft) {
   const editor = root.firstElementChild;
   const list = editor.querySelector('[data-items]'), sumBox = editor.querySelector('[data-sum]'), totalInput = editor.querySelector('[data-f="total"]');
   const renderItems = () => {
-    const cats = categoryNames(draft.items.map(i => i.category)), sym = currencyInfo(draft.currency).symbol;
+    const sym = currencyInfo(draft.currency).symbol;
     editor.querySelector('[data-total-label]').textContent = `Итог чека, ${sym}`;
     list.innerHTML = draft.items.length ? draft.items.map((it, i) => `<div class="edit-item" data-i="${i}">
       <div class="edit-name">
@@ -526,7 +526,7 @@ function mountEditor(root, draft) {
       </div>
       <div class="edit-nums">
         ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
-        <label>Категория<select class="field" data-k="category">${cats.map(c => `<option ${c === it.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+        <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${it.category_source && CATEGORY_SOURCE_TEXT[it.category_source] ? `<small class="cat-source">${CATEGORY_SOURCE_TEXT[it.category_source]}</small>` : ''}</label>
       </div>
     </div>`).join('') : '<div class="empty">Позиций нет. Добавьте их вручную или оставьте только итог.</div>';
     updateSum();
@@ -547,7 +547,14 @@ function mountEditor(root, draft) {
     const row = t.closest('[data-i]');
     if (!row || !t.dataset.k) return;
     const item = draft.items[+row.dataset.i], k = t.dataset.k;
-    item[k] = k === 'name' || k === 'category' ? t.value : num(t.value);
+    if (k === 'category') {
+      // Выбрали вручную — пометка «определил ИИ» больше не про эту категорию
+      const c = categoryByKey(t.value);
+      Object.assign(item, { category_id: c.id, category: c === UNCATEGORIZED ? null : c.name, category_source: null });
+      row.querySelector('.cat-source')?.remove();
+      return;
+    }
+    item[k] = k === 'name' ? t.value : num(t.value);
     // Количество или цена поменялись — пересчитываем сумму строки
     if (k === 'quantity' || k === 'price_per_unit') {
       item.total_price = round2(num(item.quantity) * num(item.price_per_unit));
@@ -555,21 +562,9 @@ function mountEditor(root, draft) {
     }
     if (k !== 'name' && k !== 'category') updateSum();
   });
-  editor.addEventListener('change', e => {
-    const t = e.target, row = t.closest('[data-i]');
-    // Новой позиции подбираем категорию по названию, пока пользователь не выбрал её сам
-    if (row && t.dataset.k === 'name') {
-      const item = draft.items[+row.dataset.i];
-      if (item.autoCategory) {
-        item.category = guessCategory(item.name);
-        row.querySelector('[data-k="category"]').value = item.category;
-      }
-    }
-    if (row && t.dataset.k === 'category') delete draft.items[+row.dataset.i].autoCategory;
-  });
   editor.addEventListener('click', e => {
     if (e.target.closest('[data-add]')) {
-      draft.items.push({ name: '', quantity: 1, price_per_unit: 0, total_price: 0, category: 'Другое', autoCategory: true });
+      draft.items.push({ name: '', quantity: 1, price_per_unit: 0, total_price: 0, category_id: null, category: null, category_source: null });
       renderItems();
       list.querySelector(`[data-i="${draft.items.length - 1}"] [data-k="name"]`).focus();
     } else if (e.target.closest('[data-remove]')) {
@@ -616,7 +611,7 @@ function openReceipt(id) {
   if (r.image_path) { photo.onerror = () => { photo.hidden = true; }; photo.src = r.image_path; photo.hidden = false; }
   else { photo.hidden = true; photo.removeAttribute('src'); }
   $('rmItems').innerHTML = items.length
-    ? items.map(it => `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity ?? 1)} × ${money(it.price_per_unit ?? it.total_price, cur)}</small><span class="item-cat">${esc(categoryOf(it))}</span></div><div style="text-align:right"><strong>${money(it.total_price, cur)}</strong></div></div>`).join('')
+    ? items.map(it => `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity ?? 1)} × ${money(it.price_per_unit ?? it.total_price, cur)}</small><span class="item-cat">${esc(categoryLabel(itemCategory(it)))}</span></div><div style="text-align:right"><strong>${money(it.total_price, cur)}</strong></div></div>`).join('')
     : '<div class="empty">В чеке нет товарных позиций</div>';
   // Подсказка, если распознавание потеряло или исказило строку
   const sum = itemsSum(items);
@@ -793,8 +788,12 @@ document.querySelectorAll('.nav-link').forEach(b => b.onclick = () => showPage(b
 document.addEventListener('keydown', e => {
   if (e.key === 'Tab') { trapFocus(e); return; }
   if (e.key !== 'Escape') return;
+  const catMenu = $('categoryGrid').querySelector('.cat-menu:not([hidden])');
   if (!$('receiptModal').hidden) closeReceipt();
   else if (!$('authModal').hidden) closeAuth();
+  else if (!$('categoryModal').hidden) closeModal('categoryModal');
+  else if (!$('deleteCategoryModal').hidden) closeModal('deleteCategoryModal');
+  else if (catMenu) { closeCategoryMenus(); catMenu.previousElementSibling.focus(); }
   else if (!$('accountMenu').hidden) { closeAccountMenu(); $('userMenuBtn').focus(); }
   else if ($('drawer').classList.contains('open')) { closeMenu(); $('menuBtn').focus(); }
 });
@@ -1036,7 +1035,7 @@ function exportCsv() {
     const head = [day, r.time || '', r.store || '', curOf(r), csvNum(r.total), inBase == null ? '' : csvNum(inBase)];
     const items = r.items || [];
     if (!items.length) rows.push([...head, '', '', '', '', r.category || '']);
-    items.forEach(i => rows.push([...head, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), categoryOf(i)]));
+    items.forEach(i => rows.push([...head, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), itemCategory(i).name]));
   });
   const csv = '﻿' + rows.map(row => row.map(csvCell).join(';')).join('\r\n');
   downloadFile(csv, 'text/csv;charset=utf-8', `checkai_${isoDay(new Date())}.csv`);
@@ -1045,30 +1044,360 @@ function exportCsv() {
 $('exportCsvBtn').onclick = exportCsv;
 
 // --- Категории и анализ ---
-// Траты по категориям в основной валюте; чеки без курса пропускаем (их показывает baseSummary)
+// Траты по категориям в основной валюте, по ключу catKey; чеки без курса пропускаем (их показывает baseSummary)
 function sumsByCategory(list) {
   const sums = {};
   list.forEach(r => {
     const rate = baseRate(r);
     if (rate == null) return;
-    (r.items || []).forEach(it => { const c = categoryOf(it); sums[c] = (sums[c] || 0) + num(it.total_price) * rate; });
+    (r.items || []).forEach(it => { const k = catKey(itemCategory(it)); sums[k] = (sums[k] || 0) + num(it.total_price) * rate; });
   });
   return sums;
 }
-const allItemCategories = () => receipts.flatMap(r => (r.items || []).map(i => i.category));
+// --- Категории: загрузка, раздел, перенос товаров, правила ---
+const CATEGORY_ITEMS_PAGE = 50;
+const REMEMBER_KEY = 'checkai_remember_moves';
+// Перетаскивание — только с мышью; на телефоне и с клавиатуры переносят через «Переместить в…»
+const canDrag = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+const DRAG_TYPE = 'application/x-checkai-items';
+// Раскрытая категория (ключ catKey) и отмеченные в ней позиции
+let openCategoryKey = null, pickedItems = new Set(), categoryItemsShown = CATEGORY_ITEMS_PAGE;
+
+async function loadCategories() {
+  const user = currentUser;
+  let list = [];
+  try { list = await apiRequest(user ? '/api/categories' : '/api/categories/defaults'); }
+  catch (e) { toast('Не удалось загрузить категории: ' + e.message); }
+  // Пока шёл запрос, пользователь сменил аккаунт или вышел
+  if (currentUser?.id !== user?.id) return;
+  categories = (Array.isArray(list) ? list : [])
+    .map((c, i) => ({ id: c.id ?? null, name: c.name, description: c.description || null, icon: c.icon || '◌', position: c.position ?? i }))
+    .sort((a, b) => a.position - b.position);
+  rerender();
+}
+async function loadRules() {
+  const user = currentUser;
+  let list = [];
+  if (user) {
+    try { list = await apiRequest('/api/category-rules'); }
+    catch (e) { toast('Не удалось загрузить правила: ' + e.message); }
+  }
+  if (currentUser?.id !== user?.id) return;
+  categoryRules = Array.isArray(list) ? list : [];
+  renderRules();
+}
+
 function renderCategories() {
+  const guest = !currentUser;
+  $('categoriesGuest').hidden = !guest;
+  $('categoriesBody').hidden = guest;
+  $('categoriesControls').hidden = guest;
+  if (guest) return;
   const list = filtered($('categoriesPeriod').value), sums = sumsByCategory(list), summary = baseSummary(list);
   showSkipped('categoriesSkipped', summary.skipped);
-  const sorted = categoryNames(Object.keys(sums))
-    .map(name => ({ name, icon: CATEGORY_ICON[name] || '◌', value: sums[name] || 0 }))
-    .sort((a, b) => b.value - a.value);
-  $('categoryGrid').innerHTML = sorted.map(c => `<div class="card category-row"><div class="cat-icon" aria-hidden="true">${c.icon}</div><div><h3>${esc(c.name)}</h3><small>по сохранённым чекам</small></div><div class="category-amount">${approx(money(c.value), summary.converted && c.value > 0)}</div></div>`).join('');
+  // Позиции периода по категориям
+  const rows = {};
+  list.forEach(r => (r.items || []).forEach(it => { (rows[catKey(itemCategory(it))] ||= []).push({ it, r }); }));
+  // «Без категории» показываем, только если в ней что-то есть
+  const cards = [...categories, ...(rows[''] ? [UNCATEGORIZED] : [])];
+  if (openCategoryKey !== null && !cards.some(c => catKey(c) === openCategoryKey)) openCategoryKey = null;
+  $('categoryGrid').innerHTML = cards.length
+    ? cards.map((c, i) => categoryCard(c, i, sums[catKey(c)] || 0, rows[catKey(c)] || [], summary.converted)).join('')
+    : '<div class="card empty">Категорий нет. Добавьте первую кнопкой «Добавить категорию».</div>';
+  renderRules();
 }
+function categoryCard(c, index, sum, rows, converted) {
+  const key = catKey(c), open = key === openCategoryKey, own = c !== UNCATEGORIZED, panelId = 'cat-items-' + (key || 'none');
+  const menu = own ? `<div class="cat-menu-wrap">
+      <button class="icon-btn cat-menu-btn" type="button" data-cat-menu aria-haspopup="menu" aria-expanded="false" aria-label="Действия с категорией «${esc(c.name)}»">⋯</button>
+      <div class="account-menu cat-menu" role="menu" hidden>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="edit">✎ Изменить</button>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="up" ${index === 0 ? 'disabled' : ''}>↑ Выше</button>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="down" ${index >= categories.length - 1 ? 'disabled' : ''}>↓ Ниже</button>
+        <div class="menu-sep"></div>
+        <button class="menu-item danger-text" type="button" role="menuitem" data-cat-action="delete">✕ Удалить</button>
+      </div>
+    </div>` : '';
+  const desc = c.description || (own ? 'Без описания' : 'Товары, которые не попали ни в одну категорию');
+  return `<div class="card category-row${open ? ' open' : ''}" data-cat="${esc(key)}">
+    <button class="cat-open" type="button" aria-expanded="${open}" aria-controls="${esc(panelId)}">
+      <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
+      <span class="cat-text"><b>${esc(c.name)}</b><small>${esc(desc)}</small></span>
+      <span class="cat-total"><b>${esc(approx(money(sum), converted && sum > 0))}</b><small>${rows.length} ${plural(rows.length, 'позиция', 'позиции', 'позиций')}</small></span>
+    </button>${menu}
+  </div>${open ? categoryItems(c, rows, panelId) : ''}`;
+}
+function categoryItems(c, rows, id) {
+  const key = catKey(c);
+  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">За этот период в категории нет товаров.</div></div>`;
+  // Сначала свежие покупки
+  const sorted = rows.slice().sort((a, b) => String(b.r.iso || '').localeCompare(String(a.r.iso || '')));
+  const shown = sorted.slice(0, categoryItemsShown), rest = sorted.length - shown.length;
+  const moveSelect = (attr, label) => `<select class="field" ${attr} aria-label="${esc(label)}"><option value="__" selected disabled>Переместить в…</option>${categoryOptions(null, key)}</select>`;
+  return `<div class="card cat-items" id="${esc(id)}" role="region" aria-label="Товары категории «${esc(c.name)}»">
+    <div class="cat-bulk" ${pickedItems.size ? '' : 'hidden'}>Выбрано: <b data-picked-count>${pickedItems.size}</b>
+      ${moveSelect('data-bulk-move', 'Переместить выбранные товары в категорию')}
+      <button class="text-btn" type="button" data-unpick>Снять выбор</button>
+    </div>
+    ${shown.map(({ it, r }) => `<div class="cat-item${pickedItems.has(it.id) ? ' picked' : ''}" data-item="${esc(it.id)}"${canDrag ? ' draggable="true"' : ''}>
+      <input type="checkbox" data-pick="${esc(it.id)}" ${pickedItems.has(it.id) ? 'checked' : ''} aria-label="Выбрать «${esc(it.name)}»">
+      <span class="cat-item-main"><b>${esc(it.name)}</b><small>${esc((r.store || 'Магазин не определён') + ' · ' + (fmtPurchase(r) || fmtDateTime(r.created_at)))}</small></span>
+      <span class="cat-item-sum">${esc(money(it.total_price, curOf(r)))}</span>
+      ${moveSelect(`data-move="${esc(it.id)}"`, `Переместить «${it.name}» в категорию`)}
+    </div>`).join('')}
+    ${rest > 0 ? `<div class="more-row"><button class="btn soft small" type="button" data-more-items>Показать ещё (${Math.min(rest, CATEGORY_ITEMS_PAGE)} из ${rest})</button></div>` : ''}
+  </div>`;
+}
+const focusCategory = key => $('categoryGrid').querySelector(`[data-cat="${CSS.escape(key)}"] .cat-open`)?.focus();
+function toggleCategory(key) {
+  openCategoryKey = openCategoryKey === key ? null : key;
+  pickedItems.clear();
+  categoryItemsShown = CATEGORY_ITEMS_PAGE;
+  renderCategories();
+  focusCategory(key);
+}
+// Перенос позиций в другую категорию; remember — сервер запомнит правило для таких товаров
+async function moveItems(ids, key) {
+  ids = ids.filter(id => id != null && id !== '').map(Number);
+  if (!ids.length) return;
+  const cat = categoryByKey(key), remember = $('rememberMoves').checked, back = openCategoryKey;
+  try {
+    const res = await apiRequest('/api/items/move', { method: 'POST', body: JSON.stringify({ item_ids: ids, category_id: cat.id, remember }) });
+    pickedItems.clear();
+    await loadReceipts();
+    if (remember) loadRules();
+    const n = res?.moved ?? ids.length;
+    toast(`Перемещено ${n} ${plural(n, 'позиция', 'позиции', 'позиций')} в «${cat.name}»`);
+    if (back !== null) focusCategory(back);
+  } catch (e) {
+    toast('Не удалось переместить: ' + e.message);
+    renderCategories();
+  }
+}
+function closeCategoryMenus(except) {
+  $('categoryGrid').querySelectorAll('.cat-menu').forEach(m => {
+    if (m === except) return;
+    m.hidden = true;
+    m.previousElementSibling.setAttribute('aria-expanded', 'false');
+  });
+}
+// Порядок категорий: меняем местами с соседней и отправляем весь список
+async function moveCategory(id, delta) {
+  const ids = categories.map(c => c.id), i = ids.indexOf(id), j = i + delta;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  try {
+    await apiRequest('/api/categories/order', { method: 'PUT', body: JSON.stringify({ ids }) });
+    await loadCategories();
+    $('categoryGrid').querySelector(`[data-cat="${CSS.escape(String(id))}"] [data-cat-menu]`)?.focus();
+  } catch (e) { toast('Не удалось изменить порядок: ' + e.message); }
+}
+
+$('categoryGrid').addEventListener('click', e => {
+  const card = e.target.closest('[data-cat]'), key = card?.dataset.cat;
+  const menuBtn = e.target.closest('[data-cat-menu]');
+  if (menuBtn) {
+    const menu = menuBtn.nextElementSibling, open = menu.hidden;
+    closeCategoryMenus(menu);
+    menu.hidden = !open;
+    menuBtn.setAttribute('aria-expanded', String(open));
+    if (open) menu.querySelector('.menu-item:not(:disabled)')?.focus();
+    return;
+  }
+  const action = e.target.closest('[data-cat-action]')?.dataset.catAction;
+  if (action) {
+    closeCategoryMenus();
+    const cat = categoryByKey(key);
+    if (action === 'edit') openCategoryModal(cat);
+    else if (action === 'delete') openDeleteCategory(cat);
+    else moveCategory(cat.id, action === 'up' ? -1 : 1);
+    return;
+  }
+  if (e.target.closest('.cat-open')) { toggleCategory(key); return; }
+  if (e.target.closest('[data-more-items]')) { categoryItemsShown += CATEGORY_ITEMS_PAGE; renderCategories(); return; }
+  if (e.target.closest('[data-unpick]')) { pickedItems.clear(); renderCategories(); focusCategory(openCategoryKey); }
+});
+$('categoryGrid').addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.pick !== undefined) {
+    const id = Number(t.dataset.pick);
+    if (t.checked) pickedItems.add(id); else pickedItems.delete(id);
+    // Без полной перерисовки, чтобы не терять фокус на чекбоксе
+    t.closest('.cat-item').classList.toggle('picked', t.checked);
+    const bulk = $('categoryGrid').querySelector('.cat-bulk');
+    bulk.hidden = !pickedItems.size;
+    bulk.querySelector('[data-picked-count]').textContent = pickedItems.size;
+  } else if (t.dataset.move !== undefined) moveItems([t.dataset.move], t.value);
+  else if (t.dataset.bulkMove !== undefined) moveItems([...pickedItems], t.value);
+});
+// Перетаскивание товара на карточку другой категории. Отмечены чекбоксы — переносятся все отмеченные
+$('categoryGrid').addEventListener('dragstart', e => {
+  const row = e.target.closest?.('.cat-item');
+  if (!row) return;
+  const id = Number(row.dataset.item), ids = pickedItems.has(id) ? [...pickedItems] : [id];
+  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
+  e.dataTransfer.effectAllowed = 'move';
+  row.classList.add('dragging');
+  document.body.classList.add('dragging-items');
+});
+$('categoryGrid').addEventListener('dragend', e => {
+  e.target.closest?.('.cat-item')?.classList.remove('dragging');
+  document.body.classList.remove('dragging-items');
+  $('categoryGrid').querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+});
+$('categoryGrid').addEventListener('dragover', e => {
+  const card = e.target.closest('.category-row');
+  if (!card || card.dataset.cat === openCategoryKey || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  card.classList.add('drop-target');
+});
+$('categoryGrid').addEventListener('dragleave', e => {
+  const card = e.target.closest('.category-row');
+  if (card && !card.contains(e.relatedTarget)) card.classList.remove('drop-target');
+});
+$('categoryGrid').addEventListener('drop', e => {
+  const card = e.target.closest('.category-row');
+  if (!card || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+  e.preventDefault();
+  card.classList.remove('drop-target');
+  let ids = [];
+  try { ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE)); } catch (err) { return; }
+  if (card.dataset.cat !== openCategoryKey) moveItems(ids, card.dataset.cat);
+});
+document.addEventListener('click', e => { if (!e.target.closest('.cat-menu-wrap')) closeCategoryMenus(); });
+
+// Галочка «Запомнить» — общая для раздела, по умолчанию включена
+try { $('rememberMoves').checked = localStorage.getItem(REMEMBER_KEY) !== '0'; } catch (e) { $('rememberMoves').checked = true; }
+$('rememberMoves').onchange = () => { try { localStorage.setItem(REMEMBER_KEY, $('rememberMoves').checked ? '1' : '0'); } catch (e) {} };
+
+// --- Окно «Новая категория» / «Изменить категорию» ---
+let editingCategory = null;
+$('categoryIconPicks').innerHTML = CATEGORY_ICONS.map(i => `<button class="icon-pick" type="button" data-icon="${esc(i)}" aria-label="Иконка ${esc(i)}" aria-pressed="false">${esc(i)}</button>`).join('');
+const markIconPick = () => $('categoryIconPicks').querySelectorAll('[data-icon]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.icon === $('categoryIcon').value.trim())));
+function openCategoryModal(cat = null) {
+  editingCategory = cat;
+  $('categoryModalTitle').textContent = cat ? 'Изменить категорию' : 'Новая категория';
+  $('categoryName').value = cat?.name || '';
+  $('categoryIcon').value = cat?.icon || '';
+  $('categoryDesc').value = cat?.description || '';
+  $('categoryError').hidden = true;
+  markIconPick();
+  openModal('categoryModal', $('categoryName'));
+}
+// Те же проверки, что на сервере: длина считается в символах, а не в единицах UTF-16
+const charLen = s => [...s].length;
+function categoryFormProblem(name, icon, description) {
+  if (!name) return 'Введите название категории';
+  if (charLen(name) > CATEGORY_NAME_MAX) return `Название категории: от 1 до ${CATEGORY_NAME_MAX} символов`;
+  if (name.toLowerCase() === UNCATEGORIZED.name.toLowerCase()) return 'Это название зарезервировано';
+  if (categories.some(c => c.id !== editingCategory?.id && c.name.toLowerCase() === name.toLowerCase())) return `Категория «${name}» уже есть`;
+  if (charLen(icon) > CATEGORY_ICON_MAX) return `Иконка — не больше ${CATEGORY_ICON_MAX} символов`;
+  if (charLen(description) > CATEGORY_DESC_MAX) return `Описание — не больше ${CATEGORY_DESC_MAX} символов`;
+  return null;
+}
+$('categoryIconPicks').onclick = e => {
+  const b = e.target.closest('[data-icon]');
+  if (!b) return;
+  $('categoryIcon').value = b.dataset.icon;
+  markIconPick();
+};
+$('categoryIcon').oninput = markIconPick;
+$('categoryForm').onsubmit = async e => {
+  e.preventDefault();
+  $('categoryError').hidden = true;
+  const name = $('categoryName').value.trim(), icon = $('categoryIcon').value.trim(), description = $('categoryDesc').value.trim();
+  const problem = categoryFormProblem(name, icon, description);
+  if (problem) { showFormError('categoryError', problem); return; }
+  const body = { name, icon: icon || null, description: description || null }, cat = editingCategory, btn = $('categorySave');
+  btn.disabled = true;
+  try {
+    await apiRequest(cat ? `/api/categories/${cat.id}` : '/api/categories', { method: cat ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+    closeModal('categoryModal');
+    await loadCategories();
+    toast(cat ? `Категория «${name}» сохранена` : `Категория «${name}» добавлена`);
+  } catch (err) {
+    showFormError('categoryError', err.message);
+  } finally { btn.disabled = false; }
+};
+$('categoryCancel').onclick = $('categoryModalClose').onclick = () => closeModal('categoryModal');
+$('categoryModal').onclick = e => { if (e.target.id === 'categoryModal') closeModal('categoryModal'); };
+$('addCategoryBtn').onclick = () => openCategoryModal();
+$('categoriesLoginBtn').onclick = () => openAuth('login');
+
+// --- Окно «Удалить категорию» ---
+let deletingCategory = null;
+function openDeleteCategory(cat) {
+  deletingCategory = cat;
+  // Позиции за всё время, а не за выбранный период: перенесутся все
+  const count = receipts.reduce((n, r) => n + (r.items || []).filter(it => it.category_id === cat.id).length, 0);
+  const others = categories.filter(c => c.id !== cat.id), limit = budgets.categories[catKey(cat)];
+  $('deleteCategoryTitle').textContent = `Удалить «${cat.name}»?`;
+  $('deleteCategoryText').textContent = (count ? `В ней ${count} ${plural(count, 'позиция', 'позиции', 'позиций')} за всё время.` : 'В ней пока нет позиций.')
+    + (limit ? ' Лимит бюджета этой категории будет удалён.' : '');
+  $('deleteMoveTo').innerHTML = others.map(c => `<option value="${esc(c.id)}">${esc(categoryLabel(c))}</option>`).join('');
+  // Переносить нечего или некуда — выбор не показываем
+  $('deleteMoveRow').hidden = !others.length || !count;
+  $('deleteNoneRow').hidden = !count;
+  $('deleteCategoryForm').deleteMode.value = others.length && count ? 'move' : 'none';
+  $('deleteCategoryError').hidden = true;
+  openModal('deleteCategoryModal', $('deleteCategoryCancel'));
+}
+$('deleteMoveTo').onchange = () => { $('deleteCategoryForm').deleteMode.value = 'move'; };
+$('deleteCategoryForm').onsubmit = async e => {
+  e.preventDefault();
+  const cat = deletingCategory;
+  if (!cat) return;
+  const moveTo = $('deleteCategoryForm').deleteMode.value === 'move' && !$('deleteMoveRow').hidden ? $('deleteMoveTo').value : null;
+  const btn = $('deleteCategorySubmit');
+  btn.disabled = true;
+  try {
+    const res = await apiRequest(`/api/categories/${cat.id}` + (moveTo ? `?move_to=${encodeURIComponent(moveTo)}` : ''), { method: 'DELETE' });
+    closeModal('deleteCategoryModal');
+    if (openCategoryKey === catKey(cat)) openCategoryKey = null;
+    const target = moveTo ? categoryById(Number(moveTo)).name : null;
+    await loadCategories();
+    await loadReceipts();
+    loadBudgets();
+    loadRules();
+    const moved = res?.moved_items || 0;
+    toast(`Категория «${cat.name}» удалена` + (moved ? (target ? `, позиции перенесены в «${target}»` : ', позиции остались без категории') : ''));
+  } catch (err) {
+    showFormError('deleteCategoryError', err.message);
+  } finally { btn.disabled = false; }
+};
+$('deleteCategoryCancel').onclick = $('deleteCategoryClose').onclick = () => closeModal('deleteCategoryModal');
+$('deleteCategoryModal').onclick = e => { if (e.target.id === 'deleteCategoryModal') closeModal('deleteCategoryModal'); };
+function closeCategoryModals() { closeModal('categoryModal'); closeModal('deleteCategoryModal'); closeCategoryMenus(); }
+
+// --- Запомненные правила ---
+function renderRules() {
+  $('rulesList').innerHTML = categoryRules.length
+    ? categoryRules.map(r => {
+      const cat = r.category_id != null ? categoryById(r.category_id) : UNCATEGORIZED;
+      const shown = cat === UNCATEGORIZED && r.category ? { icon: '◌', name: r.category } : cat;
+      return `<div class="rule-row"><span class="rule-pattern">«${esc(r.pattern)}»</span><span aria-hidden="true">→</span><span>${esc(categoryLabel(shown))}</span>
+        <button class="text-btn" type="button" data-rule-del="${esc(r.id)}" aria-label="Удалить правило «${esc(r.pattern)}»">✕</button></div>`;
+    }).join('')
+    : '<p class="rules-empty">Правил пока нет. Они появляются, когда вы переносите товар с галочкой «Запомнить».</p>';
+}
+$('rulesList').onclick = async e => {
+  const b = e.target.closest('[data-rule-del]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    await apiRequest(`/api/category-rules/${b.dataset.ruleDel}`, { method: 'DELETE' });
+    categoryRules = categoryRules.filter(r => String(r.id) !== b.dataset.ruleDel);
+    renderRules();
+    toast('Правило удалено');
+  } catch (err) { b.disabled = false; toast('Не удалось удалить правило: ' + err.message); }
+};
 $('categoriesPeriod').onchange = renderCategories;
 function renderAnalysis() {
-  const p = $('analysisPeriod').value, cat = $('analysisCategory').value, list = filtered(p), allSums = sumsByCategory(list), cats = categoryNames(allItemCategories());
-  $('analysisCategory').innerHTML = '<option value="all">Все категории</option>' + cats.map(c => `<option>${esc(c)}</option>`).join('');
-  $('analysisCategory').value = cats.includes(cat) ? cat : 'all';
+  const p = $('analysisPeriod').value, cat = $('analysisCategory').value, list = filtered(p), allSums = sumsByCategory(list);
+  const keys = [...categories, UNCATEGORIZED].map(catKey);
+  $('analysisCategory').innerHTML = '<option value="all">Все категории</option>' + categoryOptions(null);
+  $('analysisCategory').value = keys.includes(cat) ? cat : 'all';
   const chosenCat = $('analysisCategory').value;
   // Траты чека в основной валюте; чек без курса не учитываем
   const spent = r => {
@@ -1076,18 +1405,18 @@ function renderAnalysis() {
     if (rate == null) return 0;
     return rate * (chosenCat === 'all' ? num(r.total) : (r.items || []).reduce((a, i) => a + num(i.total_price), 0));
   };
-  const chosen = chosenCat === 'all' ? list : list.map(r => ({ ...r, items: (r.items || []).filter(i => categoryOf(i) === chosenCat) }));
+  const chosen = chosenCat === 'all' ? list : list.map(r => ({ ...r, items: (r.items || []).filter(i => catKey(itemCategory(i)) === chosenCat) }));
   const summary = baseSummary(list);
   $('analysisTotal').textContent = approx(money(chosen.reduce((s, r) => s + spent(r), 0)), summary.converted);
   showSkipped('analysisSkipped', summary.skipped);
   $('analysisItems').textContent = chosen.reduce((a, r) => a + (r.items || []).length, 0);
   const tops = Object.entries(allSums).sort((a, b) => b[1] - a[1]);
-  $('analysisTop').textContent = tops[0]?.[0] || '—';
+  $('analysisTop').textContent = tops[0] ? categoryByKey(tops[0][0]).name : '—';
   const sums = chosenCat === 'all' ? allSums : { [chosenCat]: allSums[chosenCat] || 0 };
   const sorted = Object.entries(sums).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
   const maxSum = Math.max(...sorted.map(x => x[1]));
   $('breakdown').innerHTML = sorted.length
-    ? sorted.map(([n, v]) => `<div class="legend-row"><i class="dot" aria-hidden="true"></i><div>${esc(n)}<div class="progress" aria-hidden="true"><i style="width:${Math.round(v / maxSum * 100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join('')
+    ? sorted.map(([n, v]) => `<div class="legend-row"><i class="dot" aria-hidden="true"></i><div>${esc(categoryLabel(categoryByKey(n)))}<div class="progress" aria-hidden="true"><i style="width:${Math.round(v / maxSum * 100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join('')
     : '<div class="empty">Нет данных для выбранного периода</div>';
   const buckets = [], now = new Date();
   if (p === 'week') {
@@ -1117,7 +1446,8 @@ $('analysisPeriod').onchange = renderAnalysis;
 $('analysisCategory').onchange = renderAnalysis;
 
 // --- Бюджеты: лимиты расходов на месяц ---
-// Лимиты действуют каждый месяц. Сервер хранит их списком [{category, limit}], category: null — общий лимит.
+// Лимиты действуют каждый месяц. Сервер хранит их списком [{category_id, limit}], category_id: null — общий лимит.
+// budgets.categories — {String(category_id): лимит}, ключи совпадают с catKey
 // Пока на сервере нет /api/budgets (404/405), лимиты хранятся в браузере — только на этом устройстве
 const BUDGET_WARN = 0.8;
 const emptyBudgets = () => ({ total: null, categories: {} });
@@ -1127,13 +1457,15 @@ function budgetsFromList(list) {
   (Array.isArray(list) ? list : []).forEach(x => {
     const limit = round2(x?.limit);
     if (limit <= 0) return;
-    if (x.category) b.categories[x.category] = limit; else b.total = limit;
+    if (x.category_id != null) b.categories[String(x.category_id)] = limit;
+    // Старый формат с названием категории (до своих категорий) не переносим — иначе он стал бы общим лимитом
+    else if (!x.category) b.total = limit;
   });
   return b;
 }
 const budgetsToList = b => [
-  ...(b.total ? [{ category: null, limit: b.total }] : []),
-  ...Object.entries(b.categories).map(([category, limit]) => ({ category, limit })),
+  ...(b.total ? [{ category_id: null, limit: b.total }] : []),
+  ...Object.entries(b.categories).map(([id, limit]) => ({ category_id: Number(id), limit })),
 ];
 const hasBudgets = b => !!b.total || Object.keys(b.categories).length > 0;
 const readLocalBudgets = userId => { try { return JSON.parse(localStorage.getItem(budgetsKey(userId))) || []; } catch (e) { return []; } };
@@ -1210,7 +1542,7 @@ function budgetForecast(key, spent, limit) {
 function budgetRow(b) {
   const pct = budgetPct(b.spent, b.limit);
   return `<div class="card budget-row ${budgetState(b.spent, b.limit)}">
-    <div class="cat-icon" aria-hidden="true">${CATEGORY_ICON[b.name] || '◌'}</div>
+    <div class="cat-icon" aria-hidden="true">${esc(b.icon)}</div>
     <div class="budget-main">
       <div class="budget-line"><h3>${esc(b.name)}</h3><span class="budget-pct">${pct}%</span></div>
       ${budgetBar(b.name, pct)}
@@ -1261,22 +1593,24 @@ function renderBudgets() {
     </div>`;
   }
   // Сначала категории, где лимит ближе всего к исчерпанию
+  // Лимит удалённой категории сервер удаляет сам; до перезагрузки бюджетов такие строки просто не показываем
   $('budgetList').innerHTML = Object.entries(budgets.categories)
-    .map(([name, lim]) => ({ name, limit: lim, spent: spending.byCategory[name] || 0 }))
+    .filter(([id]) => categoryById(Number(id)) !== UNCATEGORIZED)
+    .map(([id, lim]) => ({ ...categoryById(Number(id)), limit: lim, spent: spending.byCategory[id] || 0 }))
     .sort((a, b) => b.spent / b.limit - a.spent / a.limit)
     .map(budgetRow).join('');
   const unlimited = Object.entries(spending.byCategory).filter(([n, v]) => v > 0 && !budgets.categories[n]).sort((a, b) => b[1] - a[1]);
   $('budgetUnlimited').hidden = !unlimited.length || !hasBudgets(budgets);
-  $('budgetUnlimited').textContent = 'Без лимита: ' + unlimited.map(([n, v]) => `${n} — ${money(v)}`).join(', ');
+  $('budgetUnlimited').textContent = 'Без лимита: ' + unlimited.map(([k, v]) => `${categoryByKey(k).name} — ${money(v)}`).join(', ');
 }
 // Предупреждение, если новый чек довёл лимит до 80% или превысил его. receipt — ответ сервера на сохранение
 function budgetAlert(receipt) {
   const rate = baseRate(receipt);
   if (!hasBudgets(budgets) || rate == null) return '';
   const spending = monthSpending(receiptMonth({ iso: receiptIso(receipt) })), added = {};
-  (receipt.items || []).forEach(i => { const c = categoryOf(i); added[c] = (added[c] || 0) + num(i.total_price) * rate; });
-  const checks = Object.entries(budgets.categories).filter(([c]) => added[c])
-    .map(([c, limit]) => ({ name: `«${c}»`, limit, spent: spending.byCategory[c] || 0, added: added[c] }));
+  (receipt.items || []).forEach(i => { const k = catKey(itemCategory(i)); added[k] = (added[k] || 0) + num(i.total_price) * rate; });
+  const checks = Object.entries(budgets.categories).filter(([k]) => added[k])
+    .map(([k, limit]) => ({ name: `«${categoryByKey(k).name}»`, limit, spent: spending.byCategory[k] || 0, added: added[k] }));
   if (budgets.total) checks.push({ name: 'месяца', limit: budgets.total, spent: spending.total, added: num(receipt.total) * rate });
   const rank = { ok: 0, warn: 1, over: 2 };
   const crossed = checks
@@ -1287,11 +1621,12 @@ function budgetAlert(receipt) {
     ? `Бюджет ${crossed.name} превышен на ${money(crossed.spent - crossed.limit)}`
     : `Бюджет ${crossed.name}: потрачено ${budgetPct(crossed.spent, crossed.limit)}%`;
 }
-const budgetField = (name, limit, avg) => `<label class="budget-field"><span><span aria-hidden="true">${CATEGORY_ICON[name] || '◌'}</span> ${esc(name)}</span><input class="field" type="number" min="0" step="any" inputmode="decimal" data-cat="${esc(name)}" value="${limit ? esc(limit) : ''}" placeholder="Без лимита"><small>${avg ? 'в среднем ' + money(avg) + ' в месяц' : 'трат пока не было'}</small></label>`;
+const budgetField = (cat, limit, avg) => `<label class="budget-field"><span><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(cat.name)}</span><input class="field" type="number" min="0" step="any" inputmode="decimal" data-cat="${esc(catKey(cat))}" value="${limit ? esc(limit) : ''}" placeholder="Без лимита"><small>${avg ? 'в среднем ' + money(avg) + ' в месяц' : 'трат пока не было'}</small></label>`;
 function openBudgetEditor() {
   if (!currentUser) return;
-  const avg = averageSpending(3), cats = categoryNames([...allItemCategories(), ...Object.keys(budgets.categories)]);
-  $('budgetFields').innerHTML = cats.map(c => budgetField(c, budgets.categories[c], avg.byCategory[c])).join('');
+  // Лимит — только на категории пользователя: у «Без категории» его нет
+  const avg = averageSpending(3);
+  $('budgetFields').innerHTML = categories.map(c => budgetField(c, budgets.categories[catKey(c)], avg.byCategory[catKey(c)])).join('');
   $('budgetTotalInput').value = budgets.total || '';
   $('budgetEditorTitle').textContent = `Лимиты на месяц, ${currencyInfo(baseCurrency()).symbol}`;
   $('budgetTotalHint').textContent = avg.total ? `В среднем ${money(avg.total)} в месяц. Без общего лимита бюджет — сумма лимитов по категориям` : 'Без общего лимита бюджет — сумма лимитов по категориям';
