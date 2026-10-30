@@ -25,6 +25,7 @@ from app import crud
 from app import auth
 from app import currencies
 from app import rates
+from app.categories import CategoryError, DEFAULT_CATEGORIES, apply_rules
 from app.rate_limit import limiter, get_client_ip
 from app.dates import normalize_date_time, split_date_time
 from app.ocr import init_ocr, analyze_receipt
@@ -91,16 +92,22 @@ RATE_LIMIT_RULES = {
     "/api/analyze": (15, 60),               # защита от перегрузки OCR
     "/api/analyze/async": (15, 60),         # защита от перегрузки OCR
 }
+# Лимиты, которые зависят и от метода (GET того же пути не ограничиваем)
+RATE_LIMIT_METHOD_RULES = {
+    ("POST", "/api/categories"): (30, 60),  # защита от спама категориями
+}
 
 
 @app.middleware("http")
 async def upload_limit_and_headers(request: Request, call_next):
     # Ограничение частоты запросов
-    rule = RATE_LIMIT_RULES.get(request.url.path)
+    rule = RATE_LIMIT_RULES.get(request.url.path) or RATE_LIMIT_METHOD_RULES.get((request.method, request.url.path))
     if rule:
         max_requests, window_seconds = rule
         client_ip = get_client_ip(request)
-        allowed, retry_after = limiter.check_limit(f"{request.url.path}:{client_ip}", max_requests, window_seconds)
+        allowed, retry_after = limiter.check_limit(
+            f"{request.method}:{request.url.path}:{client_ip}", max_requests, window_seconds
+        )
         if not allowed:
             return JSONResponse(
                 status_code=429,
@@ -138,6 +145,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(CategoryError)
+async def category_error_handler(request: Request, exc: CategoryError):
+    """Ошибки из crud по категориям (чужая категория, дубль названия, лимит 50) → {"detail": "текст"}."""
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 # --- OCR: одна модель на процесс, распознавание по одному запросу за раз ---
 
 _ocr_model = None
@@ -154,13 +167,20 @@ def get_ocr():
     return _ocr_model
 
 
-def _run_ocr(image_path: str) -> dict:
+def _categories_for(user: Optional[models.User]) -> List[dict]:
+    """Категории, по которым ML раскладывает товары: свои у пользователя, стандартные у гостя (id = None)."""
+    if user is not None:
+        return [{"id": c.id, "name": c.name, "description": c.description} for c in user.categories]
+    return [{"id": None, "name": d["name"], "description": d["description"]} for d in DEFAULT_CATEGORIES]
+
+
+def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
     """Распознаёт чек. Вызывается из синхронных эндпоинтов, т.е. в пуле потоков, а не в event loop."""
     ocr = get_ocr()
     # PaddleOCR не потокобезопасен — параллельные запросы ждут очереди,
     # но остальные эндпоинты сервера в это время отвечают.
     with _ocr_run_lock:
-        data = analyze_receipt(image_path, ocr=ocr)
+        data = analyze_receipt(image_path, ocr=ocr, categories=categories)
     if not data.get("raw_lines"):
         raise HTTPException(status_code=422, detail="На изображении не удалось найти текст чека")
     data["date"], data["time"] = normalize_date_time(data.get("date"), data.get("time"))
@@ -170,6 +190,17 @@ def _run_ocr(image_path: str) -> dict:
         data["currency_source"] = "default"
     else:
         data["currency_source"] = data.get("currency_source") or "default"
+    for item in data.get("items") or []:
+        for key in ("category_id", "category", "category_source"):
+            item.setdefault(key, None)
+    return data
+
+
+def _analyze(db: Session, image_path: str, user: Optional[models.User]) -> dict:
+    """Распознавание с категориями. Правила пользователя важнее ML и применяются вне блокировки OCR."""
+    data = _run_ocr(image_path, _categories_for(user))
+    if user is not None:
+        apply_rules(db, user.id, data.get("items") or [])
     return data
 
 
@@ -515,11 +546,14 @@ def reset_password(
 # поэтому долгий OCR не блокирует остальные запросы.
 
 @app.post("/api/analyze-test", tags=["OCR"])
-def analyze_test_receipt():
+def analyze_test_receipt(
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
+):
     if not os.path.isfile(TEST_IMAGE_PATH):
         raise HTTPException(status_code=404, detail="Демо-файл images.jpeg не найден")
     try:
-        data = _run_ocr(TEST_IMAGE_PATH)
+        data = _analyze(db, TEST_IMAGE_PATH, current_user)
     except HTTPException:
         raise
     except Exception:
@@ -528,13 +562,17 @@ def analyze_test_receipt():
     return {"success": True, "data": data}
 
 @app.post("/api/analyze", tags=["OCR"])
-def analyze_receipt_endpoint(file: UploadFile = File(...)):
+def analyze_receipt_endpoint(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
+):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Загрузите изображение чека")
 
     file_path, filename = _save_upload(file)
     try:
-        data = _run_ocr(file_path)
+        data = _analyze(db, file_path, current_user)
     except HTTPException:
         _remove_quietly(file_path)
         raise
@@ -549,7 +587,10 @@ def analyze_receipt_endpoint(file: UploadFile = File(...)):
 
 
 @app.post("/api/analyze/async", tags=["OCR"])
-def analyze_receipt_async_endpoint(file: UploadFile = File(...)):
+def analyze_receipt_async_endpoint(
+    file: UploadFile = File(...),
+    current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
+):
     """Асинхронное распознавание чека через очередь фоновых задач.
     Возвращает task_id для периодического опроса статуса через GET /api/tasks/{task_id}."""
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -558,10 +599,17 @@ def analyze_receipt_async_endpoint(file: UploadFile = File(...)):
     file_path, filename = _save_upload(file)
     image_url = f"{RECEIPTS_URL_PREFIX}/{filename}"
     task = task_manager.create_task(file_path=file_path, image_url=image_url)
+    # Сессия запроса закроется раньше, чем задача выполнится: категории берём сейчас,
+    # а правила задача читает в своей сессии
+    categories = _categories_for(current_user)
+    user_id = current_user.id if current_user else None
 
     def _worker_fn(task_id: str) -> dict:
         task_manager.update_task(task_id, step="ocr", progress=40)
-        data = _run_ocr(file_path)
+        data = _run_ocr(file_path, categories)
+        if user_id is not None:
+            with database.SessionLocal() as db:
+                apply_rules(db, user_id, data.get("items") or [])
         data["image_path"] = image_url
         return data
 
@@ -619,7 +667,7 @@ def read_receipts(
     limit: int = Query(100, ge=1, le=500),
     from_date: Optional[str] = Query(None, alias="from", description="Начальная дата (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="Конечная дата (YYYY-MM-DD)"),
-    category: Optional[str] = Query(None, description="Категория чека"),
+    category_id: Optional[int] = Query(None, ge=0, description="Категория позиций чека; 0 — «Без категории»"),
     q: Optional[str] = Query(None, description="Поиск по магазину или товарам"),
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user)
@@ -634,7 +682,7 @@ def read_receipts(
         limit=limit,
         from_date=from_date,
         to_date=to_date,
-        category=category,
+        category_id=category_id,
         q=q,
     )
     return crud.attach_base_rates(db, receipts, current_user.base_currency)
@@ -695,7 +743,7 @@ def delete_receipt(
 _MONTH_REGEX = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
-@app.get("/api/budgets", response_model=List[schemas.BudgetItem], tags=["Budgets"])
+@app.get("/api/budgets", response_model=List[schemas.BudgetOut], tags=["Budgets"])
 def get_budgets(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
@@ -704,7 +752,7 @@ def get_budgets(
     return crud.get_user_budgets(db, user_id=current_user.id)
 
 
-@app.put("/api/budgets", response_model=List[schemas.BudgetItem], tags=["Budgets"])
+@app.put("/api/budgets", response_model=List[schemas.BudgetOut], tags=["Budgets"])
 def set_budgets(
     data: schemas.BudgetListUpdate,
     db: Session = Depends(database.get_db),
@@ -728,6 +776,105 @@ def get_budgets_status(
         if not _MONTH_REGEX.match(target_month):
             raise HTTPException(status_code=422, detail="Параметр month: укажите месяц в формате ГГГГ-ММ")
     return crud.get_budget_status(db, user_id=current_user.id, month=target_month, base_currency=current_user.base_currency)
+
+
+# --- Категории и перенос позиций (только для авторизованных, кроме стандартного списка) ---
+
+def _own_category(db: Session, user: models.User, category_id: int) -> models.Category:
+    category = crud.get_user_category(db, user.id, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Категория не найдена")
+    return category
+
+
+@app.get("/api/categories", response_model=List[schemas.CategoryOut], tags=["Categories"])
+def list_categories(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Категории пользователя в порядке position."""
+    return crud.get_categories(db, current_user.id)
+
+
+@app.get("/api/categories/defaults", response_model=List[schemas.CategoryDefaultOut], tags=["Categories"])
+def list_default_categories():
+    """Стандартные категории — для гостя (без авторизации)."""
+    return DEFAULT_CATEGORIES
+
+
+@app.post("/api/categories", response_model=schemas.CategoryOut, status_code=201, tags=["Categories"])
+def create_category(
+    data: schemas.CategoryCreate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Новая категория в конце списка. Повтор названия без учёта регистра — 409."""
+    return crud.create_category(db, current_user.id, data)
+
+
+@app.put("/api/categories/order", response_model=List[schemas.CategoryOut], tags=["Categories"])
+def reorder_categories(
+    data: schemas.CategoryOrder,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Новый порядок: все id пользователя, каждый один раз."""
+    return crud.reorder_categories(db, current_user.id, data.ids)
+
+
+@app.patch("/api/categories/{category_id}", response_model=schemas.CategoryOut, tags=["Categories"])
+def update_category(
+    category_id: int,
+    data: schemas.CategoryUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Переименование, иконка, описание — любой, в том числе стандартной категории."""
+    category = _own_category(db, current_user, category_id)
+    return crud.update_category(db, category, data)
+
+
+@app.delete("/api/categories/{category_id}", response_model=schemas.CategoryDeleteOut, tags=["Categories"])
+def delete_category(
+    category_id: int,
+    move_to: Optional[int] = Query(None, description="Куда перенести позиции, чеки и правила"),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Удаление категории. Без move_to позиции остаются без категории. Лимит бюджета удаляется всегда."""
+    category = _own_category(db, current_user, category_id)
+    return crud.delete_category(db, current_user.id, category, move_to)
+
+
+@app.post("/api/items/move", response_model=schemas.ItemsMoveOut, tags=["Categories"])
+def move_items(
+    data: schemas.ItemsMove,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Перенос позиций в категорию (null — «Без категории»); remember — запомнить правило."""
+    return crud.move_items(db, current_user.id, data.item_ids, data.category_id, data.remember)
+
+
+@app.get("/api/category-rules", response_model=List[schemas.CategoryRuleOut], tags=["Categories"])
+def list_category_rules(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Запомненные правила «товар → категория»."""
+    return crud.get_rules(db, current_user.id)
+
+
+@app.delete("/api/category-rules/{rule_id}", tags=["Categories"])
+def delete_category_rule(
+    rule_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Удаление своего правила (чужое — 404)."""
+    if not crud.delete_rule(db, current_user.id, rule_id):
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+    return {"success": True}
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # CheckAI — руководство бэкенд-разработчика
 
 Как устроен сервер, как его запустить, где что лежит и по каким правилам писать код.
-Короткая шпаргалка по запуску для всех ролей — в [TEAM_GUIDE.md](TEAM_GUIDE.md), контракт API для фронта — в [README.md](README.md#спецификация-api), задачи — в [ROADMAP.md](ROADMAP.md).
+Как запускать проект под каждую роль — в [README.md](README.md#установка-и-запуск), контракт API для фронта — в [README.md](README.md#спецификация-api), задачи — в [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -134,7 +134,8 @@ server.py — FastAPI
 | [server.py](server.py) | Приложение FastAPI: middleware, все маршруты, сохранение загрузок, проверка пути к фото, очистка фото, блокировка OCR |
 | [app/config.py](app/config.py) | Настройки из окружения (раздел 2) |
 | [app/database.py](app/database.py) | Engine и сессии SQLAlchemy, `get_db()`, `init_db()` с Alembic. Для SQLite включает внешние ключи и подменяет `lower()` на версию, понимающую кириллицу (иначе `ilike` не найдёт «магнум» в «Магнум») |
-| [app/models.py](app/models.py) | Таблицы: `User`, `Receipt`, `ReceiptItem`, `Budget` |
+| [app/models.py](app/models.py) | Таблицы: `User`, `Category`, `CategoryRule`, `Receipt`, `ReceiptItem`, `Budget`, `ExchangeRate` |
+| [app/categories.py](app/categories.py) | Стандартные категории (`DEFAULT_CATEGORIES` — единственный источник), `normalize_item_name` для правил, категория чека (`main_category_id`), поиск категории позиции (`resolve_category_id`), применение правил к распознанному чеку (`apply_rules`), `CategoryError` |
 | [app/schemas.py](app/schemas.py) | Pydantic-схемы запросов и ответов, проверка email, пароля, лимитов, нормализация дат |
 | [app/crud.py](app/crud.py) | Пользователи, чеки (фильтры, поиск, пагинация), аналитика, бюджеты |
 | [app/auth.py](app/auth.py) | bcrypt, выпуск и проверка JWT, зависимость `get_current_user` |
@@ -157,18 +158,25 @@ server.py — FastAPI
 
 ```
 users ──< receipts ──< receipt_items
-  │
-  └──< budgets
+  │          │              │
+  │          └──────┬───────┘ category_id (SET NULL)
+  ├──< categories <─┤
+  │                 ├── budgets.category_id (CASCADE)
+  │                 └── category_rules.category_id (CASCADE)
+  ├──< budgets
+  └──< category_rules
 
 exchange_rates (курсы валют к тенге на даты покупок)
 ```
 
 | Таблица | Поля | Заметки |
 |---|---|---|
-| `users` | `id`, `email`, `hashed_password`, `full_name`, `base_currency`, `created_at` | `base_currency` — основная валюта для аналитики и бюджетов (по умолчанию `KZT`). Удаление пользователя каскадно удаляет его чеки и бюджеты |
-| `receipts` | `id`, `user_id`, `store`, `date`, `time`, `category`, `total`, `currency`, `rate_to_kzt`, `image_path`, `created_at` | `currency` — валюта чека (ISO 4217, `KZT`), `rate_to_kzt` — курс к тенге на дату чека |
-| `receipt_items` | `id`, `receipt_id`, `name`, `quantity`, `price_per_unit`, `total_price`, `category` | Суммы в валюте чека. При редактировании чека позиции заменяются целиком |
-| `budgets` | `id`, `user_id`, `category`, `limit`, `created_at`, `updated_at` | Лимиты задаются в основной валюте пользователя. `category = NULL` — общий лимит на месяц |
+| `users` | `id`, `email`, `hashed_password`, `full_name`, `base_currency`, `created_at` | `base_currency` — основная валюта для аналитики и бюджетов (по умолчанию `KZT`). Удаление пользователя каскадно удаляет его чеки, бюджеты, категории и правила |
+| `categories` | `id`, `user_id`, `name`, `description`, `icon`, `position`, `created_at` | Свой набор у каждого пользователя; при регистрации — 8 стандартных. `name` уникально у пользователя без учёта регистра (проверяет `crud`, индекса нет). По `description` ML раскладывает товары |
+| `category_rules` | `id`, `user_id`, `pattern`, `category_id`, `created_at` | «Товар → категория»: `pattern` — `normalize_item_name(название)`, уникальный индекс `(user_id, pattern)`. При распознавании правило важнее ML |
+| `receipts` | `id`, `user_id`, `store`, `date`, `time`, `category_id`, `total`, `currency`, `rate_to_kzt`, `image_path`, `created_at` | `currency` — валюта чека (ISO 4217, `KZT`), `rate_to_kzt` — курс к тенге на дату чека. `category_id` вычисляет сервер (ниже) |
+| `receipt_items` | `id`, `receipt_id`, `name`, `quantity`, `price_per_unit`, `total_price`, `category_id` | Суммы в валюте чека. При редактировании чека позиции заменяются целиком и получают новые `id` |
+| `budgets` | `id`, `user_id`, `category_id`, `limit`, `created_at`, `updated_at` | Лимиты задаются в основной валюте пользователя. `category_id = NULL` — общий лимит на месяц. Лимит удаляется вместе с категорией |
 | `exchange_rates` | `id`, `date`, `currency`, `rate_to_kzt`, `fetched_at` | Официальные курсы Нацбанка РК. Уникальный индекс `(date, currency)` |
 
 Форматы, которые нельзя нарушать:
@@ -176,7 +184,8 @@ exchange_rates (курсы валют к тенге на даты покупок
 - **`receipts.date`** — строка `YYYY-MM-DD` или `NULL`. **`receipts.time`** — `HH:MM` или `NULL`. Строки в таком виде правильно сортируются и сравниваются прямо в SQL (фильтры `from`/`to`, месяц в бюджетах через `substr(date, 1, 7)`). Любую входящую дату прогоняйте через `app.dates.normalize_date_time` — схемы `ReceiptCreate`/`ReceiptUpdate` уже делают это.
 - **`created_at`** — UTC без часового пояса (`models.utcnow()`). Фронт сам добавляет `Z` при показе.
 - **`image_path`** — URL вида `/data/receipts/<32 hex>.<ext>`. Файл на диске называется `<32 hex>.<ext>`. Путь от клиента всегда проверяется `_resolve_image_path` — иначе можно сослаться на чужой или несуществующий файл. Старый формат `/data/receipts/<uuid>_<имя>.jpg` поддерживается только для уже сохранённых чеков.
-- **Категории** — список фронта: `Продукты, Одежда, Дом и быт, Транспорт, Кафе, Здоровье, Развлечения, Другое`. Сервер список не проверяет и принимает любую строку до 100 символов.
+- **Категории** — только ссылкой `category_id`, названия в чеках, позициях и бюджетах не хранятся: переименование сразу видно везде. В ответах название отдаёт свойство `category` модели (через `category_rel`), поэтому запросы, которые читают категории многих позиций, делайте с `joinedload(...category_rel)`. «Без категории» — `NULL`, а не запись; в аналитике — ключ `"Без категории"`. Категорию из запроса всегда проверяйте на владельца (`resolve_category_id` / `get_user_category`): чужая — `422` в теле, `404` в пути URL. Ошибки бизнес-правил категорий `crud` бросает как `CategoryError(код, текст)`, обработчик в `server.py` превращает их в `{"detail": "текст"}`.
+- **Категорию чека вычисляет сервер**: категория самой дорогой позиции, при равенстве — первой (`main_category_id`); у чека без позиций — присланный `category_id`. Пересчитывается при сохранении, редактировании и переносе позиций. Клиент её не задаёт.
 - **Валюты и деньги** — `Float`. Суммы и цены позиций хранятся в валюте чека. Все сводки (история, категории, аналитика, бюджеты) сервер пересчитывает в `base_currency` пользователя через `rate_to_base`. **При чтении (`GET`) в сеть за курсами не ходим никогда** (`fetch=False`), запрос к Нацбанку — только при сохранении и редактировании чека. Чеки без курса не суммируются, а группируются в `unconverted`.
 
 ---
@@ -241,16 +250,25 @@ POST /api/analyze (фото)
 | `GET /api/tasks/{task_id}` | | Статус задачи распознавания |
 | `POST /api/analyze-test` | | Распознать демо-чек |
 | `POST /api/receipts/save` | 🔒 | Сохранить чек |
-| `GET /api/receipts` | 🔒 | Свои чеки: `skip`, `limit` (≤ 500), `from`, `to` (`YYYY-MM-DD`), `category`, `q` |
+| `GET /api/receipts` | 🔒 | Свои чеки: `skip`, `limit` (≤ 500), `from`, `to` (`YYYY-MM-DD`), `category_id` (`0` — без категории), `q` |
 | `GET /api/receipts/{id}` | 🔒 | Один свой чек |
 | `PUT /api/receipts/{id}` | 🔒 | Заменить данные чека, позиции целиком |
 | `DELETE /api/receipts/{id}` | 🔒 | Удалить чек и его фото (если на фото больше никто не ссылается) |
 | `GET /api/analytics` | 🔒 | Сводка расходов: по категориям, магазинам, месяцам |
-| `GET /api/budgets` | 🔒 | Лимиты: `[{category, limit}]`, без лимитов `[]` |
-| `PUT /api/budgets` | 🔒 | Заменить все лимиты: `{"budgets": [...]}` |
+| `GET /api/budgets` | 🔒 | Лимиты: `[{category_id, category, limit}]`, без лимитов `[]` |
+| `PUT /api/budgets` | 🔒 | Заменить все лимиты: `{"budgets": [{category_id, limit}]}` |
 | `GET /api/budgets/status?month=YYYY-MM` | 🔒 | Потрачено по лимитам за месяц |
+| `GET /api/categories` | 🔒 | Свои категории по `position` |
+| `GET /api/categories/defaults` | | Стандартные категории — для гостя |
+| `POST /api/categories` | 🔒 | Создать категорию (`409` — дубль названия) |
+| `PATCH /api/categories/{id}` | 🔒 | Изменить название, иконку, описание |
+| `DELETE /api/categories/{id}?move_to=` | 🔒 | Удалить, позиции перенести в `move_to` или оставить без категории; лимит удаляется |
+| `PUT /api/categories/order` | 🔒 | Новый порядок: все id, каждый один раз |
+| `POST /api/items/move` | 🔒 | Перенести позиции в категорию, `remember` — запомнить правило |
+| `GET /api/category-rules` | 🔒 | Запомненные правила |
+| `DELETE /api/category-rules/{id}` | 🔒 | Удалить правило |
 
-Лимиты частоты запросов (на IP, в памяти процесса, `RATE_LIMIT_RULES` в [server.py](server.py)): вход и регистрация — 10 в минуту, сброс пароля — 5 в минуту, распознавание — 15 в минуту. При превышении — `429` с заголовком `Retry-After`. При запуске нескольких воркеров uvicorn у каждого свой счётчик.
+Лимиты частоты запросов (на IP, в памяти процесса, `RATE_LIMIT_RULES` в [server.py](server.py)): вход и регистрация — 10 в минуту, сброс пароля — 5 в минуту, распознавание — 15 в минуту, создание категорий — 30 в минуту (`RATE_LIMIT_METHOD_RULES`: лимит только на `POST`, `GET` того же пути не ограничен). При превышении — `429` с заголовком `Retry-After`. При запуске нескольких воркеров uvicorn у каждого свой счётчик.
 
 ---
 
@@ -331,7 +349,8 @@ alembic revision --autogenerate -m "заметка к чеку" --rev-id 0004_re
 
 - `revision` — порядковый номер и короткое имя: `0004_receipt_note`. `down_revision` — предыдущая миграция.
 - Миграция должна переживать повторный запуск на базе, где изменение уже есть: перед `add_column`/`create_table`/`create_index` проверяйте через `sa.inspect(bind)` (пример — [0003_budgets.py](migrations/versions/0003_budgets.py)).
-- SQLite почти не умеет `ALTER TABLE`: для изменения и удаления колонок используйте `with op.batch_alter_table(...)` (batch-режим для SQLite уже включён в `migrations/env.py`).
+- SQLite почти не умеет `ALTER TABLE`: для изменения и удаления колонок используйте `with op.batch_alter_table(...)` (batch-режим для SQLite уже включён в `migrations/env.py`). Batch пересоздаёт таблицу через `DROP` старой, поэтому `env.py` на время миграций выключает в SQLite внешние ключи — иначе `DROP receipts` упал бы из-за ссылок `receipt_items` или каскадно удалил строки.
+- Тест миграции на отдельной базе: передайте соединение через `cfg.attributes["connection"]` (пример — `TestCategoriesMigration` в [tests/test_categories.py](tests/test_categories.py)).
 - Если меняется формат существующих данных — переводите и старые строки в той же миграции (пример — даты в [0002_item_category_iso_dates.py](migrations/versions/0002_item_category_iso_dates.py)).
 - Пишите `downgrade()`.
 
@@ -369,7 +388,7 @@ DATABASE_URL=sqlite:///data/test.db UPLOADS_DIR=data/test_receipts python -m uni
 
 - Задайте `SECRET_KEY` и другие переменные **до** `from server import app` — настройки читаются при импорте.
 - `TestClient(app)` без `with` не запускает фоновую очистку фото — так и нужно в тестах.
-- Пользователей создавайте прямо через `models.User` и `auth.issue_tokens(user)`, как в [tests/test_budgets.py](tests/test_budgets.py) — быстрее, чем регистрация через API.
+- Пользователей создавайте прямо через `models.User` и `auth.issue_tokens(user)`, как в [tests/test_budgets.py](tests/test_budgets.py) — быстрее, чем регистрация через API. Такой пользователь создаётся без категорий: если они нужны, вызовите `create_default_categories(db, user)` до `commit`.
 - На каждый эндпоинт: успешный сценарий, `401` без токена, изоляция пользователей (пользователь B получает `404` на объекты A), ошибки валидации (`422`).
 - OCR в тестах не запускайте — это долго. Если нужно проверить сохранение распознанного чека, отправляйте готовый JSON в `/api/receipts/save`.
 
@@ -414,8 +433,8 @@ docker compose down                  # остановить
 - **`401` = сессия истекла.** Получив `401`, фронт один раз пробует `POST /api/auth/refresh` и повторяет запрос, при неудаче — переходит в гостевой режим. Не отвечайте `401` на ошибки, не связанные с токеном.
 - **`404`/`405` = «сервер этого ещё не умеет».** По этим кодам фронт включает запасное поведение (например, бюджеты в `localStorage`). Новые эндпоинты коллекций должны отвечать `200` и `[]`, а не `404`, когда данных нет.
 - **История грузится целиком** порциями по 200 (`GET /api/receipts?skip=&limit=200`) — аналитику, категории и бюджеты фронт считает сам по этим данным. Не уменьшайте максимальный `limit` ниже 200.
-- **Поля чека**, которые читает фронт: `id, store, date, time, category, total, image_path, created_at, items[{name, quantity, price_per_unit, total_price, category}]`. Переименование любого из них ломает интерфейс.
-- Эндпоинты, которые фронт вызывает: `/api/auth/register|login|refresh|me`, `/api/analyze`, `/api/analyze-test`, `/api/receipts…`, `/api/budgets`. Остальные (`/api/analytics`, `/api/budgets/status`, `/api/analyze/async`, сброс пароля, `/api/health`) фронт пока не использует.
+- **Поля чека**, которые читает фронт: `id, store, date, time, category_id, category, total, image_path, created_at, items[{id, name, quantity, price_per_unit, total_price, category_id, category}]`. Переименование любого из них ломает интерфейс.
+- Эндпоинты, которые фронт вызывает: `/api/auth/register|login|refresh|me`, `/api/analyze`, `/api/analyze-test`, `/api/receipts…`, `/api/budgets`, `/api/categories…`, `/api/items/move`, `/api/category-rules`. Остальные (`/api/analytics`, `/api/budgets/status`, `/api/analyze/async`, сброс пароля, `/api/health`) фронт пока не использует.
 
 ---
 
@@ -433,7 +452,7 @@ docker compose down                  # остановить
 | `/api/budgets/status` считает иначе, чем фронт: не учитывает чеки без даты (фронт относит их к месяцу сохранения), месяц по умолчанию берёт по UTC | `get_budget_status` в [app/crud.py](app/crud.py) | Открыто |
 | `/api/analyze-test` не ограничен по частоте, хотя запускает OCR | `RATE_LIMIT_RULES` в [server.py](server.py) | Открыто |
 | Задачи очереди старше часа удаляются, даже если ещё не выполнены | `cleanup_old_tasks` в [app/tasks.py](app/tasks.py) | Открыто |
-| В git лежат личные фото чеков в `data/receipts/` и `images_result.json` | — | Открыто |
+| Личные фото чеков из `data/receipts/` и `images_result.json` удалены из репозитория, но остаются в истории git | — | Открыто |
 | В README указан Python 3.10 и сказано, что без Ollama распознавание не работает — устарело | [README.md](README.md) | Открыто |
 
 ---
