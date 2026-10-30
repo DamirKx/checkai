@@ -3,7 +3,7 @@ import sys
 import json
 import tempfile
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # КРИТИЧНО: Отключаем багнутые фичи PaddlePaddle 3.x ДО импорта PaddleOCR
 os.environ['FLAGS_enable_pir_api'] = '0'
@@ -94,11 +94,16 @@ def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
 logger = logging.getLogger("checkai.ocr")
 
 
-def analyze_receipt(image_input, ocr: PaddleOCR = None) -> Dict[str, Any]:
+def analyze_receipt(
+    image_input, ocr: PaddleOCR = None, categories: Optional[List[dict]] = None
+) -> Dict[str, Any]:
     """Полный цикл: изображение → структурированный словарь.
-    
+
     Если Ollama/Qwen доступна — используется нейросетевой анализ.
     Если Ollama отключена или не отвечает — срабатывает мгновенный алгоритмический парсер app.parser.
+
+    categories — категории пользователя (или стандартные у гостя), по которым раскладываются товары.
+    Раскладку (categorize_items) подключает ML в своей ветке; до этого аргумент не используется.
     """
     if ocr is None:
         ocr = init_ocr()

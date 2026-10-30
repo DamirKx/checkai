@@ -4,6 +4,9 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.dates import normalize_date_time
 from app.currencies import normalize_currency, DEFAULT_CURRENCY
+from app.categories import (
+    DEFAULT_ICON, DESCRIPTION_MAX_LENGTH, ICON_MAX_LENGTH, NAME_MAX_LENGTH, UNCATEGORIZED_NAME,
+)
 
 import re
 
@@ -20,14 +23,26 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_BYTES = 72
 
 
-class ItemSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class ItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=500)
     quantity: Optional[float] = 1.0
     price_per_unit: Optional[float] = 0.0
     total_price: Optional[float] = 0.0
+    category_id: Optional[int] = None
+    # Название — если category_id нет (гость распознал чек, вошёл и сохраняет)
     category: Optional[str] = Field(default=None, max_length=100)
+
+
+class ItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    quantity: Optional[float] = 1.0
+    price_per_unit: Optional[float] = 0.0
+    total_price: Optional[float] = 0.0
+    category_id: Optional[int] = None
+    category: Optional[str] = None
 
 
 class ReceiptCreate(BaseModel):
@@ -35,12 +50,13 @@ class ReceiptCreate(BaseModel):
     # Принимается в любом распознаваемом виде, сохраняется как YYYY-MM-DD
     date: Optional[str] = None
     time: Optional[str] = None
-    category: Optional[str] = Field(default="Продукты", max_length=100)
+    # Учитывается только у чека без позиций: иначе категорию вычисляет сервер
+    category_id: Optional[int] = None
     total: Optional[float] = 0.0
     currency: str = DEFAULT_CURRENCY
     # Путь, который вернул /api/analyze, например /data/receipts/<uuid>.jpg
     image_path: Optional[str] = Field(default=None, max_length=500)
-    items: List[ItemSchema] = []
+    items: List[ItemIn] = []
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -57,11 +73,11 @@ class ReceiptUpdate(BaseModel):
     store: Optional[str] = Field(default=None, max_length=255)
     date: Optional[str] = None
     time: Optional[str] = None
-    category: Optional[str] = Field(default="Продукты", max_length=100)
+    category_id: Optional[int] = None
     total: Optional[float] = 0.0
     # None — оставить текущую валюту чека (клиент, который не знает о валютах, её не сбросит)
     currency: Optional[str] = None
-    items: List[ItemSchema] = []
+    items: List[ItemIn] = []
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -84,7 +100,8 @@ class ReceiptOut(BaseModel):
     store: Optional[str]
     date: Optional[str]
     time: Optional[str]
-    category: Optional[str]
+    category_id: Optional[int] = None
+    category: Optional[str] = None
     total: Optional[float]
     currency: str = DEFAULT_CURRENCY
     rate_to_kzt: Optional[float] = None
@@ -92,7 +109,7 @@ class ReceiptOut(BaseModel):
     rate_to_base: Optional[float] = None
     image_path: Optional[str] = None
     created_at: datetime
-    items: List[ItemSchema] = []
+    items: List[ItemOut] = []
 
 
 class UserCreate(BaseModel):
@@ -243,20 +260,17 @@ class TaskStatusOut(BaseModel):
 
 
 class BudgetItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    category: Optional[str] = Field(default=None, max_length=100)
+    # None — общий лимит на месяц
+    category_id: Optional[int] = None
     limit: float
 
-    @field_validator("category", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _clean_category(cls, v: Any) -> Optional[str]:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            cleaned = v.strip()
-            return cleaned if cleaned else None
-        return v
+    def _reject_category_name(cls, data: Any) -> Any:
+        # Иначе лимит старого формата {"category": "Кафе"} молча стал бы общим
+        if isinstance(data, dict) and "category" in data and "category_id" not in data:
+            raise ValueError("Лимит задаётся по category_id, а не по названию категории")
+        return data
 
     @field_validator("limit")
     @classmethod
@@ -279,17 +293,24 @@ class BudgetListUpdate(BaseModel):
 
         seen_categories = set()
         for item in items:
-            cat_key = item.category.lower() if item.category is not None else None
-            if cat_key in seen_categories:
-                if cat_key is None:
+            if item.category_id in seen_categories:
+                if item.category_id is None:
                     raise ValueError("Общий лимит (без категории) указан несколько раз")
-                else:
-                    raise ValueError(f"Категория «{item.category}» указана несколько раз")
-            seen_categories.add(cat_key)
+                raise ValueError("Лимит для одной категории указан несколько раз")
+            seen_categories.add(item.category_id)
         return items
 
 
+class BudgetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    category_id: Optional[int] = None
+    category: Optional[str] = None
+    limit: float
+
+
 class BudgetStatusItem(BaseModel):
+    category_id: Optional[int] = None
     category: Optional[str] = None
     limit: float
     spent: float
@@ -313,5 +334,93 @@ class CurrencyOut(BaseModel):
     symbol: str
     name: str
     digits: int
+
+
+# --- Категории (ограничения — CATEGORIES_TASKS.md, п. 0.4) ---
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: Optional[str] = None
+    icon: str
+    position: int
+
+
+class CategoryDefaultOut(BaseModel):
+    name: str
+    description: Optional[str] = None
+    icon: str
+
+
+class CategoryUpdate(BaseModel):
+    """Все поля необязательные: меняется только то, что пришло в запросе (model_fields_set)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: Any) -> str:
+        name = str(v or "").strip()
+        if not 1 <= len(name) <= NAME_MAX_LENGTH:
+            raise ValueError(f"Название категории: от 1 до {NAME_MAX_LENGTH} символов")
+        if name.lower() == UNCATEGORIZED_NAME.lower():
+            raise ValueError("Это название зарезервировано")
+        return name
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _validate_description(cls, v: Any) -> Optional[str]:
+        description = str(v).strip() if v is not None else ""
+        if len(description) > DESCRIPTION_MAX_LENGTH:
+            raise ValueError(f"Описание категории: не больше {DESCRIPTION_MAX_LENGTH} символов")
+        return description or None
+
+    @field_validator("icon", mode="before")
+    @classmethod
+    def _validate_icon(cls, v: Any) -> str:
+        # Один эмодзи может занимать несколько символов (флаги, цвет кожи)
+        icon = str(v).strip() if v is not None else ""
+        if len(icon) > ICON_MAX_LENGTH:
+            raise ValueError(f"Иконка: не больше {ICON_MAX_LENGTH} символов")
+        return icon or DEFAULT_ICON
+
+
+class CategoryCreate(CategoryUpdate):
+    name: str
+
+
+class CategoryOrder(BaseModel):
+    ids: List[int]
+
+
+class ItemsMove(BaseModel):
+    item_ids: List[int] = Field(min_length=1, max_length=500)
+    # None — «Без категории»
+    category_id: Optional[int] = None
+    remember: bool = False
+
+
+class ItemsMoveOut(BaseModel):
+    moved: int
+    rules_created: int
+
+
+class CategoryDeleteOut(BaseModel):
+    success: bool = True
+    moved_items: int
+    deleted_budget: bool
+
+
+class CategoryRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    pattern: str
+    category_id: int
+    category: str
+    created_at: datetime
 
 

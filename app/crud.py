@@ -2,10 +2,15 @@ import time
 from datetime import date, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app import models
 from app import schemas
 from app import rates
+from app.categories import (
+    CategoryError, DEFAULT_ICON, MAX_CATEGORIES, UNCATEGORIZED_NAME,
+    create_default_categories, find_category_by_name, get_user_category,
+    main_category_id, normalize_item_name, resolve_category_id,
+)
 from app.currencies import DEFAULT_CURRENCY
 
 # Все операции с чеками требуют user_id: анонимы с историей не работают
@@ -35,6 +40,7 @@ def create_user(
         full_name=full_name.strip() if full_name else None,
         base_currency=base_currency or DEFAULT_CURRENCY,
     )
+    create_default_categories(db, user)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -126,12 +132,39 @@ def attach_base_rates(
     return receipt_list[0] if is_single else receipt_list
 
 
+def _build_items(db: Session, user_id: int, items: List[schemas.ItemIn]) -> List[models.ReceiptItem]:
+    """Позиции чека с category_id пользователя. Чужой category_id — CategoryError(422)."""
+    return [
+        models.ReceiptItem(
+            name=item_data.name,
+            quantity=item_data.quantity or 1.0,
+            price_per_unit=item_data.price_per_unit or 0.0,
+            total_price=item_data.total_price or 0.0,
+            category_id=resolve_category_id(db, user_id, item_data.category_id, item_data.category),
+        )
+        for item_data in items
+    ]
+
+
+def _receipt_category_id(
+    db: Session, user_id: int, items: List[models.ReceiptItem], requested_id: Optional[int]
+) -> Optional[int]:
+    """Категорию чека вычисляет сервер; присланная клиентом учитывается только у чека без позиций."""
+    if items:
+        return main_category_id(items)
+    return resolve_category_id(db, user_id, requested_id, None)
+
+
 def create_receipt(
     db: Session,
     data: schemas.ReceiptCreate,
     user_id: int,
     image_path: Optional[str] = None,
 ) -> models.Receipt:
+    # Категории проверяем до запроса курса: на чужой категории незачем ждать Нацбанк
+    items = _build_items(db, user_id, data.items)
+    category_id = _receipt_category_id(db, user_id, items, data.category_id)
+
     cur = data.currency or DEFAULT_CURRENCY
     rate = _resolve_rate(db, cur, data.date)
 
@@ -140,22 +173,13 @@ def create_receipt(
         store=data.store,
         date=data.date,  # уже YYYY-MM-DD (см. ReceiptCreate)
         time=data.time,
-        category=data.category or "Продукты",
+        category_id=category_id,
         total=data.total or 0.0,
         currency=cur,
         rate_to_kzt=rate,
         image_path=image_path,
     )
-    receipt.items = [
-        models.ReceiptItem(
-            name=item_data.name,
-            quantity=item_data.quantity or 1.0,
-            price_per_unit=item_data.price_per_unit or 0.0,
-            total_price=item_data.total_price or 0.0,
-            category=item_data.category,
-        )
-        for item_data in data.items
-    ]
+    receipt.items = items
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
@@ -184,22 +208,32 @@ def get_all_receipts(
     limit: int = 100,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
-    category: Optional[str] = None,
+    category_id: Optional[int] = None,
     q: Optional[str] = None,
 ) -> List[models.Receipt]:
-    query = db.query(models.Receipt).filter(models.Receipt.user_id == user_id)
+    query = (
+        db.query(models.Receipt)
+        .options(
+            joinedload(models.Receipt.category_rel),
+            selectinload(models.Receipt.items).joinedload(models.ReceiptItem.category_rel),
+        )
+        .filter(models.Receipt.user_id == user_id)
+    )
 
     if from_date:
         query = query.filter(models.Receipt.date >= from_date)
     if to_date:
         query = query.filter(models.Receipt.date <= to_date)
-    if category and category.strip():
-        # Категория чека или любой его позиции (как в аналитике)
-        cat = _escape_like(category.strip())
-        query = query.filter(
-            models.Receipt.category.ilike(cat, escape="\\") |
-            models.Receipt.items.any(models.ReceiptItem.category.ilike(cat, escape="\\"))
+    if category_id is not None:
+        # Категория любой позиции чека, а у чека без позиций — его собственная (как в аналитике).
+        # 0 — «Без категории»
+        target = None if category_id == 0 else category_id
+        has_item = models.Receipt.items.any(
+            models.ReceiptItem.category_id.is_(None) if target is None
+            else models.ReceiptItem.category_id == target
         )
+        own = models.Receipt.category_id.is_(None) if target is None else models.Receipt.category_id == target
+        query = query.filter(has_item | (~models.Receipt.items.any() & own))
     if q and q.strip():
         term = f"%{_escape_like(q.strip())}%"
         query = query.filter(
@@ -227,6 +261,9 @@ def update_receipt(
     receipt: models.Receipt,
     data: schemas.ReceiptUpdate,
 ) -> models.Receipt:
+    items = _build_items(db, receipt.user_id, data.items)
+    category_id = _receipt_category_id(db, receipt.user_id, items, data.category_id)
+
     # Без currency в запросе валюта чека не меняется
     cur = data.currency or receipt.currency or DEFAULT_CURRENCY
     # Курс берётся заново, если изменились валюта или дата или его не удалось получить раньше
@@ -238,19 +275,10 @@ def update_receipt(
     receipt.store = data.store
     receipt.date = data.date
     receipt.time = data.time
-    receipt.category = data.category or "Продукты"
+    receipt.category_id = category_id
     receipt.total = data.total or 0.0
-
-    receipt.items = [
-        models.ReceiptItem(
-            name=item_data.name,
-            quantity=item_data.quantity or 1.0,
-            price_per_unit=item_data.price_per_unit or 0.0,
-            total_price=item_data.total_price or 0.0,
-            category=item_data.category,
-        )
-        for item_data in data.items
-    ]
+    # Позиции пересоздаются и получают новые id — фронт после редактирования перечитывает чеки
+    receipt.items = items
     db.commit()
     db.refresh(receipt)
     if rate_changed:
@@ -295,7 +323,10 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
 
     receipts = (
         db.query(models.Receipt)
-        .options(joinedload(models.Receipt.items))
+        .options(
+            joinedload(models.Receipt.category_rel),
+            selectinload(models.Receipt.items).joinedload(models.ReceiptItem.category_rel),
+        )
         .filter(models.Receipt.user_id == user_id)
         .order_by(*_receipts_order())
         .all()
@@ -345,10 +376,10 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
 
         if r.items:
             for item in r.items:
-                cat = item.category or r.category or "Прочее"
+                cat = item.category or UNCATEGORIZED_NAME
                 by_category[cat] = by_category.get(cat, 0.0) + (item.total_price or 0.0) * rate
         else:
-            cat = r.category or "Прочее"
+            cat = r.category or UNCATEGORIZED_NAME
             by_category[cat] = by_category.get(cat, 0.0) + rec_total
 
     top_store = max(by_store, key=by_store.get) if by_store else None
@@ -392,32 +423,30 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
 
 # --- Операции с бюджетами ---
 
-def _budgets_order():
-    # Общий бюджет (category is None) выводим первым, затем остальные по алфавиту
-    return (
-        models.Budget.category.isnot(None),
-        models.Budget.category.asc(),
-    )
-
-
 def get_user_budgets(db: Session, user_id: int) -> List[models.Budget]:
-    """Возвращает все лимиты пользователя, отсортированные: общий лимит первым, затем по алфавиту."""
+    """Лимиты пользователя: общий первым, затем в порядке категорий (position)."""
     return (
         db.query(models.Budget)
+        .outerjoin(models.Category, models.Budget.category_id == models.Category.id)
+        .options(joinedload(models.Budget.category_rel))
         .filter(models.Budget.user_id == user_id)
-        .order_by(*_budgets_order())
+        .order_by(models.Budget.category_id.isnot(None), models.Category.position, models.Budget.id)
         .all()
     )
 
 
 def set_user_budgets(db: Session, user_id: int, budgets_data: List[schemas.BudgetItem]) -> List[models.Budget]:
-    """Заменяет весь список лимитов пользователя в одной транзакции."""
+    """Заменяет весь список лимитов пользователя в одной транзакции. Чужая категория — CategoryError(422)."""
+    for item in budgets_data:
+        if item.category_id is not None and get_user_category(db, user_id, item.category_id) is None:
+            raise CategoryError(422, "Категория не найдена")
+
     db.query(models.Budget).filter(models.Budget.user_id == user_id).delete(synchronize_session=False)
 
     new_budgets = [
         models.Budget(
             user_id=user_id,
-            category=item.category,
+            category_id=item.category_id,
             limit=item.limit,
         )
         for item in budgets_data
@@ -444,7 +473,7 @@ def get_budget_status(
 
     receipts = (
         db.query(models.Receipt)
-        .options(joinedload(models.Receipt.items))
+        .options(selectinload(models.Receipt.items))
         .filter(
             models.Receipt.user_id == user_id,
             models.Receipt.date.isnot(None),
@@ -456,7 +485,7 @@ def get_budget_status(
     attach_base_rates(db, receipts, base_currency)
 
     total_spent = 0.0
-    spending_lower: Dict[str, float] = {}
+    spending: Dict[Optional[int], float] = {}
     unconverted_counts: Dict[str, int] = {}
 
     for r in receipts:
@@ -471,22 +500,19 @@ def get_budget_status(
 
         if r.items:
             for item in r.items:
-                cat = (item.category or r.category or "Прочее").strip().lower()
-                spending_lower[cat] = spending_lower.get(cat, 0.0) + (item.total_price or 0.0) * rate
+                spending[item.category_id] = spending.get(item.category_id, 0.0) + (item.total_price or 0.0) * rate
         else:
-            cat = (r.category or "Прочее").strip().lower()
-            spending_lower[cat] = spending_lower.get(cat, 0.0) + rec_total
+            spending[r.category_id] = spending.get(r.category_id, 0.0) + rec_total
 
-    general_budget = next((b for b in budgets if b.category is None), None)
+    general_budget = next((b for b in budgets if b.category_id is None), None)
     total_budget_limit = general_budget.limit if general_budget else None
 
     status_items = []
     for b in budgets:
-        if b.category is None:
+        if b.category_id is None:
             spent = round(total_spent, 2)
         else:
-            cat_key = b.category.strip().lower()
-            spent = round(spending_lower.get(cat_key, 0.0), 2)
+            spent = round(spending.get(b.category_id, 0.0), 2)
 
         remaining = round(b.limit - spent, 2)
         percent = round((spent / b.limit) * 100, 1) if b.limit > 0 else 0.0
@@ -494,6 +520,7 @@ def get_budget_status(
 
         status_items.append(
             schemas.BudgetStatusItem(
+                category_id=b.category_id,
                 category=b.category,
                 limit=round(b.limit, 2),
                 spent=spent,
@@ -518,3 +545,213 @@ def get_budget_status(
         unconverted=unconverted,
     )
 
+
+
+# --- Операции с категориями ---
+
+def get_categories(db: Session, user_id: int) -> List[models.Category]:
+    return (
+        db.query(models.Category)
+        .filter(models.Category.user_id == user_id)
+        .order_by(models.Category.position, models.Category.id)
+        .all()
+    )
+
+
+def _check_name_free(db: Session, user_id: int, name: str, exclude_id: Optional[int] = None) -> None:
+    existing = find_category_by_name(db, user_id, name)
+    if existing is not None and existing.id != exclude_id:
+        raise CategoryError(409, f"Категория «{existing.name}» уже есть")
+
+
+def create_category(db: Session, user_id: int, data: schemas.CategoryCreate) -> models.Category:
+    count = db.query(func.count(models.Category.id)).filter(models.Category.user_id == user_id).scalar() or 0
+    if count >= MAX_CATEGORIES:
+        raise CategoryError(422, f"Можно создать не больше {MAX_CATEGORIES} категорий")
+    _check_name_free(db, user_id, data.name)
+
+    last = db.query(func.max(models.Category.position)).filter(models.Category.user_id == user_id).scalar()
+    category = models.Category(
+        user_id=user_id,
+        name=data.name,
+        description=data.description,
+        icon=data.icon or DEFAULT_ICON,
+        position=(last + 1) if last is not None else 0,
+    )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def update_category(db: Session, category: models.Category, data: schemas.CategoryUpdate) -> models.Category:
+    """Меняет только поля, пришедшие в запросе. Позиции ссылаются по id — новое название видно сразу везде."""
+    fields = data.model_fields_set
+    if "name" in fields:
+        _check_name_free(db, category.user_id, data.name, exclude_id=category.id)
+        category.name = data.name
+    if "description" in fields:
+        category.description = data.description
+    if "icon" in fields:
+        category.icon = data.icon or DEFAULT_ICON
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def _recalc_receipt_categories(receipts: List[models.Receipt]) -> None:
+    """Категория чека после переноса позиций (п. 0.5). У чека без позиций она не меняется."""
+    for receipt in receipts:
+        if receipt.items:
+            receipt.category_id = main_category_id(receipt.items)
+
+
+def delete_category(
+    db: Session, user_id: int, category: models.Category, move_to: Optional[int] = None
+) -> Dict[str, Any]:
+    """Удаляет категорию в одной транзакции.
+
+    С move_to позиции, чеки и правила переходят в неё; без — позиции и чеки остаются
+    без категории, правила удаляются. Лимит бюджета удаляется в любом случае.
+    """
+    if move_to is not None:
+        if move_to == category.id:
+            raise CategoryError(422, "Нельзя перенести позиции в удаляемую категорию")
+        if get_user_category(db, user_id, move_to) is None:
+            raise CategoryError(422, "Категория не найдена")
+
+    try:
+        items = (
+            db.query(models.ReceiptItem)
+            .join(models.Receipt)
+            .filter(models.Receipt.user_id == user_id, models.ReceiptItem.category_id == category.id)
+            .all()
+        )
+        for item in items:
+            item.category_id = move_to
+        affected = {item.receipt_id for item in items}
+
+        for receipt in (
+            db.query(models.Receipt)
+            .filter(models.Receipt.user_id == user_id, models.Receipt.category_id == category.id)
+            .all()
+        ):
+            receipt.category_id = move_to
+            affected.add(receipt.id)
+
+        rules = db.query(models.CategoryRule).filter(
+            models.CategoryRule.user_id == user_id, models.CategoryRule.category_id == category.id
+        )
+        if move_to is not None:
+            rules.update({models.CategoryRule.category_id: move_to}, synchronize_session=False)
+        else:
+            rules.delete(synchronize_session=False)
+
+        deleted_budget = db.query(models.Budget).filter(
+            models.Budget.user_id == user_id, models.Budget.category_id == category.id
+        ).delete(synchronize_session=False) > 0
+
+        db.flush()
+        if affected:
+            _recalc_receipt_categories(
+                db.query(models.Receipt).filter(models.Receipt.id.in_(affected)).all()
+            )
+        db.delete(category)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"success": True, "moved_items": len(items), "deleted_budget": deleted_budget}
+
+
+def reorder_categories(db: Session, user_id: int, ids: List[int]) -> List[models.Category]:
+    categories = get_categories(db, user_id)
+    if len(ids) != len(set(ids)) or set(ids) != {c.id for c in categories}:
+        raise CategoryError(422, "Передайте все свои категории, каждую один раз")
+    by_id = {c.id: c for c in categories}
+    for position, category_id in enumerate(ids):
+        by_id[category_id].position = position
+    db.commit()
+    return get_categories(db, user_id)
+
+
+def move_items(
+    db: Session, user_id: int, item_ids: List[int], category_id: Optional[int], remember: bool
+) -> Dict[str, int]:
+    """Переносит позиции в категорию (None — «Без категории») в одной транзакции.
+
+    Хотя бы одна позиция чужая или не существует — 404, не меняется ничего.
+    remember — для каждого названия создать или обновить правило; rules_created — сколько
+    правил создано или перенаправлено.
+    """
+    ids = set(item_ids)
+    if category_id is not None and get_user_category(db, user_id, category_id) is None:
+        raise CategoryError(422, "Категория не найдена")
+    items = (
+        db.query(models.ReceiptItem)
+        .join(models.Receipt)
+        .filter(models.Receipt.user_id == user_id, models.ReceiptItem.id.in_(ids))
+        .all()
+    )
+    if len(items) != len(ids):
+        raise CategoryError(404, "Позиция не найдена")
+
+    try:
+        for item in items:
+            item.category_id = category_id
+
+        rules_saved = 0
+        if remember and category_id is not None:
+            patterns = {normalize_item_name(item.name) for item in items} - {""}
+            existing = {
+                rule.pattern: rule
+                for rule in db.query(models.CategoryRule).filter(
+                    models.CategoryRule.user_id == user_id, models.CategoryRule.pattern.in_(patterns)
+                )
+            }
+            for pattern in patterns:
+                rule = existing.get(pattern)
+                if rule is None:
+                    db.add(models.CategoryRule(user_id=user_id, pattern=pattern, category_id=category_id))
+                    rules_saved += 1
+                elif rule.category_id != category_id:
+                    rule.category_id = category_id
+                    rules_saved += 1
+
+        db.flush()
+        _recalc_receipt_categories(
+            db.query(models.Receipt).filter(models.Receipt.id.in_({item.receipt_id for item in items})).all()
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"moved": len(items), "rules_created": rules_saved}
+
+
+def get_rules(db: Session, user_id: int) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(models.CategoryRule, models.Category.name)
+        .join(models.Category, models.CategoryRule.category_id == models.Category.id)
+        .filter(models.CategoryRule.user_id == user_id)
+        .order_by(models.CategoryRule.pattern)
+        .all()
+    )
+    return [
+        {
+            "id": rule.id,
+            "pattern": rule.pattern,
+            "category_id": rule.category_id,
+            "category": name,
+            "created_at": rule.created_at,
+        }
+        for rule, name in rows
+    ]
+
+
+def delete_rule(db: Session, user_id: int, rule_id: int) -> bool:
+    deleted = db.query(models.CategoryRule).filter(
+        models.CategoryRule.id == rule_id, models.CategoryRule.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.commit()
+    return deleted > 0

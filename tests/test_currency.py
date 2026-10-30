@@ -9,6 +9,7 @@ os.environ.setdefault("SECRET_KEY", "test_secret_key_1234567890_antigravity_safe
 
 from server import app
 from app import database, models, auth, rates, currencies
+from app.categories import create_default_categories
 
 
 class TestCurrencyAPI(unittest.TestCase):
@@ -51,6 +52,8 @@ class TestCurrencyAPI(unittest.TestCase):
             full_name="User Currency B",
             base_currency="KZT",
         )
+        create_default_categories(self.db, self.user_a)
+        create_default_categories(self.db, self.user_b)
         self.db.add_all([self.user_a, self.user_b])
         self.db.commit()
         self.db.refresh(self.user_a)
@@ -247,7 +250,8 @@ class TestCurrencyAPI(unittest.TestCase):
         mock_fetch.return_value = {"USD": 500.0}
 
         # Устанавливаем бюджет на Кафе: 15 000 KZT
-        self.client.put("/api/budgets", json={"budgets": [{"category": "Кафе", "limit": 15000.0}]}, headers=self.headers_a)
+        cafe_id = next(c.id for c in self.user_a.categories if c.name == "Кафе")
+        self.client.put("/api/budgets", json={"budgets": [{"category_id": cafe_id, "limit": 15000.0}]}, headers=self.headers_a)
 
         # Сохраняем чек в Кафе на $20 (курс 500 -> 10 000 KZT)
         self.client.post("/api/receipts/save", json={"date": "2026-10-05", "currency": "USD", "total": 20.0, "items": [{"name": "Lunch", "total_price": 20.0, "category": "Кафе"}]}, headers=self.headers_a)
