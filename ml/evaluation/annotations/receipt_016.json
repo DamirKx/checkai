@@ -1,0 +1,60 @@
+{
+  "receipt_id": "receipt_016",
+  "country": "KZ",
+  "store": "Super Market",
+  "date": "2026-05-08",
+  "currency": "KZT",
+  "items": [
+    {
+      "name": "Always прокладки Ultra ночные, 10шт",
+      "quantity": 1,
+      "price": 2350.0,
+      "total": 2350.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Lenor кондиционер д/белья 1.8л",
+      "quantity": 1,
+      "price": 2850.0,
+      "total": 2850.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Pantene шампунь 400мл",
+      "quantity": 1,
+      "price": 2100.0,
+      "total": 2100.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Olay Regenerist крем д/лица, 50мл",
+      "quantity": 1,
+      "price": 6950.0,
+      "total": 6950.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Fairy капсулы д/посудомоеч. машин, 30шт",
+      "quantity": 1,
+      "price": 4490.0,
+      "total": 4490.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Mr. Proper универсальное средство, 1л",
+      "quantity": 1,
+      "price": 1750.0,
+      "total": 1750.0,
+      "category": "Дом и быт"
+    },
+    {
+      "name": "Oral-B щетка зубная Pro-Expert",
+      "quantity": 1,
+      "price": 1650.0,
+      "total": 1650.0,
+      "category": "Дом и быт"
+    }
+  ],
+  "total": 20140.0,
+  "items_annotated": true
+}
