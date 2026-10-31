@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import tempfile
 import logging
 from typing import List, Dict, Any, Optional
@@ -34,7 +35,14 @@ from app.parser import parse_receipt
 
 def init_ocr() -> PaddleOCR:
     """Инициализирует PaddleOCR (русский язык)."""
-    return PaddleOCR(lang='ru', enable_mkldnn=False)
+    return PaddleOCR(
+        enable_mkldnn=False,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
+    )
 
 
 def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
@@ -108,12 +116,16 @@ def analyze_receipt(
     if ocr is None:
         ocr = init_ocr()
 
+    t_ocr_start = time.perf_counter()
     lines = ocr_image(ocr, image_input)
+    ocr_elapsed = time.perf_counter() - t_ocr_start
     raw_text = "\n".join(lines)
 
     use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()
     parsed = None
+    parser_used = "regex"
 
+    t_llm_start = time.perf_counter()
     if use_ai not in ("0", "false", "no", "off"):
         try:
             try:
@@ -121,8 +133,15 @@ def analyze_receipt(
             except ImportError:
                 from ml.app.agent_parser import parse_receipt as ai_parse_receipt
             parsed = ai_parse_receipt(raw_text)
+            if parsed:
+                parser_used = "qwen"
         except Exception as e:
-            logger.info("Ollama/LLM недоступна (%s). Используется встроенный парсер app.parser", e)
+            logger.warning(
+                "Qwen не разобрал чек (%s: %s). Используется встроенный парсер app.parser",
+                type(e).__name__,
+                e,
+            )
+    llm_elapsed = time.perf_counter() - t_llm_start
 
     if not parsed:
         parsed = parse_receipt(lines)
@@ -133,16 +152,28 @@ def analyze_receipt(
         from ml.app.currency import detect_currency
         currency, source = detect_currency(lines)
     except Exception as e:
-        logger.debug("Ошибка в detect_currency: %s", e)
+        logger.warning("Ошибка в detect_currency: %s", e)
 
     parsed["currency"] = currency or "KZT"
     parsed["currency_source"] = source
 
+    t_cat_start = time.perf_counter()
     try:
         from ml.app.categorize import categorize_items
         categorize_items(parsed.get("items") or [], categories or [])
     except Exception as e:
-        logger.debug("Ошибка в categorize_items: %s", e)
+        logger.warning("Ошибка в categorize_items: %s", e)
+    cat_elapsed = time.perf_counter() - t_cat_start
+
+    items_list = parsed.get("items") or []
+    logger.info(
+        "analyze: ocr=%.1fs llm=%.1fs categorize=%.1fs parser=%s items=%d",
+        ocr_elapsed,
+        llm_elapsed,
+        cat_elapsed,
+        parser_used,
+        len(items_list),
+    )
 
     parsed["raw_lines"] = lines
     return parsed

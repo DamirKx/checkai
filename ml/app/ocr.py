@@ -45,10 +45,12 @@ def init_ocr() -> PaddleOCR:
     Используется русская модель распознавания.
     """
     return PaddleOCR(
-        lang="ru",
+        enable_mkldnn=False,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
-        use_textline_orientation=False
+        use_textline_orientation=False,
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
     )
 
 def ocr_image(

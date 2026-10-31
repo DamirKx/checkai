@@ -134,6 +134,7 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         "model": MODEL_NAME,
         "prompt": prompt,
         "stream": False,
+        "keep_alive": "30m",
         "options": {
             "temperature": 0.0
         }
