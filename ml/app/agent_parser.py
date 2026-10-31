@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 from typing import Any, Dict, List, Optional
@@ -1366,6 +1367,121 @@ def remove_confirmed_service_rows(ocr_text, data):
     return data
 
 
+def extract_ocr_numbers(
+    ocr_text: str
+) -> set:
+    """Собирает множество чисел с копейками из OCR-текста (форматы 2350.00, 2350,00, =2350.00, 2 350.00)."""
+    numbers = set()
+    for match in re.findall(
+        r"=?\s*(\d+(?:[\s\u00a0]\d{3})*[.,]\d{2})",
+        ocr_text or ""
+    ):
+        cleaned = (
+            match.replace(" ", "")
+            .replace("\u00a0", "")
+            .replace(",", ".")
+        )
+        try:
+            numbers.add(round(float(cleaned), 2))
+        except ValueError:
+            continue
+    return numbers
+
+
+def _number_in_ocr(
+    value: Any,
+    ocr_numbers: set
+) -> bool:
+    try:
+        num = round(float(value), 2)
+    except (TypeError, ValueError):
+        return False
+    return any(
+        abs(num - candidate) < 0.01
+        for candidate in ocr_numbers
+    )
+
+
+def is_item_confirmed(
+    item: Dict[str, Any],
+    ocr_numbers: set
+) -> bool:
+    """Позиция подтверждена, если её price_per_unit и total_price есть во множестве чисел OCR."""
+    if not isinstance(item, dict):
+        return False
+    return (
+        _number_in_ocr(item.get("price_per_unit"), ocr_numbers)
+        and _number_in_ocr(item.get("total_price"), ocr_numbers)
+    )
+
+
+def all_items_confirmed(
+    items: List[Dict[str, Any]],
+    ocr_numbers: set
+) -> bool:
+    if not items:
+        return False
+    return all(
+        is_item_confirmed(item, ocr_numbers)
+        for item in items
+    )
+
+
+def _should_accept_correction(
+    ocr_text: str,
+    before_data: Dict[str, Any],
+    after_data: Dict[str, Any],
+    ocr_numbers: set
+) -> bool:
+    """Принимает результат self_correction, только если:
+    (а) |сумма позиций - итог| уменьшилась И
+    (б) ни у одной позиции, подтверждённой до коррекции, цена не стала неподтверждённой.
+    """
+    ocr_total = extract_total_from_ocr(ocr_text)
+    if ocr_total is None:
+        return False
+
+    before_diff = abs(calculate_items_total(before_data) - ocr_total)
+    after_diff = abs(calculate_items_total(after_data) - ocr_total)
+    if after_diff >= before_diff - 1e-6:
+        return False
+
+    before_items = before_data.get("items") or []
+    after_items = after_data.get("items") or []
+
+    if len(before_items) == len(after_items):
+        for before_item, after_item in zip(before_items, after_items):
+            if is_item_confirmed(before_item, ocr_numbers):
+                if not is_item_confirmed(after_item, ocr_numbers):
+                    return False
+    else:
+        after_prices = []
+        after_totals = []
+        for item in after_items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                after_prices.append(round(float(item.get("price_per_unit")), 2))
+            except (TypeError, ValueError):
+                pass
+            try:
+                after_totals.append(round(float(item.get("total_price")), 2))
+            except (TypeError, ValueError):
+                pass
+
+        for before_item in before_items:
+            if not is_item_confirmed(before_item, ocr_numbers):
+                continue
+            b_price = round(float(before_item["price_per_unit"]), 2)
+            b_total = round(float(before_item["total_price"]), 2)
+            if not any(abs(b_price - p) < 0.01 for p in after_prices):
+                return False
+            if not any(abs(b_total - t) < 0.01 for t in after_totals):
+                return False
+
+    return True
+
+
 def finalize_receipt_items(ocr_text, data):
     data = clean_items(data)
     data = remove_confirmed_service_rows(ocr_text, data)
@@ -1392,28 +1508,46 @@ def parse_receipt_with_correction(
         data
     )
 
+    ocr_numbers = extract_ocr_numbers(
+        ocr_text
+    )
+
     # 3. Сравниваем сумму товаров
     # с итогом из OCR
-    if needs_correction(
-        ocr_text,
-        data
+    if (
+        needs_correction(ocr_text, data)
+        and not all_items_confirmed(data.get("items", []), ocr_numbers)
     ):
 
         # 4. Qwen повторно анализирует чек
         previous_currency = data.get("currency")
+        before_correction = copy.deepcopy(data)
 
-        data = self_correction(
+        corrected = self_correction(
             ocr_text,
             data
         )
 
-        if not data.get("currency"):
-            data["currency"] = previous_currency
+        if not corrected.get("currency"):
+            corrected["currency"] = previous_currency
 
         # 5. Снова удаляем служебный мусор
-        data = clean_items(
-            data
+        corrected = clean_items(
+            corrected
         )
+
+        corrected = correct_item_quantities(
+            ocr_text,
+            corrected
+        )
+
+        if _should_accept_correction(
+            ocr_text,
+            before_correction,
+            corrected,
+            ocr_numbers
+        ):
+            data = corrected
 
     # 6. Исправляем количество товаров по OCR
     data = correct_item_quantities(
