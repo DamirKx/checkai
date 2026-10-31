@@ -421,7 +421,8 @@ def _call_llm(
         options={
             "temperature": 0,
             "num_predict": 2048
-        }
+        },
+        keep_alive="30m"
     )
 
     content = response["message"]["content"].strip()
