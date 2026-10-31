@@ -419,7 +419,7 @@ def _call_llm(
         format="json",
         options={
             "temperature": 0,
-            "num_predict": 512
+            "num_predict": 2048
         }
     )
 
