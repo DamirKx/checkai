@@ -964,84 +964,6 @@ def extract_total_from_ocr(
     return None
 
 
-
-def correct_item_quantities(
-    ocr_text: str,
-    data: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Исправляет количество по подтверждённым OCR-строкам."""
-
-    lines = [
-        line.strip()
-        for line in ocr_text.splitlines()
-        if line.strip()
-    ]
-
-    items = data.get("items", [])
-
-    if not isinstance(items, list):
-        return data
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-
-        try:
-            price = float(item.get("price_per_unit", 0))
-        except (TypeError, ValueError):
-            continue
-
-        name = str(item.get("name", "")).strip().lower()
-
-        if not name or price <= 0:
-            continue
-
-        for i, line in enumerate(lines):
-            if line.lower() != name:
-                continue
-
-            for j in range(i + 1, min(i + 4, len(lines) - 1)):
-                match = re.fullmatch(
-                    r"(\\d+[.,]\\d{2})([1-9])",
-                    lines[j]
-                )
-
-                if not match:
-                    continue
-
-                detected_price = float(
-                    match.group(1).replace(",", ".")
-                )
-                detected_quantity = int(match.group(2))
-
-                next_line = lines[j + 1]
-
-                if not re.fullmatch(
-                    r"\\d+[.,]\\d{2}",
-                    next_line
-                ):
-                    continue
-
-                detected_total = float(
-                    next_line.replace(",", ".")
-                )
-
-                if (
-                    abs(detected_price - price) < 0.01
-                    and abs(
-                        detected_price * detected_quantity
-                        - detected_total
-                    ) < 0.01
-                ):
-                    item["quantity"] = detected_quantity
-                    item["total_price"] = round(
-                        detected_total, 2
-                    )
-                    break
-
-    return data
-
-
 def calculate_items_total(
     data: Dict[str, Any]
 ) -> float:
@@ -1287,26 +1209,53 @@ HAC 20%
 
 def correct_item_quantities(ocr_text, data):
     """Исправление количества при подтверждении OCR."""
-    import re
-
     lines = [
         line.strip()
         for line in ocr_text.splitlines()
         if line.strip()
     ]
 
+    price_qty_pattern = re.compile(
+        r"(\d+[.,]\d{2})\s*[*xх×]\s*(\d+(?:[.,]\d+)?)",
+        re.IGNORECASE
+    )
+
+    pairs = [
+        (
+            float(price.replace(",", ".")),
+            float(qty.replace(",", "."))
+        )
+        for line in lines
+        for price, qty in price_qty_pattern.findall(line)
+    ]
+
     for item in data.get("items", []):
         if not isinstance(item, dict):
             continue
-
-        name = str(item.get("name", "")).strip().lower()
 
         try:
             price = float(item.get("price_per_unit", 0))
         except (TypeError, ValueError):
             continue
 
-        if not name or price <= 0:
+        if price <= 0:
+            continue
+
+        # 1. Формат «цена * N» / «цена x N» / «цена × N» (сопоставление по цене)
+        quantities = {
+            qty
+            for found_price, qty in pairs
+            if abs(found_price - price) < 0.01
+        }
+        if len(quantities) == 1:
+            qty = quantities.pop()
+            item["quantity"] = int(qty) if qty == int(qty) else qty
+            item["total_price"] = round(price * qty, 2)
+            continue
+
+        # 2. Старый формат «2350.001» + следующая строка «2350.00» (сопоставление по названию)
+        name = str(item.get("name", "")).strip().lower()
+        if not name:
             continue
 
         for i, line in enumerate(lines):
@@ -1435,6 +1384,11 @@ def parse_receipt_with_correction(
 
     # 2. Убираем служебные строки
     data = clean_items(
+        data
+    )
+
+    data = correct_item_quantities(
+        ocr_text,
         data
     )
 
