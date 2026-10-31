@@ -34,7 +34,14 @@ from app.parser import parse_receipt
 
 def init_ocr() -> PaddleOCR:
     """Инициализирует PaddleOCR (русский язык)."""
-    return PaddleOCR(lang='ru', enable_mkldnn=False)
+    return PaddleOCR(
+        enable_mkldnn=False,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
+    )
 
 
 def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
