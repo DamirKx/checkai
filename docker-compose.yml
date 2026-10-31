@@ -10,6 +10,8 @@ services:
       - ./frontend:/app/frontend
       # Прокидываем app и server.py для удобной разработки
       - ./app:/app/app
+      # ml тоже прокидываем — иначе после git pull в контейнере остаётся старый парсер Qwen
+      - ./ml:/app/ml
       - ./server.py:/app/server.py
       - ./migrations:/app/migrations
       - ./alembic.ini:/app/alembic.ini
@@ -22,8 +24,11 @@ services:
       - ORPHAN_CLEANUP_HOURS=${ORPHAN_CLEANUP_HOURS:-6}
       # База данных (по умолчанию SQLite; для Postgres: postgresql://checkai:checkai_secret@db:5432/checkai)
       - DATABASE_URL=${DATABASE_URL:-}
-      # Адрес Ollama (если запущен контейнер ollama)
-      - OLLAMA_HOST=http://ollama:11434
+      # Адрес Ollama: по умолчанию контейнер ollama (--profile full).
+      # Для Ollama, установленной на компьютере: DOCKER_OLLAMA_HOST=http://host.docker.internal:11434 в .env
+      - OLLAMA_HOST=${DOCKER_OLLAMA_HOST:-http://ollama:11434}
+      # Категоризация (ml/app/categorize.py) читает свой адрес — иначе в контейнере это localhost
+      - OLLAMA_URL=${DOCKER_OLLAMA_HOST:-http://ollama:11434}/api/generate
       # Режим работы: auto (Ollama при наличии, fallback на быстрый regex-парсер)
       - USE_AI_PARSER=${USE_AI_PARSER:-auto}
       # Отключаем багнутые фичи PaddlePaddle 3.0 на Intel/AMD процессорах
