@@ -284,6 +284,17 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="savedModal" hidden>
+    <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="savedModalTitle" aria-describedby="savedModalText">
+      <button class="icon-btn modal-close" id="savedModalClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="savedModalTitle">Чек сохранён</h2>
+      <div class="auth-form">
+        <p id="savedModalText" hidden></p>
+        <div class="button-row"><button class="btn" id="savedToHistory" type="button">Перейти в историю</button><button class="btn soft" id="savedStay" type="button">Остаться</button></div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="authModal" hidden>
     <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
       <button class="icon-btn modal-close" id="authClose" type="button" aria-label="Закрыть">✕</button>

@@ -790,6 +790,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   const catMenu = $('categoryGrid').querySelector('.cat-menu:not([hidden])');
   if (!$('receiptModal').hidden) closeReceipt();
+  else if (!$('savedModal').hidden) closeModal('savedModal');
   else if (!$('authModal').hidden) closeAuth();
   else if (!$('categoryModal').hidden) closeModal('categoryModal');
   else if (!$('deleteCategoryModal').hidden) closeModal('deleteCategoryModal');
@@ -931,6 +932,15 @@ function renderResult(data) {
   $('currencyHint').hidden = !hint;
   if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+// Обратное к renderResult: после сохранения чек нельзя сохранить второй раз
+function resetResult() {
+  lastResult = null;
+  $('resultContent').hidden = true;
+  $('resultPlaceholder').hidden = false;
+  $('resultEditor').innerHTML = '';
+  $('currencyHint').hidden = true;
+  clearFile();
+}
 // Гость может распознавать чеки, а для сохранения просим войти
 async function saveReceipt() {
   if (!lastResult) return;
@@ -943,16 +953,20 @@ async function saveReceipt() {
     // В ответе — сохранённый чек с курсом к основной валюте (rate_to_base), он нужен для бюджетов
     const saved = await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(toPayload(lastResult)) });
     await loadReceipts();
+    resetResult();
     const alert = budgetAlert(saved);
-    if (alert) toast('Чек сохранён. ' + alert, 6000);
-    else toast('Чек сохранён в ваш аккаунт');
-    showPage('history');
+    $('savedModalText').textContent = alert;
+    $('savedModalText').hidden = !alert;
+    openModal('savedModal', $('savedToHistory'));
   } catch (e) {
     if (!getToken()) { pendingSave = true; openAuth('login'); }
     toast('Ошибка при сохранении: ' + e.message);
   } finally { btn.disabled = false; }
 }
 $('saveReceiptBtn').onclick = saveReceipt;
+$('savedToHistory').onclick = () => { closeModal('savedModal'); showPage('history'); };
+$('savedStay').onclick = $('savedModalClose').onclick = () => closeModal('savedModal');
+$('savedModal').onclick = e => { if (e.target.id === 'savedModal') closeModal('savedModal'); };
 // Пользователь сам выбрал валюту — подсказка «проверьте валюту» больше не нужна
 $('resultEditor').addEventListener('input', e => { if (e.target.dataset.f === 'currency') $('currencyHint').hidden = true; });
 $('downloadBtn').onclick = () => { if (lastResult) downloadJson(toPayload(lastResult), 'receipt_data.json'); };
