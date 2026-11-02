@@ -5,7 +5,7 @@
   <meta name="theme-color" content="#07080d"><title>CheckAI — ваши расходы</title>
   <script>
     // Тема выставляется до отрисовки, чтобы страница не мигала тёмным/светлым
-    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t})();
+    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/js/app.js" defer></script>
@@ -16,14 +16,6 @@
   <header class="topbar">
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
     <button class="brand-link" id="brandLink" type="button" aria-label="CheckAI — на главную"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></button>
-    <nav class="top-nav" aria-label="Разделы">
-      <button class="nav-link active" data-page="home" type="button" aria-current="page">Главная</button>
-      <button class="nav-link" data-page="upload" type="button">Добавить чек</button>
-      <button class="nav-link" data-page="history" type="button">История</button>
-      <button class="nav-link" data-page="categories" type="button">Категории</button>
-      <button class="nav-link" data-page="analysis" type="button">Анализ</button>
-      <button class="nav-link" data-page="budgets" type="button">Бюджеты</button>
-    </nav>
     <div class="top-spacer"></div>
     <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Включить светлую тему"><span aria-hidden="true" id="themeIcon">☀</span></button>
     <button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button>
@@ -42,7 +34,6 @@
   <aside class="drawer" id="drawer" aria-label="Главное меню" inert>
     <div class="drawer-head"><div class="brand-mark" aria-hidden="true">C</div><div class="brand">CheckAI</div></div>
     <nav class="drawer-nav">
-      <button class="nav-link active" data-page="home" type="button" aria-current="page"><span aria-hidden="true">◇</span><span>Главная</span></button>
       <button class="nav-link" data-page="upload" type="button"><span aria-hidden="true">＋</span><span>Добавить чек</span></button>
       <button class="nav-link" data-page="history" type="button"><span aria-hidden="true">▤</span><span>История и расходы</span></button>
       <button class="nav-link" data-page="categories" type="button"><span aria-hidden="true">◈</span><span>Категории</span></button>
@@ -50,25 +41,20 @@
       <button class="nav-link" data-page="budgets" type="button"><span aria-hidden="true">◎</span><span>Бюджеты</span><span class="nav-badge" id="budgetBadge" hidden>перерасход</span></button>
       <button class="nav-link" data-page="profile" id="navProfile" type="button" hidden><span aria-hidden="true">⚙</span><span>Профиль</span></button>
     </nav>
-    <div class="drawer-foot" id="drawerFoot">Войдите, чтобы сохранять чеки</div>
+    <div class="drawer-foot" id="drawerFoot" hidden></div>
   </aside>
 
   <main class="layout">
     <section class="page active" id="page-home" aria-labelledby="homeTitle">
       <div class="hero">
         <div class="hero-copy">
-          <div class="hero-chip"><span class="live-dot" aria-hidden="true"></span>OCR + ИИ работают на вашем компьютере</div>
+          <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
           <h1 id="homeTitle" class="hero-title">Сфоткал чек —<br><span class="grad-text">расходы посчитались</span></h1>
           <p class="hero-lead">CheckAI читает позиции, цены и итог, раскладывает покупки по категориям и следит, чтобы вы уложились в бюджет.</p>
           <div class="hero-actions" id="heroGuest">
             <button class="btn hero-cta" id="heroRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button>
             <button class="btn soft hero-cta" id="heroLogin" type="button">Войти</button>
           </div>
-          <div class="hero-actions" id="heroUser" hidden>
-            <button class="btn hero-cta" id="heroUpload" type="button">Добавить чек <span aria-hidden="true">→</span></button>
-            <button class="btn soft hero-cta" id="heroHistory" type="button">Моя история</button>
-          </div>
-          <p class="hero-note" id="heroNote">Регистрация бесплатная — после входа загрузите свой чек или попробуйте демо.</p>
           <ul class="hero-stats">
             <li><b>8</b><span>валют с курсом НБ РК</span></li>
             <li><b>3</b><span>этапа: фото, текст, анализ</span></li>
@@ -96,6 +82,40 @@
           </div>
         </div>
       </div>
+      <a class="scroll-hint" href="#about" aria-label="Подробнее о CheckAI"><span></span></a>
+
+      <section class="landing-section" id="about" aria-labelledby="howTitle">
+        <div class="section-head reveal"><div class="eyebrow">Как это работает</div><h2 id="howTitle">От фото до отчёта — <span class="grad-text">три шага</span></h2></div>
+        <ol class="steps-flow">
+          <li class="card flow-card reveal" style="--d:0"><span class="flow-num">01</span><span class="flow-ico" aria-hidden="true">📸</span><h3>Сфотографируйте чек</h3><p>Снимите камерой телефона или загрузите фото. Подойдёт даже мятый и длинный чек.</p></li>
+          <li class="card flow-card reveal" style="--d:1"><span class="flow-num">02</span><span class="flow-ico" aria-hidden="true">🧠</span><h3>ИИ его прочитает</h3><p>PaddleOCR распознаёт текст, языковая модель Qwen находит товары, цены, магазин и итог.</p></li>
+          <li class="card flow-card reveal" style="--d:2"><span class="flow-num">03</span><span class="flow-ico" aria-hidden="true">📊</span><h3>Расходы посчитаны</h3><p>Покупки разложены по категориям, сумма сверена с итогом, бюджет обновлён.</p></li>
+        </ol>
+      </section>
+
+      <div class="marquee" aria-hidden="true"><div class="marquee-track">
+        <span>🥕 Продукты</span><span>☕ Кафе</span><span>🚌 Транспорт</span><span>🏠 Дом и быт</span><span>✚ Здоровье</span><span>🧥 Одежда</span><span>🎟 Развлечения</span><span>💄 Свои категории</span>
+        <span>🥕 Продукты</span><span>☕ Кафе</span><span>🚌 Транспорт</span><span>🏠 Дом и быт</span><span>✚ Здоровье</span><span>🧥 Одежда</span><span>🎟 Развлечения</span><span>💄 Свои категории</span>
+      </div></div>
+
+      <section class="landing-section" aria-labelledby="featuresTitle">
+        <div class="section-head reveal"><div class="eyebrow">Возможности</div><h2 id="featuresTitle">Всё, чтобы <span class="grad-text">видеть свои деньги</span></h2></div>
+        <div class="feature-grid">
+          <article class="card feature reveal" style="--d:0"><span class="feature-ico" aria-hidden="true">◈</span><h3>Категории под вас</h3><p>Создавайте свои категории, переносите товары перетаскиванием — CheckAI запомнит правило для следующих чеков.</p></article>
+          <article class="card feature reveal" style="--d:1"><span class="feature-ico" aria-hidden="true">◎</span><h3>Бюджеты и лимиты</h3><p>Лимит на месяц и по категориям, прогноз до конца месяца и предупреждение о перерасходе.</p></article>
+          <article class="card feature reveal" style="--d:2"><span class="feature-ico" aria-hidden="true">₸</span><h3>8 валют</h3><p>Тенге, рубли, доллары, евро и другие — с пересчётом по официальному курсу Нацбанка РК на дату покупки.</p></article>
+          <article class="card feature reveal" style="--d:0"><span class="feature-ico" aria-hidden="true">◔</span><h3>Аналитика</h3><p>Динамика трат по дням и месяцам, самые затратные категории и средний чек.</p></article>
+          <article class="card feature reveal" style="--d:1"><span class="feature-ico" aria-hidden="true">🔒</span><h3>Данные у вас</h3><p>Распознавание идёт на вашем компьютере — фото чеков не уходят в облачные сервисы.</p></article>
+          <article class="card feature reveal" style="--d:2"><span class="feature-ico" aria-hidden="true">⇩</span><h3>Экспорт</h3><p>История выгружается в CSV для Excel, любой чек — в JSON.</p></article>
+        </div>
+      </section>
+
+      <section class="landing-cta reveal" aria-labelledby="ctaTitle">
+        <h2 id="ctaTitle">Хватит переписывать чеки <span class="grad-text">вручную</span></h2>
+        <p>Создайте аккаунт и загрузите первый чек — или попробуйте на демо.</p>
+        <div class="hero-actions"><button class="btn hero-cta" id="landingRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button><button class="btn soft hero-cta" id="landingLogin" type="button">Войти</button></div>
+      </section>
+      <footer class="landing-foot">CheckAI · учебный проект команды · распознавание чеков с помощью ИИ</footer>
     </section>
 
     <section class="page" id="page-upload" aria-labelledby="uploadTitle">

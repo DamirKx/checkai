@@ -326,14 +326,17 @@ function setGuest() {
   if ($('page-profile').classList.contains('active')) showPage('home');
   rerender();
 }
-// Распознавание — только после входа; на главной кнопки зависят от того, вошёл ли пользователь
+// Гость видит только лендинг без шапки; вошедший — приложение с шапкой, главная у него — «Добавить чек».
+// Пока при старте проверяется сохранённый токен, считаем пользователя вошедшим, чтобы лендинг не мигал
+let authPending = !!getToken();
 function renderAccess() {
-  const guest = !currentUser;
+  const guest = !currentUser && !(authPending && getToken());
+  document.documentElement.dataset.auth = guest ? 'guest' : 'user';
   $('uploadGuest').hidden = !guest;
   $('uploadBody').hidden = guest;
-  $('heroGuest').hidden = !guest;
-  $('heroNote').hidden = !guest;
-  $('heroUser').hidden = guest;
+  const onHome = $('page-home').classList.contains('active');
+  if (guest && !onHome) showPage('home');
+  else if (!guest && onHome) showPage('upload');
 }
 function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
 function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
@@ -686,10 +689,13 @@ async function loadReceipts() {
   } catch (e) { toast('Не удалось загрузить историю: ' + e.message); }
 }
 async function checkAuthOnStartup() {
-  if (!getToken()) { setGuest(); return; }
-  // Вошедший пользователь сразу попадает к загрузке чека, гость остаётся на главной
-  try { setUser(await apiRequest('/api/auth/me')); if ($('page-home').classList.contains('active')) showPage('upload'); await loadReceipts(); }
-  catch (e) { setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
+  if (!getToken()) { authPending = false; setGuest(); return; }
+  try {
+    const user = await apiRequest('/api/auth/me');
+    authPending = false;
+    setUser(user);
+    await loadReceipts();
+  } catch (e) { authPending = false; setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
 }
 
 // --- Окна: фокус внутри окна и возврат фокуса после закрытия ---
@@ -796,11 +802,9 @@ function closeMenu() { if ($('drawer').classList.contains('open')) setMenu(false
 $('menuBtn').onclick = () => setMenu(!$('drawer').classList.contains('open'));
 $('overlay').onclick = closeMenu;
 document.querySelectorAll('.nav-link').forEach(b => b.onclick = () => showPage(b.dataset.page));
-$('brandLink').onclick = () => showPage('home');
-$('heroRegister').onclick = $('uploadRegisterBtn').onclick = () => openAuth('register');
-$('heroLogin').onclick = $('uploadLoginBtn').onclick = () => openAuth('login');
-$('heroUpload').onclick = () => showPage('upload');
-$('heroHistory').onclick = () => showPage('history');
+$('brandLink').onclick = () => showPage(currentUser ? 'upload' : 'home');
+$('heroRegister').onclick = $('landingRegister').onclick = $('uploadRegisterBtn').onclick = () => openAuth('register');
+$('heroLogin').onclick = $('landingLogin').onclick = $('uploadLoginBtn').onclick = () => openAuth('login');
 document.addEventListener('keydown', e => {
   if (e.key === 'Tab') { trapFocus(e); return; }
   if (e.key !== 'Escape') return;
@@ -1694,6 +1698,7 @@ $('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) 
 $('budgetLoginBtn').onclick = () => openAuth('login');
 $('budgetMonth').onchange = renderBudgets;
 
+renderAccess();
 loadCurrencies();
 checkAuthOnStartup();
 
@@ -1708,6 +1713,14 @@ if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       stage.style.setProperty('--ry', (x * 18).toFixed(2) + 'deg');
       stage.style.setProperty('--rx', (-y * 14).toFixed(2) + 'deg');
     }, { passive: true });
+  }
+  // Блоки лендинга появляются, когда до них доходит прокрутка (без JS они просто видны)
+  if ('IntersectionObserver' in window) {
+    document.documentElement.classList.add('reveal-on');
+    const io = new IntersectionObserver(entries => entries.forEach(en => {
+      if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+    }), { threshold: .15, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
   }
   // Подсветка карточки под курсором (CSS читает --mx/--my)
   document.addEventListener('pointermove', e => {
