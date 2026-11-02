@@ -1680,3 +1680,25 @@ $('budgetMonth').onchange = renderBudgets;
 
 loadCurrencies();
 checkAuthOnStartup();
+
+// --- Эффекты интерфейса: только оформление, на данные не влияют ---
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Чек на главной наклоняется за курсором
+  const stage = document.querySelector('.receipt-stage');
+  if (stage && window.matchMedia('(hover: hover)').matches) {
+    window.addEventListener('pointermove', e => {
+      if (!$('page-upload').classList.contains('active')) return;
+      const x = e.clientX / window.innerWidth - .5, y = e.clientY / window.innerHeight - .5;
+      stage.style.setProperty('--ry', (x * 18).toFixed(2) + 'deg');
+      stage.style.setProperty('--rx', (-y * 14).toFixed(2) + 'deg');
+    }, { passive: true });
+  }
+  // Подсветка карточки под курсором (CSS читает --mx/--my)
+  document.addEventListener('pointermove', e => {
+    const card = e.target.closest?.('.card');
+    if (!card) return;
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  }, { passive: true });
+}

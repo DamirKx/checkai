@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d1730"><title>CheckAI — ваши расходы</title>
+  <meta name="theme-color" content="#07080d"><title>CheckAI — ваши расходы</title>
   <script>
     // Тема выставляется до отрисовки, чтобы страница не мигала тёмным/светлым
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t})();
@@ -10,10 +10,19 @@
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/js/app.js" defer></script>
 </head>
-<body><div class="app">
+<body>
+<div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
+<div class="app">
   <header class="topbar">
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
-    <div class="brand-mark" aria-hidden="true">C</div><div class="brand">CheckAI</div>
+    <div class="brand-mark" aria-hidden="true"><span>C</span></div><div class="brand">Check<b>AI</b></div>
+    <nav class="top-nav" aria-label="Разделы">
+      <button class="nav-link active" data-page="upload" type="button" aria-current="page">Чек</button>
+      <button class="nav-link" data-page="history" type="button">История</button>
+      <button class="nav-link" data-page="categories" type="button">Категории</button>
+      <button class="nav-link" data-page="analysis" type="button">Анализ</button>
+      <button class="nav-link" data-page="budgets" type="button">Бюджеты</button>
+    </nav>
     <div class="top-spacer"></div>
     <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Включить светлую тему"><span aria-hidden="true" id="themeIcon">☀</span></button>
     <button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button>
@@ -44,9 +53,49 @@
 
   <main class="layout">
     <section class="page active" id="page-upload" aria-labelledby="uploadTitle">
-      <div class="page-head"><div><h1 id="uploadTitle">Добавить чек</h1></div></div>
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="hero-chip"><span class="live-dot" aria-hidden="true"></span>OCR + ИИ работают на вашем компьютере</div>
+          <h1 id="uploadTitle" class="hero-title">Сфоткал чек —<br><span class="grad-text">расходы посчитались</span></h1>
+          <p class="hero-lead">CheckAI читает позиции, цены и итог, раскладывает покупки по категориям и следит, чтобы вы уложились в бюджет.</p>
+          <div class="hero-actions">
+            <a class="btn hero-cta" href="#dropzone">Загрузить чек <span aria-hidden="true">↓</span></a>
+            <span class="hero-note">или <b>попробуйте демо-чек</b> ниже</span>
+          </div>
+          <ul class="hero-stats">
+            <li><b>8</b><span>валют с курсом НБ РК</span></li>
+            <li><b>3</b><span>этапа: фото, текст, анализ</span></li>
+            <li><b>0</b><span>облачных сервисов</span></li>
+          </ul>
+        </div>
+        <div class="hero-visual" id="heroVisual" aria-hidden="true">
+          <div class="receipt-stage">
+            <div class="receipt-3d">
+              <div class="paper">
+                <div class="paper-head"><b>CHECK·AI MARKET</b><span>г. Алматы, пр. Абая 10</span><span>02.11.2026 · 18:42</span></div>
+                <div class="paper-sep"></div>
+                <div class="paper-line" style="--i:0"><span>Молоко 3,2% 1 л</span><b>620</b></div>
+                <div class="paper-line" style="--i:1"><span>Хлеб «Бородинский»</span><b>340</b></div>
+                <div class="paper-line" style="--i:2"><span>Кофе американо</span><b>990</b></div>
+                <div class="paper-line" style="--i:3"><span>Шампунь 400 мл</span><b>1 870</b></div>
+                <div class="paper-line" style="--i:4"><span>Яблоки 1,2 кг</span><b>1 000</b></div>
+                <div class="paper-sep"></div>
+                <div class="paper-total"><span>ИТОГ</span><b><i class="count"></i> ₸</b></div>
+                <div class="barcode"></div>
+                <div class="paper-foot">СПАСИБО ЗА ПОКУПКУ</div>
+              </div>
+              <div class="scan-beam"></div>
+            </div>
+            <div class="float-tag tag-a"><span class="tag-ico">🥕</span><span><b>Продукты</b><small>1 960 ₸ · 3 позиции</small></span></div>
+            <div class="float-tag tag-b"><span class="tag-ico">☕</span><span><b>Кафе</b><small>определил ИИ</small></span></div>
+            <div class="float-tag tag-c"><span><b>Бюджет на ноябрь</b><small>потрачено 72%</small><i class="mini-bar"><i></i></i></span></div>
+            <div class="float-tag tag-d"><span class="tag-ico">✓</span><span><b>Сумма сходится</b><small>4 820 ₸</small></span></div>
+          </div>
+        </div>
+      </div>
       <div class="upload-grid">
         <div class="card upload-card">
+          <div class="card-kicker"><span>01</span>Загрузите фото чека</div>
           <div id="dropzone" class="dropzone">
             <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff" hidden>
             <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
@@ -84,7 +133,8 @@
           <div id="uploadMessage" class="notice" role="alert" hidden></div>
         </div>
         <div class="card result-card" id="resultCard" aria-labelledby="resultTitle">
-          <div class="placeholder" id="resultPlaceholder"><b id="resultTitle">Здесь появится чек</b><span>Сначала загрузите фото — мы распознаем позиции и сумму.</span></div>
+          <div class="card-kicker"><span>02</span>Проверьте и сохраните</div>
+          <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b><span>Сначала загрузите фото — мы распознаем позиции и сумму.</span></div>
           <div id="resultContent" hidden>
             <div class="eyebrow">Чек распознан — проверьте и поправьте, если нужно</div>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
