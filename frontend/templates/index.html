@@ -46,20 +46,15 @@
 
   <main class="layout">
     <section class="page active" id="page-home" aria-labelledby="homeTitle">
+      <div class="land-top">
+        <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
+        <button class="btn soft small" id="heroLogin" type="button">Войти</button>
+      </div>
       <div class="hero">
         <div class="hero-copy">
-          <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
-          <h1 id="homeTitle" class="hero-title">Сфоткал чек —<br><span class="grad-text">расходы посчитались</span></h1>
-          <p class="hero-lead">CheckAI читает позиции, цены и итог, раскладывает покупки по категориям и следит, чтобы вы уложились в бюджет.</p>
-          <div class="hero-actions" id="heroGuest">
-            <button class="btn hero-cta" id="heroRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button>
-            <button class="btn soft hero-cta" id="heroLogin" type="button">Войти</button>
-          </div>
-          <ul class="hero-stats">
-            <li><b>8</b><span>валют с курсом НБ РК</span></li>
-            <li><b>3</b><span>этапа: фото, текст, анализ</span></li>
-            <li><b>0</b><span>облачных сервисов</span></li>
-          </ul>
+          <h1 id="homeTitle" class="hero-title">Чеки<br>в цифры<span class="accent">.</span></h1>
+          <p class="hero-lead">Фото чека — и расходы разложены по полочкам.</p>
+          <div class="hero-actions"><button class="btn hero-cta" id="heroRegister" type="button">Начать <span aria-hidden="true">→</span></button></div>
         </div>
         <div class="hero-visual" id="heroVisual" aria-hidden="true">
           <div class="receipt-stage">
@@ -82,62 +77,55 @@
           </div>
         </div>
       </div>
-      <a class="scroll-hint" href="#about" aria-label="Подробнее о CheckAI"><span></span></a>
 
-      <section class="landing-section" id="about" aria-labelledby="howTitle">
-        <div class="section-head reveal"><div class="eyebrow">Как это работает</div><h2 id="howTitle">От фото до отчёта — <span class="grad-text">три шага</span></h2></div>
-        <ol class="steps-flow">
-          <li class="card flow-card reveal" style="--d:0"><span class="flow-num">01</span><span class="flow-ico" aria-hidden="true">📸</span><h3>Сфотографируйте чек</h3><p>Снимите камерой телефона или загрузите фото. Подойдёт даже мятый и длинный чек.</p></li>
-          <li class="card flow-card reveal" style="--d:1"><span class="flow-num">02</span><span class="flow-ico" aria-hidden="true">🧠</span><h3>ИИ его прочитает</h3><p>PaddleOCR распознаёт текст, языковая модель Qwen находит товары, цены, магазин и итог.</p></li>
-          <li class="card flow-card reveal" style="--d:2"><span class="flow-num">03</span><span class="flow-ico" aria-hidden="true">📊</span><h3>Расходы посчитаны</h3><p>Покупки разложены по категориям, сумма сверена с итогом, бюджет обновлён.</p></li>
+      <div class="ticker" aria-hidden="true"><div class="ticker-track"><span>Продукты</span><i>✱</i><span>Кафе</span><i>✱</i><span>Транспорт</span><i>✱</i><span>Дом</span><i>✱</i><span>Здоровье</span><i>✱</i><span>Одежда</span><i>✱</i><span>Развлечения</span><i>✱</i><span>Продукты</span><i>✱</i><span>Кафе</span><i>✱</i><span>Транспорт</span><i>✱</i><span>Дом</span><i>✱</i><span>Здоровье</span><i>✱</i><span>Одежда</span><i>✱</i><span>Развлечения</span><i>✱</i></div></div>
+
+      <section class="land-block" aria-labelledby="whatTitle">
+        <div class="block-head reveal"><span class="block-idx">/01</span><h2 id="whatTitle">Что умеет</h2></div>
+        <ol class="rows">
+          <li class="row reveal" style="--d:0"><span class="row-num">01</span><b>Читает чек</b><span class="row-tag">OCR + ИИ</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:1"><span class="row-num">02</span><b>Раскладывает по категориям</b><span class="row-tag">Свои правила</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:2"><span class="row-num">03</span><b>Следит за бюджетом</b><span class="row-tag">Лимиты</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:3"><span class="row-num">04</span><b>Считает в валютах</b><span class="row-tag">Курс НБ РК</span><span class="row-arrow" aria-hidden="true">→</span></li>
         </ol>
       </section>
 
-      <div class="marquee" aria-hidden="true"><div class="marquee-track">
-        <span>🥕 Продукты</span><span>☕ Кафе</span><span>🚌 Транспорт</span><span>🏠 Дом и быт</span><span>✚ Здоровье</span><span>🧥 Одежда</span><span>🎟 Развлечения</span><span>💄 Свои категории</span>
-        <span>🥕 Продукты</span><span>☕ Кафе</span><span>🚌 Транспорт</span><span>🏠 Дом и быт</span><span>✚ Здоровье</span><span>🧥 Одежда</span><span>🎟 Развлечения</span><span>💄 Свои категории</span>
-      </div></div>
-
-      <section class="landing-section" aria-labelledby="featuresTitle">
-        <div class="section-head reveal"><div class="eyebrow">Возможности</div><h2 id="featuresTitle">Всё, чтобы <span class="grad-text">видеть свои деньги</span></h2></div>
-        <div class="feature-grid">
-          <article class="card feature reveal" style="--d:0"><span class="feature-ico" aria-hidden="true">◈</span><h3>Категории под вас</h3><p>Создавайте свои категории, переносите товары перетаскиванием — CheckAI запомнит правило для следующих чеков.</p></article>
-          <article class="card feature reveal" style="--d:1"><span class="feature-ico" aria-hidden="true">◎</span><h3>Бюджеты и лимиты</h3><p>Лимит на месяц и по категориям, прогноз до конца месяца и предупреждение о перерасходе.</p></article>
-          <article class="card feature reveal" style="--d:2"><span class="feature-ico" aria-hidden="true">₸</span><h3>8 валют</h3><p>Тенге, рубли, доллары, евро и другие — с пересчётом по официальному курсу Нацбанка РК на дату покупки.</p></article>
-          <article class="card feature reveal" style="--d:0"><span class="feature-ico" aria-hidden="true">◔</span><h3>Аналитика</h3><p>Динамика трат по дням и месяцам, самые затратные категории и средний чек.</p></article>
-          <article class="card feature reveal" style="--d:1"><span class="feature-ico" aria-hidden="true">🔒</span><h3>Данные у вас</h3><p>Распознавание идёт на вашем компьютере — фото чеков не уходят в облачные сервисы.</p></article>
-          <article class="card feature reveal" style="--d:2"><span class="feature-ico" aria-hidden="true">⇩</span><h3>Экспорт</h3><p>История выгружается в CSV для Excel, любой чек — в JSON.</p></article>
+      <section class="land-block" aria-labelledby="factsTitle">
+        <div class="block-head reveal"><span class="block-idx">/02</span><h2 id="factsTitle">В цифрах</h2></div>
+        <div class="facts">
+          <div class="fact reveal" style="--d:0"><b>8</b><span>валют</span></div>
+          <div class="fact reveal" style="--d:1"><b>50</b><span>своих категорий</span></div>
+          <div class="fact reveal" style="--d:2"><b>3</b><span>шага до отчёта</span></div>
+          <div class="fact reveal" style="--d:3"><b>0</b><span>облаков</span></div>
         </div>
       </section>
 
-      <section class="landing-cta reveal" aria-labelledby="ctaTitle">
-        <h2 id="ctaTitle">Хватит переписывать чеки <span class="grad-text">вручную</span></h2>
-        <p>Создайте аккаунт и загрузите первый чек — или попробуйте на демо.</p>
+      <section class="land-final reveal" aria-labelledby="ctaTitle">
+        <h2 id="ctaTitle">Первый чек —<br>за минуту<span class="accent">.</span></h2>
         <div class="hero-actions"><button class="btn hero-cta" id="landingRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button><button class="btn soft hero-cta" id="landingLogin" type="button">Войти</button></div>
       </section>
-      <footer class="landing-foot">CheckAI · учебный проект команды · распознавание чеков с помощью ИИ</footer>
+      <footer class="landing-foot"><span>© CheckAI</span><span>2026</span></footer>
     </section>
 
     <section class="page" id="page-upload" aria-labelledby="uploadTitle">
-      <div class="page-head"><div><div class="eyebrow">Новый чек</div><h1 id="uploadTitle">Добавить чек</h1><p>Загрузите фото — мы распознаем позиции, цены и итог. Проверьте результат и сохраните его в историю.</p></div></div>
+      <div class="page-head"><div><h1 id="uploadTitle">Добавить чек</h1></div></div>
       <div class="card empty guest-card" id="uploadGuest" hidden>
         <div class="guest-ico" aria-hidden="true">🔒</div>
-        <b>Распознавание доступно после входа</b>
-        <span>Чеки сохраняются в вашем аккаунте, а категории и правила подстраиваются под вас.</span>
+        <b>Войдите, чтобы добавить чек</b>
         <div class="button-row" style="justify-content:center"><button class="btn" id="uploadRegisterBtn" type="button">Создать аккаунт</button><button class="btn soft" id="uploadLoginBtn" type="button">Войти</button></div>
       </div>
       <div class="upload-grid" id="uploadBody">
         <div class="card upload-card">
-          <div class="card-kicker"><span>01</span>Загрузите фото чека</div>
+          <div class="card-kicker"><span>01</span>Фото</div>
           <div id="dropzone" class="dropzone">
             <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff" hidden>
             <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
             <div id="dropPrompt">
               <div class="upload-icon" aria-hidden="true">↥</div>
-              <h3>Перетащите фото чека сюда</h3>
-              <p>JPG, PNG, WEBP, BMP или TIFF, до <span id="maxSizeText">10</span> МБ</p>
+              <h3>Перетащите фото</h3>
+              <p>до <span id="maxSizeText">10</span> МБ</p>
               <div class="button-row" style="justify-content:center">
-                <button class="btn soft" id="chooseBtn" type="button">Выбрать изображение</button>
+                <button class="btn soft" id="chooseBtn" type="button">Выбрать</button>
                 <button class="btn soft touch-only" id="cameraBtn" type="button">Сфотографировать</button>
               </div>
             </div>
@@ -160,22 +148,19 @@
             <small id="stepsNote"></small>
           </div>
           <div class="upload-foot">
-            <span>Можно загрузить фото из галереи</span>
-            <button class="text-btn" id="testBtn" type="button">Попробовать на демо-чеке →</button>
+            <button class="text-btn" id="testBtn" type="button">Демо-чек →</button>
           </div>
           <div id="uploadMessage" class="notice" role="alert" hidden></div>
         </div>
         <div class="card result-card" id="resultCard" aria-labelledby="resultTitle">
-          <div class="card-kicker"><span>02</span>Проверьте и сохраните</div>
-          <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b><span>Сначала загрузите фото — мы распознаем позиции и сумму.</span></div>
+          <div class="card-kicker"><span>02</span>Результат</div>
+          <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b></div>
           <div id="resultContent" hidden>
-            <div class="eyebrow">Чек распознан — проверьте и поправьте, если нужно</div>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
             <div id="resultEditor"></div>
-            <div class="notice">Категории определены автоматически, распознавание иногда ошибается — проверьте названия, цены, итог и категории. Если товар попал не туда, в разделе «Категории» его можно перенести и запомнить.</div>
             <div class="button-row" style="margin-top:18px">
-              <button class="btn" id="saveReceiptBtn" type="button">Сохранить в историю</button>
-              <button class="btn soft" id="downloadBtn" type="button">Скачать JSON</button>
+              <button class="btn" id="saveReceiptBtn" type="button">Сохранить</button>
+              <button class="btn soft" id="downloadBtn" type="button">JSON</button>
             </div>
           </div>
         </div>
@@ -184,7 +169,7 @@
 
     <section class="page" id="page-history" aria-labelledby="historyTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Все чеки в одном месте</div><h1 id="historyTitle">История покупок</h1><p>Сводка обновляется после каждого сохранённого чека.</p></div>
+        <div><h1 id="historyTitle">История</h1></div>
         <div class="filterbar">
           <input id="historySearch" type="search" placeholder="Магазин или товар" aria-label="Поиск по магазину или товару">
           <select id="historyPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
@@ -203,21 +188,19 @@
 
     <section class="page" id="page-categories" aria-labelledby="categoriesTitle">
       <div class="page-head">
-        <div><h1 id="categoriesTitle">Категории</h1>
-          <p><span class="hover-only">Перетащите товар на другую категорию, чтобы исправить распознавание.</span><span class="touch-only">Откройте категорию и выберите «Переместить в…», чтобы исправить распознавание.</span></p></div>
+        <div><h1 id="categoriesTitle">Категории</h1></div>
         <div class="filterbar" id="categoriesControls">
           <select class="periodFilter" id="categoriesPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
-          <button class="btn soft small" id="addCategoryBtn" type="button">＋ Добавить категорию</button>
+          <button class="btn soft small" id="addCategoryBtn" type="button">＋ Категория</button>
         </div>
       </div>
-      <div class="card empty" id="categoriesGuest" hidden>Категории хранятся в аккаунте. <button class="text-btn" id="categoriesLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы настроить их под себя.</div>
+      <div class="card empty" id="categoriesGuest" hidden><button class="text-btn" id="categoriesLoginBtn" type="button">Войдите</button>, чтобы настроить категории.</div>
       <div id="categoriesBody">
-        <label class="remember-toggle"><input type="checkbox" id="rememberMoves" checked> Запоминать перенос: такие же товары в новых чеках сразу попадут в выбранную категорию</label>
+        <label class="remember-toggle"><input type="checkbox" id="rememberMoves" checked> Запоминать перенос</label>
         <p class="currency-note" id="categoriesSkipped" hidden></p>
         <div class="category-grid" id="categoryGrid"></div>
         <section class="card rules-card" aria-labelledby="rulesTitle">
-          <h3 id="rulesTitle">Запомненные правила</h3>
-          <p>При распознавании правило важнее ИИ: товар с таким названием сразу попадает в указанную категорию.</p>
+          <h3 id="rulesTitle">Правила</h3>
           <div id="rulesList"></div>
         </section>
       </div>
@@ -225,40 +208,39 @@
 
     <section class="page" id="page-analysis" aria-labelledby="analysisTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Картина расходов</div><h1 id="analysisTitle">Анализ расходов</h1><p>Сравните траты по периодам и категориям.</p></div>
+        <div><h1 id="analysisTitle">Анализ</h1></div>
         <div class="filterbar">
           <select id="analysisPeriod" aria-label="Период"><option value="month">Этот месяц</option><option value="week">Эта неделя</option><option value="year">Этот год</option><option value="all">За всё время</option></select>
           <select id="analysisCategory" aria-label="Категория"><option value="all">Все категории</option></select>
         </div>
       </div>
       <div class="summary-grid">
-        <div class="card stat"><span>Расходы за период</span><strong id="analysisTotal">0</strong></div>
-        <div class="card stat"><span>Самая крупная категория</span><strong id="analysisTop">—</strong></div>
-        <div class="card stat"><span>Позиций учтено</span><strong id="analysisItems">0</strong></div>
+        <div class="card stat"><span>Расходы</span><strong id="analysisTotal">0</strong></div>
+        <div class="card stat"><span>Топ категория</span><strong id="analysisTop">—</strong></div>
+        <div class="card stat"><span>Позиций</span><strong id="analysisItems">0</strong></div>
       </div>
       <p class="currency-note" id="analysisSkipped" hidden></p>
       <div class="analysis-grid">
         <div class="card chart-card"><h3 id="chartTitle">Динамика расходов</h3><div class="chart" id="chart" role="img"></div></div>
-        <div class="card breakdown-card"><h3>Расходы по категориям</h3><div id="breakdown" class="legend"></div></div>
+        <div class="card breakdown-card"><h3>По категориям</h3><div id="breakdown" class="legend"></div></div>
       </div>
     </section>
 
     <section class="page" id="page-budgets" aria-labelledby="budgetsTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Контроль трат</div><h1 id="budgetsTitle">Бюджеты</h1><p>Задайте лимиты на месяц — CheckAI покажет, сколько осталось, и предупредит о перерасходе.</p></div>
+        <div><h1 id="budgetsTitle">Бюджеты</h1></div>
         <div class="filterbar" id="budgetControls">
           <select id="budgetMonth" aria-label="Месяц"></select>
-          <button class="btn soft small" id="budgetEditBtn" type="button" aria-controls="budgetEditor" aria-expanded="false">Настроить лимиты</button>
+          <button class="btn soft small" id="budgetEditBtn" type="button" aria-controls="budgetEditor" aria-expanded="false">Лимиты</button>
         </div>
       </div>
-      <div class="card empty" id="budgetGuest" hidden>Бюджеты хранятся в аккаунте. <button class="text-btn" id="budgetLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы задать лимиты.</div>
+      <div class="card empty" id="budgetGuest" hidden><button class="text-btn" id="budgetLoginBtn" type="button">Войдите</button>, чтобы задать лимиты.</div>
       <form class="card budget-editor" id="budgetEditor" hidden>
         <h3 id="budgetEditorTitle">Лимиты на месяц</h3>
-        <p>Лимиты действуют каждый месяц. Оставьте поле пустым, если лимит не нужен.</p>
-        <label class="budget-field budget-total"><span>Общий лимит на месяц</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
+        <label class="budget-field budget-total"><span>Общий лимит</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
         <div class="budget-fields" id="budgetFields"></div>
         <div class="auth-error" id="budgetError" role="alert" hidden></div>
-        <div class="button-row"><button class="btn" id="budgetSave" type="submit">Сохранить лимиты</button><button class="btn soft" id="budgetCancel" type="button">Отмена</button></div>
+        <div class="button-row"><button class="btn" id="budgetSave" type="submit">Сохранить</button><button class="btn soft" id="budgetCancel" type="button">Отмена</button></div>
       </form>
       <div id="budgetBody">
         <div class="summary-grid">
@@ -271,39 +253,39 @@
         <div class="budget-list" id="budgetList"></div>
         <p class="budget-unlimited" id="budgetUnlimited" hidden></p>
       </div>
-      <div class="notice" id="budgetLocalNote" hidden>Лимиты пока сохраняются только в этом браузере: сервер ещё не поддерживает бюджеты. На другом устройстве их не будет.</div>
+      <div class="notice" id="budgetLocalNote" hidden>Лимиты хранятся только в этом браузере.</div>
     </section>
 
     <section class="page" id="page-profile" aria-labelledby="profileTitle">
-      <div class="page-head"><div><div class="eyebrow">Ваш аккаунт</div><h1 id="profileTitle">Профиль</h1><p>Данные аккаунта, смена аккаунта и удаление.</p></div></div>
+      <div class="page-head"><div><h1 id="profileTitle">Профиль</h1></div></div>
       <div class="profile-grid">
         <div class="card profile-card">
           <div class="profile-head"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div><div><h3 id="profileName"></h3><p id="profileEmail"></p></div></div>
           <dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0</dd></dl>
         </div>
         <div class="card profile-card">
-          <h3>Аккаунты на этом устройстве</h3><p>Переключайтесь между аккаунтами без повторного ввода пароля.</p>
+          <h3>Аккаунты</h3>
           <div id="profileAccounts"></div>
-          <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">Добавить аккаунт</button><button class="btn soft" id="logoutBtn" type="button">Выйти из этого аккаунта</button></div>
+          <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">Добавить аккаунт</button><button class="btn soft" id="logoutBtn" type="button">Выйти</button></div>
         </div>
         <div class="card profile-card">
-          <h3>Редактировать аккаунт</h3>
+          <h3>Данные</h3>
           <form class="auth-form" id="profileForm">
             <label>Имя<input id="editName" autocomplete="name" maxlength="255"></label>
             <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
-            <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">В ней показываются итоги, аналитика и бюджеты. Лимиты бюджетов при смене не пересчитываются</span></label>
-            <label>Новый пароль<input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять" aria-describedby="editPasswordHint"><span class="hint" id="editPasswordHint">Минимум 8 символов</span></label>
-            <label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Нужен для смены email или пароля"></label>
+            <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">Итоги и бюджеты — в ней</span></label>
+            <label>Новый пароль<input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Не менять" aria-describedby="editPasswordHint"><span class="hint" id="editPasswordHint">Минимум 8 символов</span></label>
+            <label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Для смены email или пароля"></label>
             <div class="auth-error" id="profileError" role="alert" hidden></div>
-            <div class="button-row"><button class="btn" id="profileSave" type="submit">Сохранить изменения</button><button class="btn soft" id="profileReset" type="button">Отменить</button></div>
+            <div class="button-row"><button class="btn" id="profileSave" type="submit">Сохранить</button><button class="btn soft" id="profileReset" type="button">Отменить</button></div>
           </form>
         </div>
         <div class="card profile-card danger-card">
-          <h3 class="danger-text">Удалить аккаунт</h3><p>Аккаунт и все сохранённые чеки будут удалены без возможности восстановления.</p>
+          <h3 class="danger-text">Удалить аккаунт</h3>
           <form class="auth-form" id="deleteForm">
-            <label>Пароль для подтверждения<input id="deletePassword" type="password" required autocomplete="current-password"></label>
+            <label>Пароль<input id="deletePassword" type="password" required autocomplete="current-password"></label>
             <div class="auth-error" id="deleteError" role="alert" hidden></div>
-            <button class="btn danger" id="deleteSubmit" type="submit">Удалить аккаунт навсегда</button>
+            <button class="btn danger" id="deleteSubmit" type="submit">Удалить навсегда</button>
           </form>
         </div>
       </div>
@@ -314,7 +296,6 @@
   <div class="modal-backdrop" id="receiptModal" hidden>
     <div class="card modal wide" role="dialog" aria-modal="true" aria-labelledby="rmStore">
       <button class="icon-btn modal-close" id="receiptClose" type="button" aria-label="Закрыть">✕</button>
-      <div class="eyebrow">Подробности покупки</div>
       <div id="rmView">
         <h2 id="rmStore"></h2><div class="store" id="rmDate"></div><div class="total" id="rmTotal"></div><div class="converted" id="rmConverted" hidden></div><div class="meta" id="rmMeta"></div>
         <img class="receipt-photo" id="rmPhoto" alt="Фото чека" hidden>
@@ -344,9 +325,9 @@
       <h2 id="categoryModalTitle">Новая категория</h2>
       <form class="auth-form category-form" id="categoryForm" novalidate>
         <label>Название<input id="categoryName" maxlength="50" autocomplete="off" required></label>
-        <label>Иконка<input id="categoryIcon" autocomplete="off" placeholder="◌" aria-describedby="categoryIconHint"><span class="hint" id="categoryIconHint">Эмодзи или символ — свой или один из готовых ниже</span></label>
+        <label>Иконка<input id="categoryIcon" autocomplete="off" placeholder="◌" aria-describedby="categoryIconHint"><span class="hint" id="categoryIconHint">Эмодзи или символ</span></label>
         <div class="icon-picks" id="categoryIconPicks" role="group" aria-label="Готовые иконки"></div>
-        <label>Описание<textarea id="categoryDesc" maxlength="300" rows="3" aria-describedby="categoryDescHint"></textarea><span class="hint" id="categoryDescHint">Перечислите, что сюда относится, — по описанию ИИ раскладывает товары. Например: крем, шампунь, тушь, помада</span></label>
+        <label>Описание<textarea id="categoryDesc" maxlength="300" rows="3" aria-describedby="categoryDescHint"></textarea><span class="hint" id="categoryDescHint">По нему ИИ раскладывает товары</span></label>
         <div class="auth-error" id="categoryError" role="alert" hidden></div>
         <div class="button-row"><button class="btn" id="categorySave" type="submit">Сохранить</button><button class="btn soft" id="categoryCancel" type="button">Отмена</button></div>
       </form>

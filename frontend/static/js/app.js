@@ -540,7 +540,7 @@ function mountEditor(root, draft) {
         ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
         <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${it.category_source && CATEGORY_SOURCE_TEXT[it.category_source] ? `<small class="cat-source">${CATEGORY_SOURCE_TEXT[it.category_source]}</small>` : ''}</label>
       </div>
-    </div>`).join('') : '<div class="empty">Позиций нет. Добавьте их вручную или оставьте только итог.</div>';
+    </div>`).join('') : '<div class="empty">Позиций нет</div>';
     updateSum();
   };
   const updateSum = () => {
@@ -896,7 +896,7 @@ function startSteps(withUpload) {
     const sinceUpload = Date.now() - uploadedAt;
     if (sinceUpload < OCR_STEP_MS) setStep('ocr', sinceUpload / OCR_STEP_MS);
     else setStep('ai', 1 - Math.exp(-(sinceUpload - OCR_STEP_MS) / 30000));
-    $('stepsNote').textContent = `Прошло ${seconds} с. Обычно распознавание занимает до минуты — не закрывайте страницу.`;
+    $('stepsNote').textContent = `${seconds} с`;
   };
   tick();
   stepsTimer = setInterval(tick, 400);
@@ -1020,9 +1020,9 @@ function renderHistory() {
   $('exportCsvBtn').disabled = !list.length;
   const shown = list.slice(0, historyShown);
   let empty;
-  if (!currentUser) empty = '<div class="card empty">История хранится в аккаунте. <button class="text-btn" data-open-auth type="button">Войдите или зарегистрируйтесь</button>, чтобы сохранять чеки.</div>';
-  else if (searching) empty = '<div class="card empty">Ничего не найдено. Попробуйте другое название магазина или товара.</div>';
-  else empty = '<div class="card empty">Пока нет чеков за этот период. Загрузите чек, чтобы начать историю.</div>';
+  if (!currentUser) empty = '<div class="card empty"><button class="text-btn" data-open-auth type="button">Войдите</button>, чтобы видеть историю.</div>';
+  else if (searching) empty = '<div class="card empty">Ничего не найдено</div>';
+  else empty = '<div class="card empty">Чеков пока нет</div>';
   $('historyList').innerHTML = shown.length
     ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}"><div><h3>${esc(r.store || 'Магазин не определён')}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
     : empty;
@@ -1137,7 +1137,7 @@ function renderCategories() {
   if (openCategoryKey !== null && !cards.some(c => catKey(c) === openCategoryKey)) openCategoryKey = null;
   $('categoryGrid').innerHTML = cards.length
     ? cards.map((c, i) => categoryCard(c, i, sums[catKey(c)] || 0, rows[catKey(c)] || [], summary.converted)).join('')
-    : '<div class="card empty">Категорий нет. Добавьте первую кнопкой «Добавить категорию».</div>';
+    : '<div class="card empty">Категорий нет</div>';
   renderRules();
 }
 function categoryCard(c, index, sum, rows, converted) {
@@ -1152,7 +1152,7 @@ function categoryCard(c, index, sum, rows, converted) {
         <button class="menu-item danger-text" type="button" role="menuitem" data-cat-action="delete">✕ Удалить</button>
       </div>
     </div>` : '';
-  const desc = c.description || (own ? 'Без описания' : 'Товары, которые не попали ни в одну категорию');
+  const desc = c.description || (own ? '' : 'Не распределено');
   return `<div class="card category-row${open ? ' open' : ''}" data-cat="${esc(key)}">
     <button class="cat-open" type="button" aria-expanded="${open}" aria-controls="${esc(panelId)}">
       <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
@@ -1163,7 +1163,7 @@ function categoryCard(c, index, sum, rows, converted) {
 }
 function categoryItems(c, rows, id) {
   const key = catKey(c);
-  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">За этот период в категории нет товаров.</div></div>`;
+  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">Пусто</div></div>`;
   // Сначала свежие покупки
   const sorted = rows.slice().sort((a, b) => String(b.r.iso || '').localeCompare(String(a.r.iso || '')));
   const shown = sorted.slice(0, categoryItemsShown), rest = sorted.length - shown.length;
@@ -1413,7 +1413,7 @@ function renderRules() {
       return `<div class="rule-row"><span class="rule-pattern">«${esc(r.pattern)}»</span><span aria-hidden="true">→</span><span>${esc(categoryLabel(shown))}</span>
         <button class="text-btn" type="button" data-rule-del="${esc(r.id)}" aria-label="Удалить правило «${esc(r.pattern)}»">✕</button></div>`;
     }).join('')
-    : '<p class="rules-empty">Правил пока нет. Они появляются, когда вы переносите товар с галочкой «Запомнить».</p>';
+    : '<p class="rules-empty">Правил пока нет</p>';
 }
 $('rulesList').onclick = async e => {
   const b = e.target.closest('[data-rule-del]');
@@ -1451,7 +1451,7 @@ function renderAnalysis() {
   const maxSum = Math.max(...sorted.map(x => x[1]));
   $('breakdown').innerHTML = sorted.length
     ? sorted.map(([n, v]) => `<div class="legend-row"><i class="dot" aria-hidden="true"></i><div>${esc(categoryLabel(categoryByKey(n)))}<div class="progress" aria-hidden="true"><i style="width:${Math.round(v / maxSum * 100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join('')
-    : '<div class="empty">Нет данных для выбранного периода</div>';
+    : '<div class="empty">Нет данных</div>';
   const buckets = [], now = new Date();
   if (p === 'week') {
     for (let i = 6; i >= 0; i--) {
@@ -1616,7 +1616,7 @@ function renderBudgets() {
   $('budgetLeft').textContent = limit ? money(Math.abs(limit - spent)) : '—';
   $('budgetLeft').classList.toggle('over', !!limit && spent > limit);
   if (!hasBudgets(budgets)) {
-    $('budgetOverall').innerHTML = '<div class="card empty">Лимиты ещё не заданы. <button class="text-btn" type="button" data-budget-edit>Настроить лимиты</button></div>';
+    $('budgetOverall').innerHTML = '<div class="card empty"><button class="text-btn" type="button" data-budget-edit>Задать лимиты</button></div>';
   } else {
     const pct = budgetPct(spent, limit), title = budgets.total ? 'Весь месяц' : 'Категории с лимитом', forecast = budgetForecast(key, spent, limit);
     $('budgetOverall').innerHTML = `<div class="card budget-overall ${state}">
