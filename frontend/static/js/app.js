@@ -312,7 +312,7 @@ function setUser(user) {
   $('userChip').hidden = false;
   $('navProfile').hidden = false;
   $('drawerFoot').textContent = 'Чеки сохраняются в вашем аккаунте';
-  renderAccountMenu(); renderProfile(); fillProfileForm();
+  renderAccess(); renderAccountMenu(); renderProfile(); fillProfileForm();
   closeBudgetEditor(); loadBudgets(); loadCategories(); loadRules();
 }
 function setGuest() {
@@ -323,10 +323,19 @@ function setGuest() {
   $('userChip').hidden = true;
   $('navProfile').hidden = true;
   $('drawerFoot').textContent = 'Войдите, чтобы сохранять чеки';
-  if ($('page-profile').classList.contains('active')) showPage('upload');
+  if ($('page-profile').classList.contains('active')) showPage('home');
   rerender();
 }
-function rerender() { renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
+// Распознавание — только после входа; на главной кнопки зависят от того, вошёл ли пользователь
+function renderAccess() {
+  const guest = !currentUser;
+  $('uploadGuest').hidden = !guest;
+  $('uploadBody').hidden = guest;
+  $('heroGuest').hidden = !guest;
+  $('heroNote').hidden = !guest;
+  $('heroUser').hidden = guest;
+}
+function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
 function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
 
 // --- Смена аккаунта ---
@@ -439,7 +448,7 @@ $('deleteForm').onsubmit = async e => {
   try {
     await apiRequest('/api/auth/me', { method: 'DELETE', body: JSON.stringify({ password: $('deletePassword').value }) });
     try { localStorage.removeItem(budgetsKey(u.id)); } catch (e) {}
-    forgetAccount(u.id); removeToken(); setGuest(); showPage('upload');
+    forgetAccount(u.id); removeToken(); setGuest(); showPage('home');
     toast('Аккаунт удалён');
   } catch (err) {
     showFormError('deleteError', notSupported(err) ? 'Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).' : err.message);
@@ -678,7 +687,8 @@ async function loadReceipts() {
 }
 async function checkAuthOnStartup() {
   if (!getToken()) { setGuest(); return; }
-  try { setUser(await apiRequest('/api/auth/me')); await loadReceipts(); }
+  // Вошедший пользователь сразу попадает к загрузке чека, гость остаётся на главной
+  try { setUser(await apiRequest('/api/auth/me')); if ($('page-home').classList.contains('active')) showPage('upload'); await loadReceipts(); }
   catch (e) { setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
 }
 
@@ -749,6 +759,7 @@ $('authForm').onsubmit = async e => {
     closeAuth();
     $('authForm').reset();
     toast(isLogin ? 'Добро пожаловать!' : 'Регистрация успешна!');
+    if ($('page-home').classList.contains('active')) showPage('upload');
     await loadReceipts();
     if (wasPending) await saveReceipt();
   } catch (err) {
@@ -785,6 +796,11 @@ function closeMenu() { if ($('drawer').classList.contains('open')) setMenu(false
 $('menuBtn').onclick = () => setMenu(!$('drawer').classList.contains('open'));
 $('overlay').onclick = closeMenu;
 document.querySelectorAll('.nav-link').forEach(b => b.onclick = () => showPage(b.dataset.page));
+$('brandLink').onclick = () => showPage('home');
+$('heroRegister').onclick = $('uploadRegisterBtn').onclick = () => openAuth('register');
+$('heroLogin').onclick = $('uploadLoginBtn').onclick = () => openAuth('login');
+$('heroUpload').onclick = () => showPage('upload');
+$('heroHistory').onclick = () => showPage('history');
 document.addEventListener('keydown', e => {
   if (e.key === 'Tab') { trapFocus(e); return; }
   if (e.key !== 'Escape') return;
@@ -1687,7 +1703,7 @@ if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   const stage = document.querySelector('.receipt-stage');
   if (stage && window.matchMedia('(hover: hover)').matches) {
     window.addEventListener('pointermove', e => {
-      if (!$('page-upload').classList.contains('active')) return;
+      if (!$('page-home').classList.contains('active')) return;
       const x = e.clientX / window.innerWidth - .5, y = e.clientY / window.innerHeight - .5;
       stage.style.setProperty('--ry', (x * 18).toFixed(2) + 'deg');
       stage.style.setProperty('--rx', (-y * 14).toFixed(2) + 'deg');

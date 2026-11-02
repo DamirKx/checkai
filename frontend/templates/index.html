@@ -15,9 +15,10 @@
 <div class="app">
   <header class="topbar">
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
-    <div class="brand-mark" aria-hidden="true"><span>C</span></div><div class="brand">Check<b>AI</b></div>
+    <button class="brand-link" id="brandLink" type="button" aria-label="CheckAI — на главную"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></button>
     <nav class="top-nav" aria-label="Разделы">
-      <button class="nav-link active" data-page="upload" type="button" aria-current="page">Чек</button>
+      <button class="nav-link active" data-page="home" type="button" aria-current="page">Главная</button>
+      <button class="nav-link" data-page="upload" type="button">Добавить чек</button>
       <button class="nav-link" data-page="history" type="button">История</button>
       <button class="nav-link" data-page="categories" type="button">Категории</button>
       <button class="nav-link" data-page="analysis" type="button">Анализ</button>
@@ -41,7 +42,8 @@
   <aside class="drawer" id="drawer" aria-label="Главное меню" inert>
     <div class="drawer-head"><div class="brand-mark" aria-hidden="true">C</div><div class="brand">CheckAI</div></div>
     <nav class="drawer-nav">
-      <button class="nav-link active" data-page="upload" type="button" aria-current="page"><span aria-hidden="true">＋</span><span>Добавить чек</span></button>
+      <button class="nav-link active" data-page="home" type="button" aria-current="page"><span aria-hidden="true">◇</span><span>Главная</span></button>
+      <button class="nav-link" data-page="upload" type="button"><span aria-hidden="true">＋</span><span>Добавить чек</span></button>
       <button class="nav-link" data-page="history" type="button"><span aria-hidden="true">▤</span><span>История и расходы</span></button>
       <button class="nav-link" data-page="categories" type="button"><span aria-hidden="true">◈</span><span>Категории</span></button>
       <button class="nav-link" data-page="analysis" type="button"><span aria-hidden="true">◔</span><span>Анализ расходов</span></button>
@@ -52,16 +54,21 @@
   </aside>
 
   <main class="layout">
-    <section class="page active" id="page-upload" aria-labelledby="uploadTitle">
+    <section class="page active" id="page-home" aria-labelledby="homeTitle">
       <div class="hero">
         <div class="hero-copy">
           <div class="hero-chip"><span class="live-dot" aria-hidden="true"></span>OCR + ИИ работают на вашем компьютере</div>
-          <h1 id="uploadTitle" class="hero-title">Сфоткал чек —<br><span class="grad-text">расходы посчитались</span></h1>
+          <h1 id="homeTitle" class="hero-title">Сфоткал чек —<br><span class="grad-text">расходы посчитались</span></h1>
           <p class="hero-lead">CheckAI читает позиции, цены и итог, раскладывает покупки по категориям и следит, чтобы вы уложились в бюджет.</p>
-          <div class="hero-actions">
-            <a class="btn hero-cta" href="#dropzone">Загрузить чек <span aria-hidden="true">↓</span></a>
-            <span class="hero-note">или <b>попробуйте демо-чек</b> ниже</span>
+          <div class="hero-actions" id="heroGuest">
+            <button class="btn hero-cta" id="heroRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button>
+            <button class="btn soft hero-cta" id="heroLogin" type="button">Войти</button>
           </div>
+          <div class="hero-actions" id="heroUser" hidden>
+            <button class="btn hero-cta" id="heroUpload" type="button">Добавить чек <span aria-hidden="true">→</span></button>
+            <button class="btn soft hero-cta" id="heroHistory" type="button">Моя история</button>
+          </div>
+          <p class="hero-note" id="heroNote">Регистрация бесплатная — после входа загрузите свой чек или попробуйте демо.</p>
           <ul class="hero-stats">
             <li><b>8</b><span>валют с курсом НБ РК</span></li>
             <li><b>3</b><span>этапа: фото, текст, анализ</span></li>
@@ -86,14 +93,20 @@
               </div>
               <div class="scan-beam"></div>
             </div>
-            <div class="float-tag tag-a"><span class="tag-ico">🥕</span><span><b>Продукты</b><small>1 960 ₸ · 3 позиции</small></span></div>
-            <div class="float-tag tag-b"><span class="tag-ico">☕</span><span><b>Кафе</b><small>определил ИИ</small></span></div>
-            <div class="float-tag tag-c"><span><b>Бюджет на ноябрь</b><small>потрачено 72%</small><i class="mini-bar"><i></i></i></span></div>
-            <div class="float-tag tag-d"><span class="tag-ico">✓</span><span><b>Сумма сходится</b><small>4 820 ₸</small></span></div>
           </div>
         </div>
       </div>
-      <div class="upload-grid">
+    </section>
+
+    <section class="page" id="page-upload" aria-labelledby="uploadTitle">
+      <div class="page-head"><div><div class="eyebrow">Новый чек</div><h1 id="uploadTitle">Добавить чек</h1><p>Загрузите фото — мы распознаем позиции, цены и итог. Проверьте результат и сохраните его в историю.</p></div></div>
+      <div class="card empty guest-card" id="uploadGuest" hidden>
+        <div class="guest-ico" aria-hidden="true">🔒</div>
+        <b>Распознавание доступно после входа</b>
+        <span>Чеки сохраняются в вашем аккаунте, а категории и правила подстраиваются под вас.</span>
+        <div class="button-row" style="justify-content:center"><button class="btn" id="uploadRegisterBtn" type="button">Создать аккаунт</button><button class="btn soft" id="uploadLoginBtn" type="button">Войти</button></div>
+      </div>
+      <div class="upload-grid" id="uploadBody">
         <div class="card upload-card">
           <div class="card-kicker"><span>01</span>Загрузите фото чека</div>
           <div id="dropzone" class="dropzone">
