@@ -4,11 +4,11 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07080d"><title>CheckAI — ваши расходы</title>
   <script>
-    // Тема выставляется до отрисовки, чтобы страница не мигала тёмным/светлым
-    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
+    // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
+    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=profile-2">
-  <script src="/static/js/app.js?v=profile-2" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=avatar-1">
+  <script src="/static/js/app.js?v=avatar-1" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -17,7 +17,7 @@
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
     <button class="brand-link" id="brandLink" type="button" aria-label="CheckAI — на главную"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></button>
     <div class="top-spacer"></div>
-    <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Включить светлую тему"><span aria-hidden="true" id="themeIcon">☀</span></button>
+    <button class="icon-btn theme-btn" id="themeBtn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
     <button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button>
     <div class="user-chip" id="userChip" hidden>
       <button class="user-btn" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню аккаунта"><div class="avatar" id="userAvatar" aria-hidden="true">Я</div><div class="user-meta"><b id="userName"></b><small id="userEmail"></small></div></button>
@@ -48,7 +48,10 @@
     <section class="page active" id="page-home" aria-labelledby="homeTitle">
       <div class="land-top">
         <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
-        <button class="btn soft small" id="heroLogin" type="button">Войти</button>
+        <div class="land-top-actions">
+          <button class="icon-btn theme-btn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
+          <button class="btn soft small" id="heroLogin" type="button">Войти</button>
+        </div>
       </div>
       <div class="hero">
         <div class="hero-copy">
@@ -260,7 +263,7 @@
       <div class="card pf-hero">
         <div class="pf-hero-top"><span class="block-idx">/профиль</span><span id="profileSince"></span></div>
         <div class="pf-hero-main">
-          <div class="pf-avatar"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div></div>
+          <button class="pf-avatar" id="avatarBtn" type="button" aria-label="Изменить фото профиля"><span class="avatar" id="profileAvatar" aria-hidden="true">Я</span><span class="pf-avatar-edit" aria-hidden="true">Изменить</span></button>
           <div class="pf-id">
             <h1 id="profileName"></h1>
             <p id="profileEmail"></p>
@@ -353,6 +356,15 @@
               <button class="theme-pick" data-theme-pick="light" type="button" aria-pressed="false"><span class="theme-preview tp-light" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Светлая</span></button>
               <button class="theme-pick" data-theme-pick="system" type="button" aria-pressed="false"><span class="theme-preview tp-system" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Как в системе</span></button>
             </div>
+            <h4 class="pf-sub" id="accentLabel">Акцентный цвет</h4>
+            <div class="accent-picks" id="accentPicks" role="radiogroup" aria-labelledby="accentLabel">
+              <button class="accent-pick" data-accent-pick="violet" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Фиолетовый</span></button>
+              <button class="accent-pick" data-accent-pick="red" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Красный</span></button>
+              <button class="accent-pick" data-accent-pick="orange" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Оранжевый</span></button>
+              <button class="accent-pick" data-accent-pick="green" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Зелёный</span></button>
+              <button class="accent-pick" data-accent-pick="blue" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Синий</span></button>
+              <button class="accent-pick" data-accent-pick="pink" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Розовый</span></button>
+            </div>
           </div>
 
           <div class="card pf-panel" id="pfPanel-data" role="tabpanel" aria-labelledby="pfTab-data" hidden>
@@ -440,6 +452,34 @@
         <p id="savedModalText" hidden></p>
         <div class="button-row"><button class="btn" id="savedToHistory" type="button">Перейти в историю</button><button class="btn soft" id="savedStay" type="button">Остаться</button></div>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="avatarModal" hidden>
+    <div class="card modal avatar-modal" role="dialog" aria-modal="true" aria-labelledby="avatarTitle" data-step="choose">
+      <button class="icon-btn modal-close" id="avatarClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="avatarTitle">Фото профиля</h2>
+      <div class="av-step av-choose">
+        <div class="av-current"><span class="avatar" id="avatarCurrent" aria-hidden="true">Я</span></div>
+        <div class="av-actions">
+          <button class="btn" id="avatarFileBtn" type="button">Загрузить с устройства</button>
+          <button class="btn soft" id="avatarCameraBtn" type="button">Сделать фото</button>
+          <button class="btn soft av-remove" id="avatarRemove" type="button">Удалить фото</button>
+        </div>
+        <p class="av-note">JPG, PNG или WEBP. Пока фото хранится только в этом браузере.</p>
+      </div>
+      <div class="av-step av-camera">
+        <div class="av-video"><video id="avatarVideo" playsinline muted></video></div>
+        <div class="button-row"><button class="btn" id="avatarShoot" type="button">Снять</button><button class="btn soft" id="avatarCameraCancel" type="button">Назад</button></div>
+      </div>
+      <div class="av-step av-crop">
+        <div class="av-stage" id="avatarStage" tabindex="0" aria-label="Положение фото: перетаскивайте или используйте стрелки"><img id="avatarCropImg" alt="" draggable="false"></div>
+        <label class="av-zoom"><span>Масштаб</span><input id="avatarZoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+        <div class="button-row"><button class="btn" id="avatarSave" type="button">Сохранить</button><button class="btn soft" id="avatarCropCancel" type="button">Назад</button></div>
+      </div>
+      <div class="auth-error" id="avatarError" role="alert" hidden></div>
+      <input id="avatarFile" type="file" accept="image/jpeg,image/png,image/webp,image/*" hidden>
+      <input id="avatarCapture" type="file" accept="image/*" capture="user" hidden>
     </div>
   </div>
 

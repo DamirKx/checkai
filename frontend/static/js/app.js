@@ -151,9 +151,12 @@ function applyTheme(theme, save) {
   document.documentElement.dataset.theme = theme;
   if (save) { try { localStorage.setItem(THEME_KEY, theme); } catch (e) {} }
   const light = theme === 'light';
-  $('themeIcon').textContent = light ? '☾' : '☀';
-  $('themeBtn').setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
-  $('themeBtn').title = light ? 'Тёмная тема' : 'Светлая тема';
+  // Кнопка-переключатель есть в шапке и на лендинге
+  document.querySelectorAll('[data-theme-toggle]').forEach(b => {
+    b.firstElementChild.textContent = light ? '☾' : '☀';
+    b.setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
+    b.title = light ? 'Тёмная тема' : 'Светлая тема';
+  });
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
   renderThemePicks();
 }
@@ -172,8 +175,38 @@ function renderThemePicks() {
 }
 systemThemeQuery.addEventListener?.('change', () => { if (themePref() === 'system') applyTheme(systemTheme(), false); });
 document.querySelectorAll('[data-theme-pick]').forEach(b => b.onclick = () => setThemePref(b.dataset.themePick));
-$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true);
+document.querySelectorAll('[data-theme-toggle]').forEach(b => b.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true));
 applyTheme(document.documentElement.dataset.theme || 'dark', false);
+
+// Акцентный цвет: violet — по умолчанию (атрибута нет), остальные — [data-accent] в app.css
+const ACCENT_KEY = 'checkai_accent';
+const ACCENTS = ['violet', 'red', 'orange', 'green', 'blue', 'pink'];
+const accentPref = () => document.documentElement.dataset.accent || 'violet';
+function setAccent(accent) {
+  if (!ACCENTS.includes(accent)) accent = 'violet';
+  if (accent === 'violet') delete document.documentElement.dataset.accent;
+  else document.documentElement.dataset.accent = accent;
+  try { accent === 'violet' ? localStorage.removeItem(ACCENT_KEY) : localStorage.setItem(ACCENT_KEY, accent); } catch (e) {}
+  renderAccentPicks();
+}
+function renderAccentPicks() {
+  const cur = accentPref();
+  document.querySelectorAll('[data-accent-pick]').forEach(b => {
+    const on = b.dataset.accentPick === cur;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+document.querySelectorAll('[data-accent-pick]').forEach(b => b.onclick = () => setAccent(b.dataset.accentPick));
+$('accentPicks').addEventListener('keydown', e => {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!step) return;
+  e.preventDefault();
+  const next = ACCENTS[(ACCENTS.indexOf(accentPref()) + step + ACCENTS.length) % ACCENTS.length];
+  setAccent(next);
+  document.querySelector(`[data-accent-pick="${next}"]`).focus();
+});
+renderAccentPicks();
 
 // --- API и токен ---
 const TOKEN_KEY = 'checkai_token';
@@ -297,6 +330,23 @@ function apiUpload(url, formData, onProgress) {
 
 // --- Сессия пользователя ---
 const initial = u => String(u?.full_name || u?.email || '?').trim().charAt(0).toUpperCase() || '?';
+// Фото профиля: avatar_url с сервера, а пока его нет — сжатая копия в localStorage (PROFILE_TASKS.md, п. 1.2)
+// В ключе и дата регистрации: id удалённого аккаунта база может выдать новому
+const avatarKey = u => `checkai_avatar_${u.id}_${u.created_at || ''}`;
+const localAvatar = u => { try { return u ? localStorage.getItem(avatarKey(u)) : null; } catch (e) { return null; } };
+const avatarSrc = u => u?.avatar_url || localAvatar(u);
+function paintAvatar(el, u) {
+  const src = avatarSrc(u);
+  el.classList.toggle('has-photo', !!src);
+  if (!src) { el.textContent = initial(u); return; }
+  const img = new Image();
+  img.src = src; img.alt = '';
+  el.replaceChildren(img);
+}
+const avatarHtml = u => {
+  const src = avatarSrc(u);
+  return src ? `<div class="avatar has-photo" aria-hidden="true"><img src="${esc(src)}" alt=""></div>` : `<div class="avatar" aria-hidden="true">${esc(initial(u))}</div>`;
+};
 // created_at приходит без часового пояса (UTC) — добавляем Z, чтобы показать местное время
 const serverDate = s => new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
 const fmtDateTime = s => {
@@ -320,7 +370,7 @@ function setUser(user) {
   currentUser = user;
   rememberAccount(getToken(), user);
   const name = user.full_name || user.email;
-  $('userAvatar').textContent = initial(user);
+  paintAvatar($('userAvatar'), user);
   $('userName').textContent = name;
   $('userEmail').textContent = user.email;
   $('userEmail').hidden = !user.full_name;
@@ -382,7 +432,7 @@ async function switchAccount(id) {
 function renderAccountMenu() {
   const others = getAccounts().filter(a => !currentUser || a.user.id !== currentUser.id);
   $('menuAccounts').innerHTML = others.length
-    ? others.map(a => `<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><span>${esc(a.user.full_name || a.user.email)}</span></button>`).join('')
+    ? others.map(a => `<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem">${avatarHtml(a.user)}<span>${esc(a.user.full_name || a.user.email)}</span></button>`).join('')
     : '<div class="menu-label">Других аккаунтов на устройстве нет</div>';
   $('menuAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
 }
@@ -424,7 +474,7 @@ function countTo(el, value, fmt, animate) {
 function renderProfile(animate = false) {
   if (!currentUser) return;
   const u = currentUser, accounts = getAccounts(), spent = baseSummary(receipts), days = daysSince(u.created_at), cur = currencyInfo(baseCurrency());
-  $('profileAvatar').textContent = initial(u);
+  paintAvatar($('profileAvatar'), u);
   $('profileName').textContent = u.full_name || u.email.split('@')[0];
   $('profileEmail').textContent = u.email;
   const since = u.created_at ? serverDate(u.created_at) : null;
@@ -552,7 +602,7 @@ function renderProfileAccounts(accounts) {
   const id = currentUser.id;
   $('profileAccounts').innerHTML = accounts.map(a => {
     const me = a.user.id === id;
-    return `<div class="account-row${me ? ' current' : ''}"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? '<span class="pill">Текущий</span>'
+    return `<div class="account-row${me ? ' current' : ''}">${avatarHtml(a.user)}<div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? '<span class="pill">Текущий</span>'
       : `<button class="btn soft small" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="icon-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`;
   }).join('');
   $('profileAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
@@ -730,12 +780,139 @@ $('deleteForm').onsubmit = async e => {
   btn.disabled = true;
   try {
     await apiRequest('/api/auth/me', { method: 'DELETE', body: JSON.stringify({ password: $('deletePassword').value }) });
-    try { localStorage.removeItem(budgetsKey(u.id)); } catch (e) {}
+    try { localStorage.removeItem(budgetsKey(u.id)); localStorage.removeItem(avatarKey(u)); } catch (e) {}
     forgetAccount(u.id); removeToken(); setGuest(); showPage('home');
     toast('Аккаунт удалён');
   } catch (err) {
     showFormError('deleteError', notSupported(err) ? 'Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).' : err.message);
   } finally { btn.disabled = false; }
+};
+
+// --- Фото профиля: выбор файла, камера, кадрирование ---
+// Кадр — квадрат AVATAR_SIZE: фото накрывает круг целиком, его можно двигать и приближать
+const AVATAR_SIZE = 256, AVATAR_MAX_FILE = 15 * 1024 * 1024;
+let avatarStream = null, avatarCrop = null;
+const avatarStep = step => { $('avatarModal').querySelector('.avatar-modal').dataset.step = step; $('avatarError').hidden = true; };
+function stopCamera() {
+  avatarStream?.getTracks().forEach(t => t.stop());
+  avatarStream = null;
+  $('avatarVideo').srcObject = null;
+}
+function openAvatar() {
+  if (!currentUser) return;
+  paintAvatar($('avatarCurrent'), currentUser);
+  $('avatarRemove').hidden = !localAvatar(currentUser);
+  avatarCrop = null;
+  avatarStep('choose');
+  openModal('avatarModal', $('avatarFileBtn'));
+}
+function closeAvatar() { stopCamera(); avatarCrop = null; closeModal('avatarModal'); }
+function refreshAvatars() { paintAvatar($('userAvatar'), currentUser); renderProfile(); renderAccountMenu(); }
+$('avatarBtn').onclick = openAvatar;
+$('avatarClose').onclick = closeAvatar;
+
+$('avatarFileBtn').onclick = () => $('avatarFile').click();
+$('avatarFile').onchange = $('avatarCapture').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return showFormError('avatarError', 'Это не изображение');
+  if (file.size > AVATAR_MAX_FILE) return showFormError('avatarError', 'Файл больше 15 МБ');
+  const url = URL.createObjectURL(file);
+  startCrop(url, () => URL.revokeObjectURL(url));
+};
+
+// Камера: getUserMedia с превью; где его нет — системная камера через <input capture>
+$('avatarCameraBtn').onclick = async () => {
+  if (!navigator.mediaDevices?.getUserMedia) { $('avatarCapture').click(); return; }
+  try {
+    avatarStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+  } catch (err) {
+    showFormError('avatarError', err.name === 'NotAllowedError' ? 'Нет доступа к камере — разрешите его в настройках браузера' : 'Камера не найдена или занята другим приложением');
+    return;
+  }
+  if ($('avatarModal').hidden) { stopCamera(); return; }
+  avatarStep('camera');
+  const video = $('avatarVideo');
+  // «Снять» доступна, когда камера отдала первый кадр
+  $('avatarShoot').disabled = true;
+  video.onloadeddata = () => { $('avatarShoot').disabled = false; $('avatarShoot').focus(); };
+  video.srcObject = avatarStream;
+  video.play().catch(() => {});
+  $('avatarCameraCancel').focus();
+};
+$('avatarCameraCancel').onclick = () => { stopCamera(); avatarStep('choose'); $('avatarCameraBtn').focus(); };
+$('avatarShoot').onclick = () => {
+  const v = $('avatarVideo');
+  if (!v.videoWidth) return;
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  const ctx = c.getContext('2d');
+  // Снимок — как в превью, зеркально
+  ctx.translate(c.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  stopCamera();
+  startCrop(c.toDataURL('image/jpeg', .92));
+};
+
+function startCrop(src, done) {
+  const img = $('avatarCropImg');
+  img.onload = () => {
+    done?.();
+    avatarStep('crop');
+    const S = $('avatarStage').clientWidth, w = img.naturalWidth, h = img.naturalHeight;
+    avatarCrop = { S, w, h, base: S / Math.min(w, h), z: 1, x: 0, y: 0 };
+    $('avatarZoom').value = 1;
+    layoutCrop();
+    $('avatarStage').focus();
+  };
+  img.onerror = () => { done?.(); avatarStep('choose'); showFormError('avatarError', 'Не удалось открыть изображение. Попробуйте JPG или PNG'); };
+  img.src = src;
+}
+// x, y — сдвиг центра фото от центра круга; фото не должно открывать края круга
+function layoutCrop() {
+  const c = avatarCrop, W = c.w * c.base * c.z, H = c.h * c.base * c.z;
+  c.x = Math.max(-(W - c.S) / 2, Math.min((W - c.S) / 2, c.x));
+  c.y = Math.max(-(H - c.S) / 2, Math.min((H - c.S) / 2, c.y));
+  c.left = (c.S - W) / 2 + c.x; c.top = (c.S - H) / 2 + c.y; c.W = W; c.H = H;
+  Object.assign($('avatarCropImg').style, { width: W + 'px', height: H + 'px', left: c.left + 'px', top: c.top + 'px' });
+}
+function setCropZoom(z) {
+  avatarCrop.z = Math.min(3, Math.max(1, z));
+  $('avatarZoom').value = avatarCrop.z;
+  layoutCrop();
+}
+$('avatarZoom').oninput = e => { if (avatarCrop) setCropZoom(+e.target.value); };
+$('avatarStage').onpointerdown = e => {
+  if (!avatarCrop) return;
+  const stage = e.currentTarget, sx = e.clientX - avatarCrop.x, sy = e.clientY - avatarCrop.y;
+  stage.setPointerCapture(e.pointerId);
+  stage.onpointermove = m => { avatarCrop.x = m.clientX - sx; avatarCrop.y = m.clientY - sy; layoutCrop(); };
+  stage.onpointerup = stage.onpointercancel = () => { stage.onpointermove = null; };
+};
+$('avatarStage').addEventListener('wheel', e => { if (!avatarCrop) return; e.preventDefault(); setCropZoom(avatarCrop.z - e.deltaY * .002); }, { passive: false });
+$('avatarStage').onkeydown = e => {
+  if (!avatarCrop) return;
+  const d = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[e.key];
+  if (d) { e.preventDefault(); avatarCrop.x += d[0]; avatarCrop.y += d[1]; layoutCrop(); }
+  else if (e.key === '+' || e.key === '=') setCropZoom(avatarCrop.z + .1);
+  else if (e.key === '-') setCropZoom(avatarCrop.z - .1);
+};
+$('avatarCropCancel').onclick = () => { avatarCrop = null; avatarStep('choose'); $('avatarFileBtn').focus(); };
+$('avatarSave').onclick = () => {
+  if (!avatarCrop) return;
+  const c = avatarCrop, k = AVATAR_SIZE / c.S, cv = document.createElement('canvas');
+  cv.width = cv.height = AVATAR_SIZE;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage($('avatarCropImg'), c.left * k, c.top * k, c.W * k, c.H * k);
+  try { localStorage.setItem(avatarKey(currentUser), cv.toDataURL('image/jpeg', .88)); }
+  catch (e) { showFormError('avatarError', 'В браузере не хватило места для фото'); return; }
+  refreshAvatars(); closeAvatar(); toast('Фото обновлено');
+};
+$('avatarRemove').onclick = () => {
+  try { localStorage.removeItem(avatarKey(currentUser)); } catch (e) {}
+  refreshAvatars(); closeAvatar(); toast('Фото удалено');
 };
 
 // --- Редактор чека: черновик и форма ---
@@ -1091,6 +1268,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   const catMenu = $('categoryGrid').querySelector('.cat-menu:not([hidden])');
   if (!$('receiptModal').hidden) closeReceipt();
+  else if (!$('avatarModal').hidden) closeAvatar();
   else if (!$('savedModal').hidden) closeModal('savedModal');
   else if (!$('authModal').hidden) closeAuth();
   else if (!$('categoryModal').hidden) closeModal('categoryModal');
