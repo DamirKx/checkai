@@ -7,8 +7,8 @@
     // Тема выставляется до отрисовки, чтобы страница не мигала тёмным/светлым
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/js/app.js" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=profile-2">
+  <script src="/static/js/app.js?v=profile-2" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -256,39 +256,123 @@
       <div class="notice" id="budgetLocalNote" hidden>Лимиты хранятся только в этом браузере.</div>
     </section>
 
-    <section class="page" id="page-profile" aria-labelledby="profileTitle">
-      <div class="page-head"><div><h1 id="profileTitle">Профиль</h1></div></div>
-      <div class="profile-grid">
-        <div class="card profile-card">
-          <div class="profile-head"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div><div><h3 id="profileName"></h3><p id="profileEmail"></p></div></div>
-          <dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0</dd></dl>
-        </div>
-        <div class="card profile-card">
-          <h3>Аккаунты</h3>
-          <div id="profileAccounts"></div>
-          <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">Добавить аккаунт</button><button class="btn soft" id="logoutBtn" type="button">Выйти</button></div>
-        </div>
-        <div class="card profile-card">
-          <h3>Данные</h3>
-          <form class="auth-form" id="profileForm">
-            <label>Имя<input id="editName" autocomplete="name" maxlength="255"></label>
-            <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
-            <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">Итоги и бюджеты — в ней</span></label>
-            <label>Новый пароль<input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Не менять" aria-describedby="editPasswordHint"><span class="hint" id="editPasswordHint">Минимум 8 символов</span></label>
-            <label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Для смены email или пароля"></label>
-            <div class="auth-error" id="profileError" role="alert" hidden></div>
-            <div class="button-row"><button class="btn" id="profileSave" type="submit">Сохранить</button><button class="btn soft" id="profileReset" type="button">Отменить</button></div>
-          </form>
-        </div>
-        <div class="card profile-card danger-card">
-          <h3 class="danger-text">Удалить аккаунт</h3>
-          <form class="auth-form" id="deleteForm">
-            <label>Пароль<input id="deletePassword" type="password" required autocomplete="current-password"></label>
-            <div class="auth-error" id="deleteError" role="alert" hidden></div>
-            <button class="btn danger" id="deleteSubmit" type="submit">Удалить навсегда</button>
-          </form>
+    <section class="page" id="page-profile" aria-labelledby="profileName">
+      <div class="card pf-hero">
+        <div class="pf-hero-top"><span class="block-idx">/профиль</span><span id="profileSince"></span></div>
+        <div class="pf-hero-main">
+          <div class="pf-avatar"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div></div>
+          <div class="pf-id">
+            <h1 id="profileName"></h1>
+            <p id="profileEmail"></p>
+            <div class="pf-chips" id="profileChips"></div>
+          </div>
+          <div class="pf-hero-actions"><button class="btn" id="profileAddReceipt" type="button">＋ Чек</button><button class="btn soft" id="logoutBtn" type="button">Выйти</button></div>
         </div>
       </div>
+
+      <div class="pf-facts">
+        <div class="pf-fact"><b id="profileReceipts">0</b><span>чеков</span></div>
+        <div class="pf-fact"><b id="profileSpent">0</b><span>потрачено</span></div>
+        <div class="pf-fact"><b id="profileAverage">0</b><span>средний чек</span></div>
+        <div class="pf-fact"><b id="profileDays">0</b><span id="profileDaysLabel">дней с нами</span></div>
+      </div>
+
+      <div class="pf-grid" id="profileGrid">
+        <div class="card pf-card pf-activity">
+          <div class="pf-card-head"><h3>Активность</h3><span class="pf-muted">за полгода</span></div>
+          <div class="pf-activity-body">
+            <div class="heatmap-wrap">
+              <div class="heatmap-months" id="heatmapMonths" aria-hidden="true"></div>
+              <div class="heatmap-days" aria-hidden="true"><span>пн</span><span></span><span>ср</span><span></span><span>пт</span><span></span><span></span></div>
+              <div class="heatmap" id="heatmap" role="img"></div>
+              <div class="heatmap-legend" aria-hidden="true">меньше<i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i><i data-l="4"></i>больше</div>
+            </div>
+            <dl class="pf-side" id="activityStats"></dl>
+          </div>
+        </div>
+        <div class="card pf-card pf-habits">
+          <div class="pf-card-head"><h3>Привычки</h3></div>
+          <ol class="pf-rows" id="profileHabits"></ol>
+        </div>
+        <div class="card pf-card pf-start" id="profileStart">
+          <div class="pf-card-head"><h3>Первые шаги</h3><span class="pf-muted" id="startCount"></span></div>
+          <div class="progress" aria-hidden="true"><i id="startBar"></i></div>
+          <ul class="pf-start-list" id="startList"></ul>
+        </div>
+      </div>
+
+      <section class="pf-settings" id="profileSettings" aria-labelledby="settingsTitle">
+        <div class="block-head"><span class="block-idx">/01</span><h2 id="settingsTitle">Настройки</h2></div>
+        <div class="pf-settings-body">
+          <div class="pf-tabs" id="pfTabs" role="tablist" aria-label="Разделы настроек" aria-orientation="vertical">
+            <button class="pf-tab active" id="pfTab-personal" data-pf-tab="personal" type="button" role="tab" aria-selected="true" aria-controls="pfPanel-personal"><span class="pf-tab-num">01</span><span>Личное</span></button>
+            <button class="pf-tab" id="pfTab-security" data-pf-tab="security" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-security" tabindex="-1"><span class="pf-tab-num">02</span><span>Вход и пароль</span></button>
+            <button class="pf-tab" id="pfTab-accounts" data-pf-tab="accounts" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-accounts" tabindex="-1"><span class="pf-tab-num">03</span><span>Аккаунты</span><span class="pf-count" id="accountsCount">1</span></button>
+            <button class="pf-tab" id="pfTab-look" data-pf-tab="look" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-look" tabindex="-1"><span class="pf-tab-num">04</span><span>Оформление</span></button>
+            <button class="pf-tab" id="pfTab-data" data-pf-tab="data" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-data" tabindex="-1"><span class="pf-tab-num">05</span><span>Данные</span><span class="pf-count" id="dataCount">0</span></button>
+            <button class="pf-tab danger-tab" id="pfTab-danger" data-pf-tab="danger" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-danger" tabindex="-1"><span class="pf-tab-num">06</span><span>Удаление</span></button>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-personal" role="tabpanel" aria-labelledby="pfTab-personal">
+            <div class="pf-panel-head"><h3>Личное</h3><p>Как к вам обращаться и в какой валюте считать итоги.</p></div>
+            <form class="auth-form pf-form" id="profileForm">
+              <label>Имя<input id="editName" autocomplete="name" maxlength="255" placeholder="Как вас зовут"></label>
+              <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">Итоги, аналитика и бюджеты — в ней</span></label>
+              <div class="auth-error" id="profileError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn" id="profileSave" type="submit" disabled>Сохранить</button><button class="btn soft" id="profileReset" type="button" disabled>Отменить</button><span class="pf-dirty" id="profileDirty" hidden>Есть несохранённые изменения</span></div>
+            </form>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-security" role="tabpanel" aria-labelledby="pfTab-security" hidden>
+            <div class="pf-panel-head"><h3>Вход и пароль</h3><p>Для любых изменений здесь нужен текущий пароль.</p></div>
+            <form class="auth-form pf-form" id="securityForm">
+              <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
+              <label>Новый пароль
+                <span class="pw-field"><input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Не менять" aria-describedby="editPasswordHint"><button class="pw-toggle" data-pw-toggle="editPassword" type="button" aria-label="Показать пароль">Показать</button></span>
+                <span class="pw-meter" id="pwMeter" data-score="0" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span class="hint" id="editPasswordHint">Минимум 8 символов</span>
+              </label>
+              <label>Текущий пароль
+                <span class="pw-field"><input id="editCurrentPassword" type="password" autocomplete="current-password" required><button class="pw-toggle" data-pw-toggle="editCurrentPassword" type="button" aria-label="Показать пароль">Показать</button></span>
+              </label>
+              <div class="auth-error" id="securityError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn" id="securitySave" type="submit">Обновить</button></div>
+            </form>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-accounts" role="tabpanel" aria-labelledby="pfTab-accounts" hidden>
+            <div class="pf-panel-head"><h3>Аккаунты</h3><p>Быстрое переключение между аккаунтами на этом устройстве.</p></div>
+            <div id="profileAccounts"></div>
+            <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">＋ Добавить аккаунт</button></div>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-look" role="tabpanel" aria-labelledby="pfTab-look" hidden>
+            <div class="pf-panel-head"><h3>Оформление</h3><p>Хранится в этом браузере.</p></div>
+            <div class="theme-picks" id="themePicks" role="group" aria-label="Тема">
+              <button class="theme-pick" data-theme-pick="dark" type="button" aria-pressed="false"><span class="theme-preview tp-dark" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Тёмная</span></button>
+              <button class="theme-pick" data-theme-pick="light" type="button" aria-pressed="false"><span class="theme-preview tp-light" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Светлая</span></button>
+              <button class="theme-pick" data-theme-pick="system" type="button" aria-pressed="false"><span class="theme-preview tp-system" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Как в системе</span></button>
+            </div>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-data" role="tabpanel" aria-labelledby="pfTab-data" hidden>
+            <div class="pf-panel-head"><h3>Данные</h3><p>Всё, что хранится в аккаунте, можно забрать с собой.</p></div>
+            <dl class="pf-stats" id="dataStats"></dl>
+            <div class="button-row"><button class="btn soft" id="exportAllJson" type="button">Скачать всё · JSON</button><button class="btn soft" id="exportAllCsv" type="button">Чеки · CSV</button></div>
+            <p class="hint">Фото чеков в выгрузку не входят.</p>
+          </div>
+
+          <div class="card pf-panel danger-panel" id="pfPanel-danger" role="tabpanel" aria-labelledby="pfTab-danger" hidden>
+            <div class="pf-panel-head"><h3 class="danger-text">Удалить аккаунт</h3><p id="deleteSummary">Аккаунт и все данные удалятся без возможности восстановления.</p></div>
+            <form class="auth-form pf-form" id="deleteForm">
+              <label>Пароль<input id="deletePassword" type="password" required autocomplete="current-password"></label>
+              <div class="auth-error" id="deleteError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn danger" id="deleteSubmit" type="submit">Удалить навсегда</button></div>
+            </form>
+          </div>
+        </div>
+      </section>
+      <div class="heat-tip" id="heatTip" aria-hidden="true" hidden></div>
     </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

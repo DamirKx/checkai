@@ -155,7 +155,23 @@ function applyTheme(theme, save) {
   $('themeBtn').setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
   $('themeBtn').title = light ? 'Тёмная тема' : 'Светлая тема';
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  renderThemePicks();
 }
+// Выбор в профиле: dark | light | system (system — тема не сохранена, следуем за ОС)
+const systemThemeQuery = matchMedia('(prefers-color-scheme: light)');
+const systemTheme = () => systemThemeQuery.matches ? 'light' : 'dark';
+const themePref = () => { try { const t = localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : 'system'; } catch (e) { return 'system'; } };
+function setThemePref(pref) {
+  if (pref !== 'system') { applyTheme(pref, true); return; }
+  try { localStorage.removeItem(THEME_KEY); } catch (e) {}
+  applyTheme(systemTheme(), false);
+}
+function renderThemePicks() {
+  const pref = themePref();
+  document.querySelectorAll('[data-theme-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themePick === pref)));
+}
+systemThemeQuery.addEventListener?.('change', () => { if (themePref() === 'system') applyTheme(systemTheme(), false); });
+document.querySelectorAll('[data-theme-pick]').forEach(b => b.onclick = () => setThemePref(b.dataset.themePick));
 $('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true);
 applyTheme(document.documentElement.dataset.theme || 'dark', false);
 
@@ -282,9 +298,10 @@ function apiUpload(url, formData, onProgress) {
 // --- Сессия пользователя ---
 const initial = u => String(u?.full_name || u?.email || '?').trim().charAt(0).toUpperCase() || '?';
 // created_at приходит без часового пояса (UTC) — добавляем Z, чтобы показать местное время
+const serverDate = s => new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
 const fmtDateTime = s => {
   if (!s) return '—';
-  const d = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
+  const d = serverDate(s);
   return Number.isNaN(+d) ? String(s) : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 const showFormError = (id, msg) => { $(id).textContent = msg; $(id).hidden = false; };
@@ -381,63 +398,326 @@ $('accountMenu').querySelectorAll('[data-menu]').forEach(b => b.onclick = () => 
   else if (action === 'logout') logout();
 });
 
-// --- Профиль: просмотр, редактирование, удаление ---
-function renderProfile() {
+// --- Профиль: обложка, цифры, активность, привычки ---
+// Всё, кроме форм, считается на клиенте по уже загруженным чекам (receipts)
+const ACTIVITY_WEEKS = 26;
+const DAY_MS = 864e5;
+const WEEKDAYS_ON = ['по воскресеньям', 'по понедельникам', 'по вторникам', 'по средам', 'по четвергам', 'по пятницам', 'по субботам'];
+const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const intText = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+const daysSince = s => { const d = s ? serverDate(s) : null; return d && !Number.isNaN(+d) ? Math.max(0, Math.floor((Date.now() - d) / DAY_MS)) : 0; };
+// Траты по дням для тепловой карты и подсказки над ячейкой: {YYYY-MM-DD: {count, total}}
+let activityDays = {};
+
+// Число добегает до значения при открытии раздела; при обновлении данных меняется сразу
+function countTo(el, value, fmt, animate) {
+  cancelAnimationFrame(el._raf);
+  if (!animate || !value || prefersReducedMotion.matches) { el.textContent = fmt(value); return; }
+  const start = performance.now();
+  const step = t => {
+    const p = Math.min(1, (t - start) / 900);
+    el.textContent = fmt(value * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+function renderProfile(animate = false) {
   if (!currentUser) return;
-  const u = currentUser;
+  const u = currentUser, accounts = getAccounts(), spent = baseSummary(receipts), days = daysSince(u.created_at), cur = currencyInfo(baseCurrency());
   $('profileAvatar').textContent = initial(u);
-  $('profileName').textContent = u.full_name || 'Без имени';
+  $('profileName').textContent = u.full_name || u.email.split('@')[0];
   $('profileEmail').textContent = u.email;
-  $('profileCreated').textContent = fmtDateTime(u.created_at);
-  $('profileReceipts').textContent = receipts.length;
-  const spent = baseSummary(receipts);
-  $('profileSpent').textContent = approx(money(spent.total), spent.converted);
-  $('profileAccounts').innerHTML = getAccounts().map(a => `<div class="account-row"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${a.user.id === u.id ? '<span class="pill">Текущий</span>' : `<button class="text-btn" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="text-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`).join('');
+  const since = u.created_at ? serverDate(u.created_at) : null;
+  $('profileSince').textContent = since && !Number.isNaN(+since) ? 'с нами с ' + since.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  $('profileChips').innerHTML = [
+    `<span class="pill">${esc(cur.symbol)} ${esc(cur.code)} · основная валюта</span>`,
+    u.full_name ? '' : '<button class="pill pill-action" data-pf-goto="personal" type="button">＋ Добавить имя</button>',
+    accounts.length > 1 ? `<button class="pill pill-action" data-pf-goto="accounts" type="button">${accounts.length} ${plural(accounts.length, 'аккаунт', 'аккаунта', 'аккаунтов')} на устройстве</button>` : '',
+  ].join('');
+  const avg = spent.counted ? spent.total / spent.counted : 0;
+  countTo($('profileReceipts'), receipts.length, intText, animate);
+  countTo($('profileSpent'), spent.total, n => approx(money(n), spent.converted), animate);
+  countTo($('profileAverage'), avg, n => approx(money(n), spent.converted), animate);
+  countTo($('profileDays'), days, intText, animate);
+  $('profileDaysLabel').textContent = plural(days, 'день', 'дня', 'дней') + ' с нами';
+  $('accountsCount').textContent = accounts.length;
+  $('dataCount').textContent = receipts.length;
+  renderActivity(); renderHabits(); renderStartSteps(); renderProfileAccounts(accounts); renderDataStats();
+}
+
+// Тепловая карта за полгода: колонка — неделя с понедельника, последняя — текущая
+function renderActivity() {
+  activityDays = {};
+  receipts.forEach(r => {
+    const d = new Date(r.iso || '');
+    if (Number.isNaN(+d)) return;
+    const s = activityDays[isoDay(d)] ||= { count: 0, total: 0 };
+    s.count++;
+    s.total += toBase(r, r.total) ?? 0;
+  });
+  const today = new Date(), todayKey = isoDay(today);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (today.getDay() + 6) % 7 - (ACTIVITY_WEEKS - 1) * 7);
+  const cells = [], months = [], weekdays = Array(7).fill(0);
+  let total = 0, best = 0, run = 0, lastMonth = null;
+  for (let i = 0; i < ACTIVITY_WEEKS * 7; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = isoDay(d), w = Math.floor(i / 7);
+    // Подпись месяца — над первой его неделей; у первой колонки — только если месяц успеет показаться
+    if (i % 7 === 0) {
+      if (d.getMonth() !== lastMonth && (w > 0 || d.getDate() <= 10)) months.push(`<span style="grid-column:${w + 1}">${esc(d.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', ''))}</span>`);
+      lastMonth = d.getMonth();
+    }
+    const future = key > todayKey, count = activityDays[key]?.count || 0;
+    if (!future) {
+      run = count ? run + 1 : 0;
+      best = Math.max(best, run);
+      total += count;
+      weekdays[d.getDay()] += count;
+    }
+    cells.push(`<i class="hm-cell${future ? ' future' : ''}${key === todayKey ? ' today' : ''}" data-l="${Math.min(4, count)}" data-day="${key}" style="--w:${w}"></i>`);
+  }
+  $('heatmap').parentElement.style.setProperty('--weeks', ACTIVITY_WEEKS);
+  $('heatmapMonths').innerHTML = months.join('');
+  $('heatmap').innerHTML = cells.join('');
+  $('heatmap').setAttribute('aria-label', `Активность за полгода: ${total} ${plural(total, 'чек', 'чека', 'чеков')}`);
+  const topDay = weekdays.indexOf(Math.max(...weekdays));
+  $('activityStats').innerHTML = [
+    ['За полгода', `${total} ${plural(total, 'чек', 'чека', 'чеков')}`],
+    ['Рекорд подряд', best ? `${best} ${plural(best, 'день', 'дня', 'дней')}` : '—'],
+    ['Чаще всего', total ? WEEKDAYS_ON[topDay] : '—'],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+$('heatmap').addEventListener('pointerover', e => {
+  const cell = e.target.closest('.hm-cell:not(.future)'), tip = $('heatTip');
+  if (!cell) { tip.hidden = true; return; }
+  const s = activityDays[cell.dataset.day], d = new Date(cell.dataset.day + 'T00:00');
+  tip.innerHTML = (s ? `${s.count} ${plural(s.count, 'чек', 'чека', 'чеков')} · ${esc(money(s.total))}` : 'Нет чеков')
+    + `<small>${esc(d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }))}</small>`;
+  const r = cell.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(r.left + r.width / 2, 90), window.innerWidth - 90) + 'px';
+  tip.style.top = r.top + 'px';
+  tip.hidden = false;
+});
+$('heatmap').addEventListener('pointerleave', () => { $('heatTip').hidden = true; });
+
+// «Привычки»: любимый магазин, топ-категория, самый крупный чек, сравнение с прошлым месяцем
+function renderHabits() {
+  if (!receipts.length) {
+    $('profileHabits').innerHTML = '<li class="pf-empty">Здесь появятся любимый магазин, топ-категория и самый крупный чек.<button class="btn small" data-pf-goto="upload" type="button">Добавить первый чек</button></li>';
+    return;
+  }
+  const stores = {};
+  receipts.forEach(r => { const name = String(r.store || '').trim(); if (name) (stores[name.toLowerCase()] ||= { name, count: 0 }).count++; });
+  const store = Object.values(stores).sort((a, b) => b.count - a.count)[0];
+  const sums = sumsByCategory(receipts), topKey = Object.keys(sums).filter(k => k !== '').sort((a, b) => sums[b] - sums[a])[0];
+  let biggest = null, biggestSum = 0;
+  receipts.forEach(r => { const v = toBase(r, r.total); if (v != null && v > biggestSum) { biggest = r; biggestSum = v; } });
+  const month = monthKey(new Date()), now = monthSpending(month).total, prev = monthSpending(shiftMonth(month, -1)).total;
+  const delta = prev ? Math.round((now - prev) / prev * 100) : null;
+  const rows = [
+    store && { habit: 'store', value: store.name, label: 'Любимый магазин', meta: `${store.count} ${plural(store.count, 'визит', 'визита', 'визитов')}`, data: store.name },
+    topKey != null && { habit: 'category', value: categoryLabel(categoryByKey(topKey)), label: 'Больше всего тратите на', meta: money(sums[topKey]) },
+    biggest && { habit: 'receipt', value: approx(money(biggestSum), curOf(biggest) !== baseCurrency()), label: 'Самый крупный чек', meta: biggest.store || fmtPurchase(biggest), data: biggest.id },
+    { habit: 'analysis', value: money(now), label: 'Этот месяц', cls: delta > 0 ? 'up' : delta < 0 ? 'down' : '',
+      meta: delta == null ? 'в прошлом месяце трат не было' : delta === 0 ? 'как в прошлом месяце' : `${delta > 0 ? '↑' : '↓'} ${Math.abs(delta)}% к прошлому` },
+  ].filter(Boolean);
+  $('profileHabits').innerHTML = rows.map((r, i) => `<li><button class="pf-row" data-habit="${r.habit}" data-value="${esc(r.data ?? '')}" type="button"><span class="pf-row-num">${pad2(i + 1)}</span><span class="pf-row-main"><small>${esc(r.label)}</small><b>${esc(r.value)}</b></span><span class="pf-row-meta ${r.cls || ''}">${esc(r.meta)}</span><span class="pf-row-arrow" aria-hidden="true">→</span></button></li>`).join('');
+}
+$('profileHabits').onclick = e => {
+  const b = e.target.closest('[data-habit]');
+  if (!b) return;
+  const habit = b.dataset.habit;
+  if (habit === 'store') { $('historySearch').value = b.dataset.value; $('historyPeriod').value = 'all'; showPage('history'); resetHistoryPage(); }
+  else if (habit === 'category') showPage('categories');
+  else if (habit === 'receipt') openReceipt(b.dataset.value);
+  else if (habit === 'analysis') { $('analysisPeriod').value = 'month'; showPage('analysis'); }
+};
+
+// «Первые шаги»: карточка пропадает, когда всё сделано
+function renderStartSteps() {
+  const steps = [
+    { done: !!currentUser.full_name, text: 'Указать имя', go: 'personal' },
+    { done: receipts.length > 0, text: 'Сохранить первый чек', go: 'upload' },
+    { done: overallLimit(budgets) > 0, text: 'Задать лимит на месяц', go: 'budgets' },
+    { done: categoryRules.length > 0, text: 'Перенести товар в нужную категорию', go: 'categories' },
+  ];
+  const done = steps.filter(s => s.done).length, all = done === steps.length;
+  $('profileStart').hidden = all;
+  $('profileGrid').classList.toggle('no-start', all);
+  $('startCount').textContent = `${done} из ${steps.length}`;
+  $('startBar').style.width = done / steps.length * 100 + '%';
+  $('startList').innerHTML = steps.map(s => `<li><button class="pf-step${s.done ? ' done' : ''}" data-pf-goto="${s.go}" type="button"><i aria-hidden="true">${s.done ? '✓' : ''}</i><span>${esc(s.text)}${s.done ? '<span class="sr-only"> — готово</span>' : ''}</span></button></li>`).join('');
+}
+
+function renderProfileAccounts(accounts) {
+  const id = currentUser.id;
+  $('profileAccounts').innerHTML = accounts.map(a => {
+    const me = a.user.id === id;
+    return `<div class="account-row${me ? ' current' : ''}"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? '<span class="pill">Текущий</span>'
+      : `<button class="btn soft small" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="icon-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`;
+  }).join('');
   $('profileAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
   $('profileAccounts').querySelectorAll('[data-forget]').forEach(b => b.onclick = () => { forgetAccount(+b.dataset.forget); renderProfile(); renderAccountMenu(); });
 }
+
+function renderDataStats() {
+  const items = receipts.reduce((s, r) => s + (r.items || []).length, 0), n = receipts.length, c = categories.length;
+  $('dataStats').innerHTML = [['Чеков', n], ['Позиций', items], ['Категорий', c], ['Правил', categoryRules.length]]
+    .map(([k, v]) => `<div><dt>${k}</dt><dd>${intText(v)}</dd></div>`).join('');
+  $('exportAllJson').disabled = $('exportAllCsv').disabled = !n;
+  $('deleteSummary').textContent = (n ? `Удалятся ${n} ${plural(n, 'чек', 'чека', 'чеков')} с фото, ` : 'Удалятся ')
+    + `${c} ${plural(c, 'категория', 'категории', 'категорий')}, правила и лимиты. Восстановить их будет нельзя.`;
+}
+$('exportAllJson').onclick = () => {
+  const u = currentUser;
+  if (!u || !receipts.length) return;
+  const data = {
+    exported_at: new Date().toISOString(),
+    user: { email: u.email, full_name: u.full_name, base_currency: baseCurrency(), created_at: u.created_at },
+    receipts: receipts.map(({ iso, ...r }) => r), categories, category_rules: categoryRules, budgets,
+  };
+  downloadFile(JSON.stringify(data, null, 2), 'application/json', `checkai_export_${isoDay(new Date())}.json`);
+  toast('Выгрузка готова');
+};
+$('exportAllCsv').onclick = () => exportCsv(receipts);
+
+// --- Профиль: вкладки настроек ---
+const PF_TABS = ['personal', 'security', 'accounts', 'look', 'data', 'danger'];
+function openSettings(tab, scroll = false) {
+  document.querySelectorAll('[data-pf-tab]').forEach(b => {
+    const on = b.dataset.pfTab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('.pf-panel').forEach(p => { p.hidden = p.id !== 'pfPanel-' + tab; });
+  $('pfTab-' + tab).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (scroll) $('profileSettings').scrollIntoView({ behavior: prefersReducedMotion.matches ? 'auto' : 'smooth', block: 'start' });
+}
+$('pfTabs').onclick = e => { const b = e.target.closest('[data-pf-tab]'); if (b) openSettings(b.dataset.pfTab); };
+$('pfTabs').onkeydown = e => {
+  const i = PF_TABS.indexOf(document.activeElement?.dataset?.pfTab);
+  const next = i < 0 ? null : { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: PF_TABS.length - 1 }[e.key];
+  if (next == null) return;
+  e.preventDefault();
+  const tab = PF_TABS[(next + PF_TABS.length) % PF_TABS.length];
+  openSettings(tab);
+  $('pfTab-' + tab).focus();
+};
+// Чипы, «Первые шаги» и пустые состояния ведут во вкладку настроек или в другой раздел
+$('page-profile').addEventListener('click', e => {
+  const b = e.target.closest('[data-pf-goto]');
+  if (!b) return;
+  const to = b.dataset.pfGoto;
+  if (!PF_TABS.includes(to)) { showPage(to); return; }
+  openSettings(to, true);
+  if (to === 'personal') $('editName').focus({ preventScroll: true });
+});
+$('profileAddReceipt').onclick = () => showPage('upload');
+$('addAccountBtn').onclick = () => openAuth('login');
+
+// --- Профиль: формы ---
 function fillProfileForm() {
   if (!currentUser) return;
-  $('profileForm').reset();
+  ['profileForm', 'securityForm', 'deleteForm'].forEach(id => $(id).reset());
+  ['profileError', 'securityError', 'deleteError'].forEach(id => { $(id).hidden = true; });
   $('editName').value = currentUser.full_name || '';
-  $('editEmail').value = currentUser.email;
   $('editBaseCurrency').innerHTML = currencyOptions(baseCurrency());
-  $('profileError').hidden = true;
-  $('deleteForm').reset();
-  $('deleteError').hidden = true;
+  $('editEmail').value = currentUser.email;
+  hidePasswords();
+  updatePasswordMeter();
+  updatePersonalDirty();
 }
-$('profileReset').onclick = fillProfileForm;
-$('addAccountBtn').onclick = () => openAuth('login');
+// «Личное»: кнопки активны, только когда есть что сохранять
+function personalChanges() {
+  const u = currentUser, body = {};
+  if (!u) return body;
+  const name = $('editName').value.trim(), base = $('editBaseCurrency').value;
+  if (name !== (u.full_name || '')) body.full_name = name || null;
+  if (base && base !== baseCurrency()) body.base_currency = base;
+  return body;
+}
+function updatePersonalDirty() {
+  const dirty = Object.keys(personalChanges()).length > 0;
+  $('profileSave').disabled = $('profileReset').disabled = !dirty;
+  $('profileDirty').hidden = !dirty;
+}
+$('profileForm').oninput = $('profileForm').onchange = updatePersonalDirty;
+$('profileReset').onclick = () => {
+  $('editName').value = currentUser?.full_name || '';
+  $('editBaseCurrency').value = baseCurrency();
+  $('profileError').hidden = true;
+  updatePersonalDirty();
+};
+// PATCH /api/auth/me отвечает новой парой токенов и пользователем
+async function updateMe(body) {
+  const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
+  if (data.access_token) setSession(data);
+  const user = data.user || data;
+  setUser(user);
+  return user;
+}
+const updateMeError = err => notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message;
 $('profileForm').onsubmit = async e => {
   e.preventDefault();
-  const u = currentUser;
-  if (!u) return;
+  if (!currentUser) return;
   $('profileError').hidden = true;
-  const name = $('editName').value.trim(), email = $('editEmail').value.trim().toLowerCase(), password = $('editPassword').value, current = $('editCurrentPassword').value, body = {};
-  if (name !== (u.full_name || '')) body.full_name = name || null;
-  if (email !== u.email) body.email = email;
-  if (password) body.new_password = password;
-  const base = $('editBaseCurrency').value;
-  if (base !== baseCurrency()) body.base_currency = base;
-  if (!Object.keys(body).length) { showFormError('profileError', 'Вы ничего не изменили'); return; }
-  if ((body.email || body.new_password) && !current) { showFormError('profileError', 'Введите текущий пароль, чтобы сменить email или пароль'); return; }
-  if (current) body.current_password = current;
-  const btn = $('profileSave');
-  btn.disabled = true;
+  const body = personalChanges();
+  if (!Object.keys(body).length) return;
+  $('profileSave').disabled = true;
   try {
-    const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
-    if (data.access_token) setSession(data);
-    const user = data.user || data;
-    setUser(user);
+    const user = await updateMe(body);
     if (body.base_currency) {
       // Старый сервер молча пропустит неизвестное поле — проверяем, что валюта действительно сменилась
       if (user.base_currency !== body.base_currency) { showFormError('profileError', 'Сервер пока не поддерживает основную валюту — остальные изменения сохранены.'); return; }
       // rate_to_base у чеков пересчитан сервером под новую валюту
       await loadReceipts();
     }
-    toast('Данные аккаунта обновлены');
+    toast('Данные сохранены');
   } catch (err) {
-    showFormError('profileError', notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message);
+    showFormError('profileError', updateMeError(err));
+  } finally { updatePersonalDirty(); }
+};
+
+// «Вход и пароль»: показ пароля и оценка его надёжности
+function passwordScore(p) {
+  if (!p) return 0;
+  if (p.length < 8) return 1;
+  let s = 1;
+  if (p.length >= 12) s++;
+  if (/[a-zа-яё]/.test(p) && /[A-ZА-ЯЁ]/.test(p)) s++;
+  if (/\d/.test(p) && /[^a-zа-яё\d]/i.test(p)) s++;
+  return s;
+}
+function updatePasswordMeter() {
+  const p = $('editPassword').value, s = passwordScore(p);
+  $('pwMeter').dataset.score = s;
+  $('editPasswordHint').textContent = !p ? 'Минимум 8 символов' : p.length < 8 ? 'Слишком короткий — минимум 8 символов' : ['', 'Слабый', 'Средний', 'Хороший', 'Надёжный'][s];
+}
+$('editPassword').oninput = updatePasswordMeter;
+function setPasswordShown(button, shown) {
+  $(button.dataset.pwToggle).type = shown ? 'text' : 'password';
+  button.textContent = shown ? 'Скрыть' : 'Показать';
+  button.setAttribute('aria-label', shown ? 'Скрыть пароль' : 'Показать пароль');
+}
+const hidePasswords = () => document.querySelectorAll('[data-pw-toggle]').forEach(b => setPasswordShown(b, false));
+document.querySelectorAll('[data-pw-toggle]').forEach(b => b.onclick = () => setPasswordShown(b, $(b.dataset.pwToggle).type === 'password'));
+$('securityForm').onsubmit = async e => {
+  e.preventDefault();
+  const u = currentUser;
+  if (!u) return;
+  $('securityError').hidden = true;
+  const email = $('editEmail').value.trim().toLowerCase(), password = $('editPassword').value, body = {};
+  if (email !== u.email) body.email = email;
+  if (password) body.new_password = password;
+  if (!Object.keys(body).length) { showFormError('securityError', 'Укажите новый email или новый пароль'); return; }
+  body.current_password = $('editCurrentPassword').value;
+  const btn = $('securitySave');
+  btn.disabled = true;
+  try {
+    await updateMe(body);
+    toast(body.new_password ? 'Пароль обновлён' : 'Email обновлён');
+  } catch (err) {
+    showFormError('securityError', updateMeError(err));
   } finally { btn.disabled = false; }
 };
 $('deleteForm').onsubmit = async e => {
@@ -787,7 +1067,8 @@ function showPage(name) {
   if (name === 'categories') renderCategories();
   if (name === 'analysis') renderAnalysis();
   if (name === 'budgets') renderBudgets();
-  if (name === 'profile') { renderProfile(); fillProfileForm(); }
+  if (name === 'profile') { renderProfile(true); fillProfileForm(); }
+  else $('heatTip').hidden = true;
 }
 function setMenu(open) {
   $('drawer').classList.toggle('open', open);
@@ -1058,8 +1339,8 @@ function csvCell(value) {
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 const csvNum = n => String(round2(n)).replace('.', ',');
-function exportCsv() {
-  const list = historyList();
+// По умолчанию — то, что видно в истории с фильтрами; из профиля — все чеки
+function exportCsv(list = historyList()) {
   if (!list.length) return;
   // Цены и суммы — в валюте чека, отдельная колонка — итог в основной валюте (пусто, если курса нет)
   const rows = [['Дата', 'Время', 'Магазин', 'Валюта', 'Итог чека', `Итог в ${baseCurrency()}`, 'Товар', 'Количество', 'Цена', 'Сумма', 'Категория']];
@@ -1075,7 +1356,7 @@ function exportCsv() {
   downloadFile(csv, 'text/csv;charset=utf-8', `checkai_${isoDay(new Date())}.csv`);
   toast(`Выгружено чеков: ${list.length}`);
 }
-$('exportCsvBtn').onclick = exportCsv;
+$('exportCsvBtn').onclick = () => exportCsv();
 
 // --- Категории и анализ ---
 // Траты по категориям в основной валюте, по ключу catKey; чеки без курса пропускаем (их показывает baseSummary)
