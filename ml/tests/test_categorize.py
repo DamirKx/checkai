@@ -131,3 +131,48 @@ if __name__ == "__main__":
     test_categorize_empty_inputs()
     print("Все тесты категоризации пройдены!")
 
+
+
+def _assert_source_invariant(items):
+    """У каждой позиции есть category_source; он None тогда и только тогда, когда категории нет (PROFILE_TASKS.md, п. 2.1)."""
+    for item in items:
+        assert {"category_id", "category", "category_source"} <= set(item), item
+        assert (item["category"] is None) == (item["category_source"] is None), item
+        assert item["category_source"] in (None, "ai", "keywords"), item
+
+
+def test_category_source_present_for_every_item():
+    categories = [
+        {"id": 10, "name": "Продукты", "description": "Еда и напитки, молоко, хлеб"},
+        {"id": 20, "name": "Косметика", "description": "Крем, шампунь, тушь"},
+    ]
+
+    def fresh():
+        return [
+            {"name": "Молоко 2.5%", "total_price": 500},
+            {"name": "Крем Nivea", "total_price": 1890},
+            {"name": "Неизвестный артикул XYZ", "total_price": 50},
+        ]
+
+    # Qwen разложил только первую позицию — остальные через ключевые слова или без категории
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"response": '{"items": [{"index": 0, "category": 1}]}'}
+    items = fresh()
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("app.categorize.requests.post", return_value=mock_resp):
+        categorize_items(items, categories)
+    _assert_source_invariant(items)
+    assert [i["category_source"] for i in items] == ["ai", "keywords", None]
+
+    # Ollama недоступна
+    items = fresh()
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), \
+            patch("app.categorize.requests.post", side_effect=ConnectionError("no ollama")):
+        categorize_items(items, categories)
+    _assert_source_invariant(items)
+
+    # Нет категорий вообще
+    items = fresh()
+    categorize_items(items, [])
+    _assert_source_invariant(items)
+    assert all(i["category_source"] is None for i in items)
