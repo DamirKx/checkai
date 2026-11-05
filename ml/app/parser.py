@@ -2,6 +2,7 @@ import re
 from typing import List, Dict, Any, Optional, Tuple
 
 from .merchant import canonical_merchant
+from .textfix import fix_item_names
 
 
 def clean_number(text: str, currency: str = "KZT") -> Optional[float]:
@@ -257,6 +258,7 @@ def parse_receipt(raw_lines: List[str]) -> Dict[str, Any]:
         total = round(sum(item['total_price'] for item in items if item['total_price'] is not None), 2)
 
     store = find_store_name(lines)
+    fix_item_names(items)
     return {
         'store': store,
         # Каноническое имя сети: по нему группируются «любимый магазин» и поиск (PROFILE_TASKS.md, п. 2.2)

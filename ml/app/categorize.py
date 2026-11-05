@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+# Как в agent_parser.py: одинаковый num_ctx, чтобы Ollama не перезагружала модель между запросами
+NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
 # Пытаемся импортировать единую функцию нормализации из бэкенда (п. 0.6),
 # а при автономном запуске из папки ml/ используем точную копию контракта.
@@ -44,6 +46,11 @@ KEYWORDS: Dict[str, List[str]] = {
         "бытов", "губк", "салфет", "кирпич", "цемент", "щебен", "шебень", "гвозд",
         "гв03ди", "жидкие", "домофон", "донофон", "ремонт", "строит", "хозтов", "чистящ",
         "зубн", "паста", "lamp", "board", "sprayer", "tape", "kleenso", "plastic",
+        # Гигиена и косметика — в разметке эталонов это «Дом и быт»
+        "прокладк", "тампон", "подгузн", "щетк", "щётк", "крем", "гель", "дезодор", "бальзам",
+        "кондиционер", "стирал", "отбел", "освежит", "капсул", "универсальн", "средство для",
+        "fairy", "lenor", "ariel", "tide", "persil", "domestos", "pantene", "always", "oral",
+        "colgate", "nivea", "dove", "olay", "proper", "head shoulders", "gillette",
     ],
     "транспорт": [
         "бензин", "дизел", "такси", "проезд", "метро", "автобус", "парков",
@@ -66,6 +73,24 @@ KEYWORDS: Dict[str, List[str]] = {
 }
 
 
+# Служебные слова описаний: «Еда и напитки для дома», «мелочи для дома» не должны давать ключи «для» и «дома»
+DESCRIPTION_STOP_WORDS = {"для", "дома", "вне", "все", "всё", "что", "или", "как", "при", "без", "под", "над", "это"}
+
+# «Кондиционер д/белья», «крем для лица»: слово после «д/» и «для» — назначение, а не сам товар.
+# Без этого «д/белья» попадает в «Одежду», а «д/лица» — никуда
+_PURPOSE_RE = re.compile(r"(?:(?<![\w])д\s*/\s*|(?<![\w])для\s+)[\w.]+", re.IGNORECASE)
+
+
+def _keyword_text(item_name: str) -> str:
+    """Текст для поиска ключевых слов: без «для X», нормализованный, с пробелом в начале для границы слова."""
+    return " " + normalize_item_name(_PURPOSE_RE.sub(" ", str(item_name or "")))
+
+
+def _has_key(key: str, text: str) -> bool:
+    """Ключ — начало слова: «бель» находит «бельё», но не «д/белья» (убрано выше) и не «кобель»."""
+    return (" " + key) in text
+
+
 def _extract_description_keys(description: Optional[str]) -> set:
     """
     Извлекает ключи из описания категории по п. 2 Шаг 4:
@@ -80,7 +105,7 @@ def _extract_description_keys(description: Optional[str]) -> set:
     keys = set()
     for token in tokens:
         word = re.sub(r"[^\w]", "", token)
-        if len(word) >= 3:
+        if len(word) >= 3 and word not in DESCRIPTION_STOP_WORDS:
             keys.add(word[:5])
     return keys
 
@@ -97,13 +122,16 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
     if use_ai in ("0", "false", "no", "off"):
         return {}
 
-    # Формируем пронумерованный список категорий с 1 с описанием
+    # Категории — списком без номеров: модель отвечает названием. С номерами qwen2.5:3b копировал «1»
+    # из образца ответа, и почти всё уходило в первую категорию («Продукты»)
     cats_text = ""
-    valid_cat_numbers = {}  # номер с 1 -> индекс в списке categories (0-based)
+    valid_cat_numbers = {}  # номер с 1 -> индекс в списке categories (0-based): старый формат ответа
+    index_by_name = {}       # название в нижнем регистре -> индекс в списке categories
     for idx, cat in enumerate(categories, start=1):
         valid_cat_numbers[idx] = idx - 1
+        index_by_name[str(cat["name"]).strip().lower().replace("ё", "е")] = idx - 1
         desc = cat.get("description") or "нет описания"
-        cats_text += f"{idx}. {cat['name']} — {desc}\n"
+        cats_text += f"- {cat['name']} — {desc}\n"
 
     # Формируем список товаров с 0
     items_text = ""
@@ -116,18 +144,21 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         f"{cats_text}\n"
         "А также список товаров из чека:\n"
         f"{items_text}\n"
-        "Для каждого товара определи наиболее подходящую категорию по её номеру (1, 2, ...).\n"
+        "Для каждого товара выбери наиболее подходящую категорию и верни её название точно как в списке.\n"
         "Описание категории важнее её названия. Если ни одна категория не подходит — null.\n"
         "Примеры:\n"
         "- Молоко, чай, хлеб, мясо -> Продукты\n"
         "- Одежда, обувь, сумка, ремешок, аксессуары -> Одежда\n"
         "- Кирпич, цемент, щебень, гвозди, стройматериалы, лампа, посуда, бытовая химия -> Дом и быт\n"
+        "- Шампунь, крем, зубная щётка, прокладки, подгузники, кондиционер для белья, капсулы для посудомойки -> Дом и быт\n"
+        "- Слова после «для» и «д/» — назначение товара: «крем д/лица» — это крем, «кондиционер д/белья» — бытовая химия\n"
         "- Бургер, пицца, блюда в кафе или ресторане -> Кафе\n"
         "- Автозапчасти, автохимия (WD40, моторное масло, омыватель, свечи) -> Транспорт\n"
         "- Игрушки, пластилин (modelling clay), кино, игры -> Развлечения\n"
         "- Смартфон, электроника, техника, скидочная карта -> null\n"
         "Ответ верни строго в формате JSON без лишнего текста и блоков кода:\n"
-        "{\n  \"items\": [\n    {\"index\": 0, \"category\": 1},\n    {\"index\": 1, \"category\": null}\n  ]\n}"
+        "{\n  \"items\": [\n    {\"index\": 0, \"category\": \"<название из списка>\"},\n    {\"index\": 1, \"category\": null}\n  ]\n}\n"
+        "В ответе должны быть все товары, по одному разу каждый."
     )
 
     payload = {
@@ -136,7 +167,8 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         "stream": False,
         "keep_alive": "30m",
         "options": {
-            "temperature": 0.0
+            "temperature": 0.0,
+            "num_ctx": NUM_CTX
         }
     }
 
@@ -172,9 +204,13 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
                         continue
                     seen_indices.add(i)
 
-                    # Проверяем, что номер категории валидный и не является категорией "Другое" без явных ключей
-                    if isinstance(c_num, int) and not isinstance(c_num, bool) and c_num in valid_cat_numbers:
+                    # Ответ — название категории; номер (старый формат) тоже принимаем
+                    cat_idx = None
+                    if isinstance(c_num, str):
+                        cat_idx = index_by_name.get(c_num.strip().lower().replace("ё", "е"))
+                    elif isinstance(c_num, int) and not isinstance(c_num, bool) and c_num in valid_cat_numbers:
                         cat_idx = valid_cat_numbers[c_num]
+                    if cat_idx is not None:
                         cat_name_lower = str(categories[cat_idx].get("name") or "").strip().lower()
                         # ML не кладёт в «Другое» сам, неподходящее остаётся «Без категории» (None)
                         if cat_name_lower != "другое":
@@ -195,8 +231,8 @@ def _match_by_keywords(item_name: str, categories: List[dict], desc_keys_list: L
        - среди равных — больше совпавших ключей;
        - при равенстве — меньшая position (или индекс в списке).
     """
-    norm_name = normalize_item_name(item_name)
-    if not norm_name:
+    norm_name = _keyword_text(item_name)
+    if not norm_name.strip():
         return None
 
     best_cat_idx: Optional[int] = None
@@ -214,11 +250,11 @@ def _match_by_keywords(item_name: str, categories: List[dict], desc_keys_list: L
         if cat_name_lower == "другое" and "не подошло" in str(cat.get("description") or "").lower():
             user_keys = set()
 
-        matched_user_keys = sum(1 for k in user_keys if k in norm_name)
+        matched_user_keys = sum(1 for k in user_keys if _has_key(k, norm_name))
 
         # 2. Ключи из встроенного словаря KEYWORDS
         builtin_keys = KEYWORDS.get(cat_name_lower, [])
-        matched_builtin_keys = sum(1 for k in builtin_keys if k in norm_name)
+        matched_builtin_keys = sum(1 for k in builtin_keys if _has_key(k, norm_name))
 
         if matched_user_keys > 0:
             candidate_score = (1, matched_user_keys, -position, -idx)

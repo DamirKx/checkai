@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any, get_args
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
@@ -177,8 +177,24 @@ class Preferences(BaseModel):
 
 class PreferencesUpdate(BaseModel):
     """PATCH /api/auth/me: меняются только пришедшие ключи, null у ключа — значение по умолчанию."""
-    theme: Optional[ThemeName] = None
-    accent: Optional[AccentName] = None
+    theme: Optional[str] = None
+    accent: Optional[str] = None
+
+    @field_validator("theme")
+    @classmethod
+    def _check_theme(cls, v: Optional[str]) -> Optional[str]:
+        allowed = get_args(ThemeName)
+        if v is not None and v not in allowed:
+            raise ValueError(f"Неизвестная тема. Доступны: {', '.join(allowed)}")
+        return v
+
+    @field_validator("accent")
+    @classmethod
+    def _check_accent(cls, v: Optional[str]) -> Optional[str]:
+        allowed = get_args(AccentName)
+        if v is not None and v not in allowed:
+            raise ValueError(f"Неизвестный акцентный цвет. Доступны: {', '.join(allowed)}")
+        return v
 
 
 class UserUpdate(BaseModel):
