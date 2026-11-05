@@ -2,20 +2,22 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d1730"><title>CheckAI — ваши расходы</title>
+  <meta name="theme-color" content="#07080d"><title>CheckAI — ваши расходы</title>
   <script>
-    // Тема выставляется до отрисовки, чтобы страница не мигала тёмным/светлым
-    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t})();
+    // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
+    (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/js/app.js" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=avatar-1">
+  <script src="/static/js/app.js?v=avatar-1" defer></script>
 </head>
-<body><div class="app">
+<body>
+<div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
+<div class="app">
   <header class="topbar">
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
-    <div class="brand-mark" aria-hidden="true">C</div><div class="brand">CheckAI</div>
+    <button class="brand-link" id="brandLink" type="button" aria-label="CheckAI — на главную"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></button>
     <div class="top-spacer"></div>
-    <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Включить светлую тему"><span aria-hidden="true" id="themeIcon">☀</span></button>
+    <button class="icon-btn theme-btn" id="themeBtn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
     <button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button>
     <div class="user-chip" id="userChip" hidden>
       <button class="user-btn" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню аккаунта"><div class="avatar" id="userAvatar" aria-hidden="true">Я</div><div class="user-meta"><b id="userName"></b><small id="userEmail"></small></div></button>
@@ -32,30 +34,101 @@
   <aside class="drawer" id="drawer" aria-label="Главное меню" inert>
     <div class="drawer-head"><div class="brand-mark" aria-hidden="true">C</div><div class="brand">CheckAI</div></div>
     <nav class="drawer-nav">
-      <button class="nav-link active" data-page="upload" type="button" aria-current="page"><span aria-hidden="true">＋</span><span>Добавить чек</span></button>
+      <button class="nav-link" data-page="upload" type="button"><span aria-hidden="true">＋</span><span>Добавить чек</span></button>
       <button class="nav-link" data-page="history" type="button"><span aria-hidden="true">▤</span><span>История и расходы</span></button>
       <button class="nav-link" data-page="categories" type="button"><span aria-hidden="true">◈</span><span>Категории</span></button>
       <button class="nav-link" data-page="analysis" type="button"><span aria-hidden="true">◔</span><span>Анализ расходов</span></button>
       <button class="nav-link" data-page="budgets" type="button"><span aria-hidden="true">◎</span><span>Бюджеты</span><span class="nav-badge" id="budgetBadge" hidden>перерасход</span></button>
       <button class="nav-link" data-page="profile" id="navProfile" type="button" hidden><span aria-hidden="true">⚙</span><span>Профиль</span></button>
     </nav>
-    <div class="drawer-foot" id="drawerFoot">Войдите, чтобы сохранять чеки</div>
+    <div class="drawer-foot" id="drawerFoot" hidden></div>
   </aside>
 
   <main class="layout">
-    <section class="page active" id="page-upload" aria-labelledby="uploadTitle">
+    <section class="page active" id="page-home" aria-labelledby="homeTitle">
+      <div class="land-top">
+        <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
+        <div class="land-top-actions">
+          <button class="icon-btn theme-btn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
+          <button class="btn soft small" id="heroLogin" type="button">Войти</button>
+        </div>
+      </div>
+      <div class="hero">
+        <div class="hero-copy">
+          <h1 id="homeTitle" class="hero-title">Чеки<br>в цифры<span class="accent">.</span></h1>
+          <p class="hero-lead">Фото чека — и расходы разложены по полочкам.</p>
+          <div class="hero-actions"><button class="btn hero-cta" id="heroRegister" type="button">Начать <span aria-hidden="true">→</span></button></div>
+        </div>
+        <div class="hero-visual" id="heroVisual" aria-hidden="true">
+          <div class="receipt-stage">
+            <div class="receipt-3d">
+              <div class="paper">
+                <div class="paper-head"><b>CHECK·AI MARKET</b><span>г. Алматы, пр. Абая 10</span><span>02.11.2026 · 18:42</span></div>
+                <div class="paper-sep"></div>
+                <div class="paper-line" style="--i:0"><span>Молоко 3,2% 1 л</span><b>620</b></div>
+                <div class="paper-line" style="--i:1"><span>Хлеб «Бородинский»</span><b>340</b></div>
+                <div class="paper-line" style="--i:2"><span>Кофе американо</span><b>990</b></div>
+                <div class="paper-line" style="--i:3"><span>Шампунь 400 мл</span><b>1 870</b></div>
+                <div class="paper-line" style="--i:4"><span>Яблоки 1,2 кг</span><b>1 000</b></div>
+                <div class="paper-sep"></div>
+                <div class="paper-total"><span>ИТОГ</span><b><i class="count"></i> ₸</b></div>
+                <div class="barcode"></div>
+                <div class="paper-foot">СПАСИБО ЗА ПОКУПКУ</div>
+              </div>
+              <div class="scan-beam"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticker" aria-hidden="true"><div class="ticker-track"><span>Продукты</span><i>✱</i><span>Кафе</span><i>✱</i><span>Транспорт</span><i>✱</i><span>Дом</span><i>✱</i><span>Здоровье</span><i>✱</i><span>Одежда</span><i>✱</i><span>Развлечения</span><i>✱</i><span>Продукты</span><i>✱</i><span>Кафе</span><i>✱</i><span>Транспорт</span><i>✱</i><span>Дом</span><i>✱</i><span>Здоровье</span><i>✱</i><span>Одежда</span><i>✱</i><span>Развлечения</span><i>✱</i></div></div>
+
+      <section class="land-block" aria-labelledby="whatTitle">
+        <div class="block-head reveal"><span class="block-idx">/01</span><h2 id="whatTitle">Что умеет</h2></div>
+        <ol class="rows">
+          <li class="row reveal" style="--d:0"><span class="row-num">01</span><b>Читает чек</b><span class="row-tag">OCR + ИИ</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:1"><span class="row-num">02</span><b>Раскладывает по категориям</b><span class="row-tag">Свои правила</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:2"><span class="row-num">03</span><b>Следит за бюджетом</b><span class="row-tag">Лимиты</span><span class="row-arrow" aria-hidden="true">→</span></li>
+          <li class="row reveal" style="--d:3"><span class="row-num">04</span><b>Считает в валютах</b><span class="row-tag">Курс НБ РК</span><span class="row-arrow" aria-hidden="true">→</span></li>
+        </ol>
+      </section>
+
+      <section class="land-block" aria-labelledby="factsTitle">
+        <div class="block-head reveal"><span class="block-idx">/02</span><h2 id="factsTitle">В цифрах</h2></div>
+        <div class="facts">
+          <div class="fact reveal" style="--d:0"><b>8</b><span>валют</span></div>
+          <div class="fact reveal" style="--d:1"><b>50</b><span>своих категорий</span></div>
+          <div class="fact reveal" style="--d:2"><b>3</b><span>шага до отчёта</span></div>
+          <div class="fact reveal" style="--d:3"><b>0</b><span>облаков</span></div>
+        </div>
+      </section>
+
+      <section class="land-final reveal" aria-labelledby="ctaTitle">
+        <h2 id="ctaTitle">Первый чек —<br>за минуту<span class="accent">.</span></h2>
+        <div class="hero-actions"><button class="btn hero-cta" id="landingRegister" type="button">Создать аккаунт <span aria-hidden="true">→</span></button><button class="btn soft hero-cta" id="landingLogin" type="button">Войти</button></div>
+      </section>
+      <footer class="landing-foot"><span>© CheckAI</span><span>2026</span></footer>
+    </section>
+
+    <section class="page" id="page-upload" aria-labelledby="uploadTitle">
       <div class="page-head"><div><h1 id="uploadTitle">Добавить чек</h1></div></div>
-      <div class="upload-grid">
+      <div class="card empty guest-card" id="uploadGuest" hidden>
+        <div class="guest-ico" aria-hidden="true">🔒</div>
+        <b>Войдите, чтобы добавить чек</b>
+        <div class="button-row" style="justify-content:center"><button class="btn" id="uploadRegisterBtn" type="button">Создать аккаунт</button><button class="btn soft" id="uploadLoginBtn" type="button">Войти</button></div>
+      </div>
+      <div class="upload-grid" id="uploadBody">
         <div class="card upload-card">
+          <div class="card-kicker"><span>01</span>Фото</div>
           <div id="dropzone" class="dropzone">
             <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff" hidden>
             <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
             <div id="dropPrompt">
               <div class="upload-icon" aria-hidden="true">↥</div>
-              <h3>Перетащите фото чека сюда</h3>
-              <p>JPG, PNG, WEBP, BMP или TIFF, до <span id="maxSizeText">10</span> МБ</p>
+              <h3>Перетащите фото</h3>
+              <p>до <span id="maxSizeText">10</span> МБ</p>
               <div class="button-row" style="justify-content:center">
-                <button class="btn soft" id="chooseBtn" type="button">Выбрать изображение</button>
+                <button class="btn soft" id="chooseBtn" type="button">Выбрать</button>
                 <button class="btn soft touch-only" id="cameraBtn" type="button">Сфотографировать</button>
               </div>
             </div>
@@ -78,21 +151,19 @@
             <small id="stepsNote"></small>
           </div>
           <div class="upload-foot">
-            <span>Можно загрузить фото из галереи</span>
-            <button class="text-btn" id="testBtn" type="button">Попробовать на демо-чеке →</button>
+            <button class="text-btn" id="testBtn" type="button">Демо-чек →</button>
           </div>
           <div id="uploadMessage" class="notice" role="alert" hidden></div>
         </div>
         <div class="card result-card" id="resultCard" aria-labelledby="resultTitle">
-          <div class="placeholder" id="resultPlaceholder"><b id="resultTitle">Здесь появится чек</b><span>Сначала загрузите фото — мы распознаем позиции и сумму.</span></div>
+          <div class="card-kicker"><span>02</span>Результат</div>
+          <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b></div>
           <div id="resultContent" hidden>
-            <div class="eyebrow">Чек распознан — проверьте и поправьте, если нужно</div>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
             <div id="resultEditor"></div>
-            <div class="notice">Категории определены автоматически, распознавание иногда ошибается — проверьте названия, цены, итог и категории. Если товар попал не туда, в разделе «Категории» его можно перенести и запомнить.</div>
             <div class="button-row" style="margin-top:18px">
-              <button class="btn" id="saveReceiptBtn" type="button">Сохранить в историю</button>
-              <button class="btn soft" id="downloadBtn" type="button">Скачать JSON</button>
+              <button class="btn" id="saveReceiptBtn" type="button">Сохранить</button>
+              <button class="btn soft" id="downloadBtn" type="button">JSON</button>
             </div>
           </div>
         </div>
@@ -101,7 +172,7 @@
 
     <section class="page" id="page-history" aria-labelledby="historyTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Все чеки в одном месте</div><h1 id="historyTitle">История покупок</h1><p>Сводка обновляется после каждого сохранённого чека.</p></div>
+        <div><h1 id="historyTitle">История</h1></div>
         <div class="filterbar">
           <input id="historySearch" type="search" placeholder="Магазин или товар" aria-label="Поиск по магазину или товару">
           <select id="historyPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
@@ -120,21 +191,19 @@
 
     <section class="page" id="page-categories" aria-labelledby="categoriesTitle">
       <div class="page-head">
-        <div><h1 id="categoriesTitle">Категории</h1>
-          <p><span class="hover-only">Перетащите товар на другую категорию, чтобы исправить распознавание.</span><span class="touch-only">Откройте категорию и выберите «Переместить в…», чтобы исправить распознавание.</span></p></div>
+        <div><h1 id="categoriesTitle">Категории</h1></div>
         <div class="filterbar" id="categoriesControls">
           <select class="periodFilter" id="categoriesPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
-          <button class="btn soft small" id="addCategoryBtn" type="button">＋ Добавить категорию</button>
+          <button class="btn soft small" id="addCategoryBtn" type="button">＋ Категория</button>
         </div>
       </div>
-      <div class="card empty" id="categoriesGuest" hidden>Категории хранятся в аккаунте. <button class="text-btn" id="categoriesLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы настроить их под себя.</div>
+      <div class="card empty" id="categoriesGuest" hidden><button class="text-btn" id="categoriesLoginBtn" type="button">Войдите</button>, чтобы настроить категории.</div>
       <div id="categoriesBody">
-        <label class="remember-toggle"><input type="checkbox" id="rememberMoves" checked> Запоминать перенос: такие же товары в новых чеках сразу попадут в выбранную категорию</label>
+        <label class="remember-toggle"><input type="checkbox" id="rememberMoves" checked> Запоминать перенос</label>
         <p class="currency-note" id="categoriesSkipped" hidden></p>
         <div class="category-grid" id="categoryGrid"></div>
         <section class="card rules-card" aria-labelledby="rulesTitle">
-          <h3 id="rulesTitle">Запомненные правила</h3>
-          <p>При распознавании правило важнее ИИ: товар с таким названием сразу попадает в указанную категорию.</p>
+          <h3 id="rulesTitle">Правила</h3>
           <div id="rulesList"></div>
         </section>
       </div>
@@ -142,40 +211,39 @@
 
     <section class="page" id="page-analysis" aria-labelledby="analysisTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Картина расходов</div><h1 id="analysisTitle">Анализ расходов</h1><p>Сравните траты по периодам и категориям.</p></div>
+        <div><h1 id="analysisTitle">Анализ</h1></div>
         <div class="filterbar">
           <select id="analysisPeriod" aria-label="Период"><option value="month">Этот месяц</option><option value="week">Эта неделя</option><option value="year">Этот год</option><option value="all">За всё время</option></select>
           <select id="analysisCategory" aria-label="Категория"><option value="all">Все категории</option></select>
         </div>
       </div>
       <div class="summary-grid">
-        <div class="card stat"><span>Расходы за период</span><strong id="analysisTotal">0</strong></div>
-        <div class="card stat"><span>Самая крупная категория</span><strong id="analysisTop">—</strong></div>
-        <div class="card stat"><span>Позиций учтено</span><strong id="analysisItems">0</strong></div>
+        <div class="card stat"><span>Расходы</span><strong id="analysisTotal">0</strong></div>
+        <div class="card stat"><span>Топ категория</span><strong id="analysisTop">—</strong></div>
+        <div class="card stat"><span>Позиций</span><strong id="analysisItems">0</strong></div>
       </div>
       <p class="currency-note" id="analysisSkipped" hidden></p>
       <div class="analysis-grid">
         <div class="card chart-card"><h3 id="chartTitle">Динамика расходов</h3><div class="chart" id="chart" role="img"></div></div>
-        <div class="card breakdown-card"><h3>Расходы по категориям</h3><div id="breakdown" class="legend"></div></div>
+        <div class="card breakdown-card"><h3>По категориям</h3><div id="breakdown" class="legend"></div></div>
       </div>
     </section>
 
     <section class="page" id="page-budgets" aria-labelledby="budgetsTitle">
       <div class="page-head">
-        <div><div class="eyebrow">Контроль трат</div><h1 id="budgetsTitle">Бюджеты</h1><p>Задайте лимиты на месяц — CheckAI покажет, сколько осталось, и предупредит о перерасходе.</p></div>
+        <div><h1 id="budgetsTitle">Бюджеты</h1></div>
         <div class="filterbar" id="budgetControls">
           <select id="budgetMonth" aria-label="Месяц"></select>
-          <button class="btn soft small" id="budgetEditBtn" type="button" aria-controls="budgetEditor" aria-expanded="false">Настроить лимиты</button>
+          <button class="btn soft small" id="budgetEditBtn" type="button" aria-controls="budgetEditor" aria-expanded="false">Лимиты</button>
         </div>
       </div>
-      <div class="card empty" id="budgetGuest" hidden>Бюджеты хранятся в аккаунте. <button class="text-btn" id="budgetLoginBtn" type="button">Войдите или зарегистрируйтесь</button>, чтобы задать лимиты.</div>
+      <div class="card empty" id="budgetGuest" hidden><button class="text-btn" id="budgetLoginBtn" type="button">Войдите</button>, чтобы задать лимиты.</div>
       <form class="card budget-editor" id="budgetEditor" hidden>
         <h3 id="budgetEditorTitle">Лимиты на месяц</h3>
-        <p>Лимиты действуют каждый месяц. Оставьте поле пустым, если лимит не нужен.</p>
-        <label class="budget-field budget-total"><span>Общий лимит на месяц</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
+        <label class="budget-field budget-total"><span>Общий лимит</span><input class="field" id="budgetTotalInput" type="number" min="0" step="any" inputmode="decimal" placeholder="Без лимита"><small id="budgetTotalHint"></small></label>
         <div class="budget-fields" id="budgetFields"></div>
         <div class="auth-error" id="budgetError" role="alert" hidden></div>
-        <div class="button-row"><button class="btn" id="budgetSave" type="submit">Сохранить лимиты</button><button class="btn soft" id="budgetCancel" type="button">Отмена</button></div>
+        <div class="button-row"><button class="btn" id="budgetSave" type="submit">Сохранить</button><button class="btn soft" id="budgetCancel" type="button">Отмена</button></div>
       </form>
       <div id="budgetBody">
         <div class="summary-grid">
@@ -188,42 +256,135 @@
         <div class="budget-list" id="budgetList"></div>
         <p class="budget-unlimited" id="budgetUnlimited" hidden></p>
       </div>
-      <div class="notice" id="budgetLocalNote" hidden>Лимиты пока сохраняются только в этом браузере: сервер ещё не поддерживает бюджеты. На другом устройстве их не будет.</div>
+      <div class="notice" id="budgetLocalNote" hidden>Лимиты хранятся только в этом браузере.</div>
     </section>
 
-    <section class="page" id="page-profile" aria-labelledby="profileTitle">
-      <div class="page-head"><div><div class="eyebrow">Ваш аккаунт</div><h1 id="profileTitle">Профиль</h1><p>Данные аккаунта, смена аккаунта и удаление.</p></div></div>
-      <div class="profile-grid">
-        <div class="card profile-card">
-          <div class="profile-head"><div class="avatar" id="profileAvatar" aria-hidden="true">Я</div><div><h3 id="profileName"></h3><p id="profileEmail"></p></div></div>
-          <dl class="kv"><dt>Зарегистрирован</dt><dd id="profileCreated">—</dd><dt>Сохранено чеков</dt><dd id="profileReceipts">0</dd><dt>Потрачено всего</dt><dd id="profileSpent">0</dd></dl>
-        </div>
-        <div class="card profile-card">
-          <h3>Аккаунты на этом устройстве</h3><p>Переключайтесь между аккаунтами без повторного ввода пароля.</p>
-          <div id="profileAccounts"></div>
-          <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">Добавить аккаунт</button><button class="btn soft" id="logoutBtn" type="button">Выйти из этого аккаунта</button></div>
-        </div>
-        <div class="card profile-card">
-          <h3>Редактировать аккаунт</h3>
-          <form class="auth-form" id="profileForm">
-            <label>Имя<input id="editName" autocomplete="name" maxlength="255"></label>
-            <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
-            <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">В ней показываются итоги, аналитика и бюджеты. Лимиты бюджетов при смене не пересчитываются</span></label>
-            <label>Новый пароль<input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять" aria-describedby="editPasswordHint"><span class="hint" id="editPasswordHint">Минимум 8 символов</span></label>
-            <label>Текущий пароль<input id="editCurrentPassword" type="password" autocomplete="current-password" placeholder="Нужен для смены email или пароля"></label>
-            <div class="auth-error" id="profileError" role="alert" hidden></div>
-            <div class="button-row"><button class="btn" id="profileSave" type="submit">Сохранить изменения</button><button class="btn soft" id="profileReset" type="button">Отменить</button></div>
-          </form>
-        </div>
-        <div class="card profile-card danger-card">
-          <h3 class="danger-text">Удалить аккаунт</h3><p>Аккаунт и все сохранённые чеки будут удалены без возможности восстановления.</p>
-          <form class="auth-form" id="deleteForm">
-            <label>Пароль для подтверждения<input id="deletePassword" type="password" required autocomplete="current-password"></label>
-            <div class="auth-error" id="deleteError" role="alert" hidden></div>
-            <button class="btn danger" id="deleteSubmit" type="submit">Удалить аккаунт навсегда</button>
-          </form>
+    <section class="page" id="page-profile" aria-labelledby="profileName">
+      <div class="card pf-hero">
+        <div class="pf-hero-top"><span class="block-idx">/профиль</span><span id="profileSince"></span></div>
+        <div class="pf-hero-main">
+          <button class="pf-avatar" id="avatarBtn" type="button" aria-label="Изменить фото профиля"><span class="avatar" id="profileAvatar" aria-hidden="true">Я</span><span class="pf-avatar-edit" aria-hidden="true">Изменить</span></button>
+          <div class="pf-id">
+            <h1 id="profileName"></h1>
+            <p id="profileEmail"></p>
+            <div class="pf-chips" id="profileChips"></div>
+          </div>
+          <div class="pf-hero-actions"><button class="btn" id="profileAddReceipt" type="button">＋ Чек</button><button class="btn soft" id="logoutBtn" type="button">Выйти</button></div>
         </div>
       </div>
+
+      <div class="pf-facts">
+        <div class="pf-fact"><b id="profileReceipts">0</b><span>чеков</span></div>
+        <div class="pf-fact"><b id="profileSpent">0</b><span>потрачено</span></div>
+        <div class="pf-fact"><b id="profileAverage">0</b><span>средний чек</span></div>
+        <div class="pf-fact"><b id="profileDays">0</b><span id="profileDaysLabel">дней с нами</span></div>
+      </div>
+
+      <div class="pf-grid" id="profileGrid">
+        <div class="card pf-card pf-activity">
+          <div class="pf-card-head"><h3>Активность</h3><span class="pf-muted">за полгода</span></div>
+          <div class="pf-activity-body">
+            <div class="heatmap-wrap">
+              <div class="heatmap-months" id="heatmapMonths" aria-hidden="true"></div>
+              <div class="heatmap-days" aria-hidden="true"><span>пн</span><span></span><span>ср</span><span></span><span>пт</span><span></span><span></span></div>
+              <div class="heatmap" id="heatmap" role="img"></div>
+              <div class="heatmap-legend" aria-hidden="true">меньше<i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i><i data-l="4"></i>больше</div>
+            </div>
+            <dl class="pf-side" id="activityStats"></dl>
+          </div>
+        </div>
+        <div class="card pf-card pf-habits">
+          <div class="pf-card-head"><h3>Привычки</h3></div>
+          <ol class="pf-rows" id="profileHabits"></ol>
+        </div>
+        <div class="card pf-card pf-start" id="profileStart">
+          <div class="pf-card-head"><h3>Первые шаги</h3><span class="pf-muted" id="startCount"></span></div>
+          <div class="progress" aria-hidden="true"><i id="startBar"></i></div>
+          <ul class="pf-start-list" id="startList"></ul>
+        </div>
+      </div>
+
+      <section class="pf-settings" id="profileSettings" aria-labelledby="settingsTitle">
+        <div class="block-head"><span class="block-idx">/01</span><h2 id="settingsTitle">Настройки</h2></div>
+        <div class="pf-settings-body">
+          <div class="pf-tabs" id="pfTabs" role="tablist" aria-label="Разделы настроек" aria-orientation="vertical">
+            <button class="pf-tab active" id="pfTab-personal" data-pf-tab="personal" type="button" role="tab" aria-selected="true" aria-controls="pfPanel-personal"><span class="pf-tab-num">01</span><span>Личное</span></button>
+            <button class="pf-tab" id="pfTab-security" data-pf-tab="security" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-security" tabindex="-1"><span class="pf-tab-num">02</span><span>Вход и пароль</span></button>
+            <button class="pf-tab" id="pfTab-accounts" data-pf-tab="accounts" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-accounts" tabindex="-1"><span class="pf-tab-num">03</span><span>Аккаунты</span><span class="pf-count" id="accountsCount">1</span></button>
+            <button class="pf-tab" id="pfTab-look" data-pf-tab="look" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-look" tabindex="-1"><span class="pf-tab-num">04</span><span>Оформление</span></button>
+            <button class="pf-tab" id="pfTab-data" data-pf-tab="data" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-data" tabindex="-1"><span class="pf-tab-num">05</span><span>Данные</span><span class="pf-count" id="dataCount">0</span></button>
+            <button class="pf-tab danger-tab" id="pfTab-danger" data-pf-tab="danger" type="button" role="tab" aria-selected="false" aria-controls="pfPanel-danger" tabindex="-1"><span class="pf-tab-num">06</span><span>Удаление</span></button>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-personal" role="tabpanel" aria-labelledby="pfTab-personal">
+            <div class="pf-panel-head"><h3>Личное</h3><p>Как к вам обращаться и в какой валюте считать итоги.</p></div>
+            <form class="auth-form pf-form" id="profileForm">
+              <label>Имя<input id="editName" autocomplete="name" maxlength="255" placeholder="Как вас зовут"></label>
+              <label>Основная валюта<select id="editBaseCurrency" aria-describedby="editBaseCurrencyHint"></select><span class="hint" id="editBaseCurrencyHint">Итоги, аналитика и бюджеты — в ней</span></label>
+              <div class="auth-error" id="profileError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn" id="profileSave" type="submit" disabled>Сохранить</button><button class="btn soft" id="profileReset" type="button" disabled>Отменить</button><span class="pf-dirty" id="profileDirty" hidden>Есть несохранённые изменения</span></div>
+            </form>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-security" role="tabpanel" aria-labelledby="pfTab-security" hidden>
+            <div class="pf-panel-head"><h3>Вход и пароль</h3><p>Для любых изменений здесь нужен текущий пароль.</p></div>
+            <form class="auth-form pf-form" id="securityForm">
+              <label>Email<input id="editEmail" type="email" required autocomplete="email"></label>
+              <label>Новый пароль
+                <span class="pw-field"><input id="editPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Не менять" aria-describedby="editPasswordHint"><button class="pw-toggle" data-pw-toggle="editPassword" type="button" aria-label="Показать пароль">Показать</button></span>
+                <span class="pw-meter" id="pwMeter" data-score="0" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span class="hint" id="editPasswordHint">Минимум 8 символов</span>
+              </label>
+              <label>Текущий пароль
+                <span class="pw-field"><input id="editCurrentPassword" type="password" autocomplete="current-password" required><button class="pw-toggle" data-pw-toggle="editCurrentPassword" type="button" aria-label="Показать пароль">Показать</button></span>
+              </label>
+              <div class="auth-error" id="securityError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn" id="securitySave" type="submit">Обновить</button></div>
+            </form>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-accounts" role="tabpanel" aria-labelledby="pfTab-accounts" hidden>
+            <div class="pf-panel-head"><h3>Аккаунты</h3><p>Быстрое переключение между аккаунтами на этом устройстве.</p></div>
+            <div id="profileAccounts"></div>
+            <div class="button-row"><button class="btn soft" id="addAccountBtn" type="button">＋ Добавить аккаунт</button></div>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-look" role="tabpanel" aria-labelledby="pfTab-look" hidden>
+            <div class="pf-panel-head"><h3>Оформление</h3><p>Хранится в этом браузере.</p></div>
+            <div class="theme-picks" id="themePicks" role="group" aria-label="Тема">
+              <button class="theme-pick" data-theme-pick="dark" type="button" aria-pressed="false"><span class="theme-preview tp-dark" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Тёмная</span></button>
+              <button class="theme-pick" data-theme-pick="light" type="button" aria-pressed="false"><span class="theme-preview tp-light" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Светлая</span></button>
+              <button class="theme-pick" data-theme-pick="system" type="button" aria-pressed="false"><span class="theme-preview tp-system" aria-hidden="true"><i></i><b><i></i><i></i><i></i></b></span><span>Как в системе</span></button>
+            </div>
+            <h4 class="pf-sub" id="accentLabel">Акцентный цвет</h4>
+            <div class="accent-picks" id="accentPicks" role="radiogroup" aria-labelledby="accentLabel">
+              <button class="accent-pick" data-accent-pick="violet" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Фиолетовый</span></button>
+              <button class="accent-pick" data-accent-pick="red" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Красный</span></button>
+              <button class="accent-pick" data-accent-pick="orange" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Оранжевый</span></button>
+              <button class="accent-pick" data-accent-pick="green" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Зелёный</span></button>
+              <button class="accent-pick" data-accent-pick="blue" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Синий</span></button>
+              <button class="accent-pick" data-accent-pick="pink" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Розовый</span></button>
+            </div>
+          </div>
+
+          <div class="card pf-panel" id="pfPanel-data" role="tabpanel" aria-labelledby="pfTab-data" hidden>
+            <div class="pf-panel-head"><h3>Данные</h3><p>Всё, что хранится в аккаунте, можно забрать с собой.</p></div>
+            <dl class="pf-stats" id="dataStats"></dl>
+            <div class="button-row"><button class="btn soft" id="exportAllJson" type="button">Скачать всё · JSON</button><button class="btn soft" id="exportAllCsv" type="button">Чеки · CSV</button></div>
+            <p class="hint">Фото чеков в выгрузку не входят.</p>
+          </div>
+
+          <div class="card pf-panel danger-panel" id="pfPanel-danger" role="tabpanel" aria-labelledby="pfTab-danger" hidden>
+            <div class="pf-panel-head"><h3 class="danger-text">Удалить аккаунт</h3><p id="deleteSummary">Аккаунт и все данные удалятся без возможности восстановления.</p></div>
+            <form class="auth-form pf-form" id="deleteForm">
+              <label>Пароль<input id="deletePassword" type="password" required autocomplete="current-password"></label>
+              <div class="auth-error" id="deleteError" role="alert" hidden></div>
+              <div class="pf-form-foot"><button class="btn danger" id="deleteSubmit" type="submit">Удалить навсегда</button></div>
+            </form>
+          </div>
+        </div>
+      </section>
+      <div class="heat-tip" id="heatTip" aria-hidden="true" hidden></div>
     </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -231,7 +392,6 @@
   <div class="modal-backdrop" id="receiptModal" hidden>
     <div class="card modal wide" role="dialog" aria-modal="true" aria-labelledby="rmStore">
       <button class="icon-btn modal-close" id="receiptClose" type="button" aria-label="Закрыть">✕</button>
-      <div class="eyebrow">Подробности покупки</div>
       <div id="rmView">
         <h2 id="rmStore"></h2><div class="store" id="rmDate"></div><div class="total" id="rmTotal"></div><div class="converted" id="rmConverted" hidden></div><div class="meta" id="rmMeta"></div>
         <img class="receipt-photo" id="rmPhoto" alt="Фото чека" hidden>
@@ -261,9 +421,9 @@
       <h2 id="categoryModalTitle">Новая категория</h2>
       <form class="auth-form category-form" id="categoryForm" novalidate>
         <label>Название<input id="categoryName" maxlength="50" autocomplete="off" required></label>
-        <label>Иконка<input id="categoryIcon" autocomplete="off" placeholder="◌" aria-describedby="categoryIconHint"><span class="hint" id="categoryIconHint">Эмодзи или символ — свой или один из готовых ниже</span></label>
+        <label>Иконка<input id="categoryIcon" autocomplete="off" placeholder="◌" aria-describedby="categoryIconHint"><span class="hint" id="categoryIconHint">Эмодзи или символ</span></label>
         <div class="icon-picks" id="categoryIconPicks" role="group" aria-label="Готовые иконки"></div>
-        <label>Описание<textarea id="categoryDesc" maxlength="300" rows="3" aria-describedby="categoryDescHint"></textarea><span class="hint" id="categoryDescHint">Перечислите, что сюда относится, — по описанию ИИ раскладывает товары. Например: крем, шампунь, тушь, помада</span></label>
+        <label>Описание<textarea id="categoryDesc" maxlength="300" rows="3" aria-describedby="categoryDescHint"></textarea><span class="hint" id="categoryDescHint">По нему ИИ раскладывает товары</span></label>
         <div class="auth-error" id="categoryError" role="alert" hidden></div>
         <div class="button-row"><button class="btn" id="categorySave" type="submit">Сохранить</button><button class="btn soft" id="categoryCancel" type="button">Отмена</button></div>
       </form>
@@ -281,6 +441,45 @@
         <div class="auth-error" id="deleteCategoryError" role="alert" hidden></div>
         <div class="button-row"><button class="btn danger" id="deleteCategorySubmit" type="submit">Удалить</button><button class="btn soft" id="deleteCategoryCancel" type="button">Отмена</button></div>
       </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="savedModal" hidden>
+    <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="savedModalTitle" aria-describedby="savedModalText">
+      <button class="icon-btn modal-close" id="savedModalClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="savedModalTitle">Чек сохранён</h2>
+      <div class="auth-form">
+        <p id="savedModalText" hidden></p>
+        <div class="button-row"><button class="btn" id="savedToHistory" type="button">Перейти в историю</button><button class="btn soft" id="savedStay" type="button">Остаться</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="avatarModal" hidden>
+    <div class="card modal avatar-modal" role="dialog" aria-modal="true" aria-labelledby="avatarTitle" data-step="choose">
+      <button class="icon-btn modal-close" id="avatarClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="avatarTitle">Фото профиля</h2>
+      <div class="av-step av-choose">
+        <div class="av-current"><span class="avatar" id="avatarCurrent" aria-hidden="true">Я</span></div>
+        <div class="av-actions">
+          <button class="btn" id="avatarFileBtn" type="button">Загрузить с устройства</button>
+          <button class="btn soft" id="avatarCameraBtn" type="button">Сделать фото</button>
+          <button class="btn soft av-remove" id="avatarRemove" type="button">Удалить фото</button>
+        </div>
+        <p class="av-note">JPG, PNG или WEBP. Пока фото хранится только в этом браузере.</p>
+      </div>
+      <div class="av-step av-camera">
+        <div class="av-video"><video id="avatarVideo" playsinline muted></video></div>
+        <div class="button-row"><button class="btn" id="avatarShoot" type="button">Снять</button><button class="btn soft" id="avatarCameraCancel" type="button">Назад</button></div>
+      </div>
+      <div class="av-step av-crop">
+        <div class="av-stage" id="avatarStage" tabindex="0" aria-label="Положение фото: перетаскивайте или используйте стрелки"><img id="avatarCropImg" alt="" draggable="false"></div>
+        <label class="av-zoom"><span>Масштаб</span><input id="avatarZoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+        <div class="button-row"><button class="btn" id="avatarSave" type="button">Сохранить</button><button class="btn soft" id="avatarCropCancel" type="button">Назад</button></div>
+      </div>
+      <div class="auth-error" id="avatarError" role="alert" hidden></div>
+      <input id="avatarFile" type="file" accept="image/jpeg,image/png,image/webp,image/*" hidden>
+      <input id="avatarCapture" type="file" accept="image/*" capture="user" hidden>
     </div>
   </div>
 

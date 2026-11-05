@@ -151,13 +151,62 @@ function applyTheme(theme, save) {
   document.documentElement.dataset.theme = theme;
   if (save) { try { localStorage.setItem(THEME_KEY, theme); } catch (e) {} }
   const light = theme === 'light';
-  $('themeIcon').textContent = light ? '☾' : '☀';
-  $('themeBtn').setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
-  $('themeBtn').title = light ? 'Тёмная тема' : 'Светлая тема';
+  // Кнопка-переключатель есть в шапке и на лендинге
+  document.querySelectorAll('[data-theme-toggle]').forEach(b => {
+    b.firstElementChild.textContent = light ? '☾' : '☀';
+    b.setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
+    b.title = light ? 'Тёмная тема' : 'Светлая тема';
+  });
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  renderThemePicks();
 }
-$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true);
+// Выбор в профиле: dark | light | system (system — тема не сохранена, следуем за ОС)
+const systemThemeQuery = matchMedia('(prefers-color-scheme: light)');
+const systemTheme = () => systemThemeQuery.matches ? 'light' : 'dark';
+const themePref = () => { try { const t = localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : 'system'; } catch (e) { return 'system'; } };
+function setThemePref(pref) {
+  if (pref !== 'system') { applyTheme(pref, true); return; }
+  try { localStorage.removeItem(THEME_KEY); } catch (e) {}
+  applyTheme(systemTheme(), false);
+}
+function renderThemePicks() {
+  const pref = themePref();
+  document.querySelectorAll('[data-theme-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themePick === pref)));
+}
+systemThemeQuery.addEventListener?.('change', () => { if (themePref() === 'system') applyTheme(systemTheme(), false); });
+document.querySelectorAll('[data-theme-pick]').forEach(b => b.onclick = () => setThemePref(b.dataset.themePick));
+document.querySelectorAll('[data-theme-toggle]').forEach(b => b.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true));
 applyTheme(document.documentElement.dataset.theme || 'dark', false);
+
+// Акцентный цвет: violet — по умолчанию (атрибута нет), остальные — [data-accent] в app.css
+const ACCENT_KEY = 'checkai_accent';
+const ACCENTS = ['violet', 'red', 'orange', 'green', 'blue', 'pink'];
+const accentPref = () => document.documentElement.dataset.accent || 'violet';
+function setAccent(accent) {
+  if (!ACCENTS.includes(accent)) accent = 'violet';
+  if (accent === 'violet') delete document.documentElement.dataset.accent;
+  else document.documentElement.dataset.accent = accent;
+  try { accent === 'violet' ? localStorage.removeItem(ACCENT_KEY) : localStorage.setItem(ACCENT_KEY, accent); } catch (e) {}
+  renderAccentPicks();
+}
+function renderAccentPicks() {
+  const cur = accentPref();
+  document.querySelectorAll('[data-accent-pick]').forEach(b => {
+    const on = b.dataset.accentPick === cur;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+document.querySelectorAll('[data-accent-pick]').forEach(b => b.onclick = () => setAccent(b.dataset.accentPick));
+$('accentPicks').addEventListener('keydown', e => {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!step) return;
+  e.preventDefault();
+  const next = ACCENTS[(ACCENTS.indexOf(accentPref()) + step + ACCENTS.length) % ACCENTS.length];
+  setAccent(next);
+  document.querySelector(`[data-accent-pick="${next}"]`).focus();
+});
+renderAccentPicks();
 
 // --- API и токен ---
 const TOKEN_KEY = 'checkai_token';
@@ -281,10 +330,28 @@ function apiUpload(url, formData, onProgress) {
 
 // --- Сессия пользователя ---
 const initial = u => String(u?.full_name || u?.email || '?').trim().charAt(0).toUpperCase() || '?';
+// Фото профиля: avatar_url с сервера, а пока его нет — сжатая копия в localStorage (PROFILE_TASKS.md, п. 1.2)
+// В ключе и дата регистрации: id удалённого аккаунта база может выдать новому
+const avatarKey = u => `checkai_avatar_${u.id}_${u.created_at || ''}`;
+const localAvatar = u => { try { return u ? localStorage.getItem(avatarKey(u)) : null; } catch (e) { return null; } };
+const avatarSrc = u => u?.avatar_url || localAvatar(u);
+function paintAvatar(el, u) {
+  const src = avatarSrc(u);
+  el.classList.toggle('has-photo', !!src);
+  if (!src) { el.textContent = initial(u); return; }
+  const img = new Image();
+  img.src = src; img.alt = '';
+  el.replaceChildren(img);
+}
+const avatarHtml = u => {
+  const src = avatarSrc(u);
+  return src ? `<div class="avatar has-photo" aria-hidden="true"><img src="${esc(src)}" alt=""></div>` : `<div class="avatar" aria-hidden="true">${esc(initial(u))}</div>`;
+};
 // created_at приходит без часового пояса (UTC) — добавляем Z, чтобы показать местное время
+const serverDate = s => new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
 const fmtDateTime = s => {
   if (!s) return '—';
-  const d = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
+  const d = serverDate(s);
   return Number.isNaN(+d) ? String(s) : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 const showFormError = (id, msg) => { $(id).textContent = msg; $(id).hidden = false; };
@@ -303,7 +370,7 @@ function setUser(user) {
   currentUser = user;
   rememberAccount(getToken(), user);
   const name = user.full_name || user.email;
-  $('userAvatar').textContent = initial(user);
+  paintAvatar($('userAvatar'), user);
   $('userName').textContent = name;
   $('userEmail').textContent = user.email;
   $('userEmail').hidden = !user.full_name;
@@ -312,7 +379,7 @@ function setUser(user) {
   $('userChip').hidden = false;
   $('navProfile').hidden = false;
   $('drawerFoot').textContent = 'Чеки сохраняются в вашем аккаунте';
-  renderAccountMenu(); renderProfile(); fillProfileForm();
+  renderAccess(); renderAccountMenu(); renderProfile(); fillProfileForm();
   closeBudgetEditor(); loadBudgets(); loadCategories(); loadRules();
 }
 function setGuest() {
@@ -323,10 +390,22 @@ function setGuest() {
   $('userChip').hidden = true;
   $('navProfile').hidden = true;
   $('drawerFoot').textContent = 'Войдите, чтобы сохранять чеки';
-  if ($('page-profile').classList.contains('active')) showPage('upload');
+  if ($('page-profile').classList.contains('active')) showPage('home');
   rerender();
 }
-function rerender() { renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
+// Гость видит только лендинг без шапки; вошедший — приложение с шапкой, главная у него — «Добавить чек».
+// Пока при старте проверяется сохранённый токен, считаем пользователя вошедшим, чтобы лендинг не мигал
+let authPending = !!getToken();
+function renderAccess() {
+  const guest = !currentUser && !(authPending && getToken());
+  document.documentElement.dataset.auth = guest ? 'guest' : 'user';
+  $('uploadGuest').hidden = !guest;
+  $('uploadBody').hidden = guest;
+  const onHome = $('page-home').classList.contains('active');
+  if (guest && !onHome) showPage('home');
+  else if (!guest && onHome) showPage('upload');
+}
+function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
 function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
 
 // --- Смена аккаунта ---
@@ -353,7 +432,7 @@ async function switchAccount(id) {
 function renderAccountMenu() {
   const others = getAccounts().filter(a => !currentUser || a.user.id !== currentUser.id);
   $('menuAccounts').innerHTML = others.length
-    ? others.map(a => `<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><span>${esc(a.user.full_name || a.user.email)}</span></button>`).join('')
+    ? others.map(a => `<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem">${avatarHtml(a.user)}<span>${esc(a.user.full_name || a.user.email)}</span></button>`).join('')
     : '<div class="menu-label">Других аккаунтов на устройстве нет</div>';
   $('menuAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
 }
@@ -369,63 +448,326 @@ $('accountMenu').querySelectorAll('[data-menu]').forEach(b => b.onclick = () => 
   else if (action === 'logout') logout();
 });
 
-// --- Профиль: просмотр, редактирование, удаление ---
-function renderProfile() {
+// --- Профиль: обложка, цифры, активность, привычки ---
+// Всё, кроме форм, считается на клиенте по уже загруженным чекам (receipts)
+const ACTIVITY_WEEKS = 26;
+const DAY_MS = 864e5;
+const WEEKDAYS_ON = ['по воскресеньям', 'по понедельникам', 'по вторникам', 'по средам', 'по четвергам', 'по пятницам', 'по субботам'];
+const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const intText = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+const daysSince = s => { const d = s ? serverDate(s) : null; return d && !Number.isNaN(+d) ? Math.max(0, Math.floor((Date.now() - d) / DAY_MS)) : 0; };
+// Траты по дням для тепловой карты и подсказки над ячейкой: {YYYY-MM-DD: {count, total}}
+let activityDays = {};
+
+// Число добегает до значения при открытии раздела; при обновлении данных меняется сразу
+function countTo(el, value, fmt, animate) {
+  cancelAnimationFrame(el._raf);
+  if (!animate || !value || prefersReducedMotion.matches) { el.textContent = fmt(value); return; }
+  const start = performance.now();
+  const step = t => {
+    const p = Math.min(1, (t - start) / 900);
+    el.textContent = fmt(value * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+function renderProfile(animate = false) {
   if (!currentUser) return;
-  const u = currentUser;
-  $('profileAvatar').textContent = initial(u);
-  $('profileName').textContent = u.full_name || 'Без имени';
+  const u = currentUser, accounts = getAccounts(), spent = baseSummary(receipts), days = daysSince(u.created_at), cur = currencyInfo(baseCurrency());
+  paintAvatar($('profileAvatar'), u);
+  $('profileName').textContent = u.full_name || u.email.split('@')[0];
   $('profileEmail').textContent = u.email;
-  $('profileCreated').textContent = fmtDateTime(u.created_at);
-  $('profileReceipts').textContent = receipts.length;
-  const spent = baseSummary(receipts);
-  $('profileSpent').textContent = approx(money(spent.total), spent.converted);
-  $('profileAccounts').innerHTML = getAccounts().map(a => `<div class="account-row"><div class="avatar" aria-hidden="true">${esc(initial(a.user))}</div><div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${a.user.id === u.id ? '<span class="pill">Текущий</span>' : `<button class="text-btn" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="text-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`).join('');
+  const since = u.created_at ? serverDate(u.created_at) : null;
+  $('profileSince').textContent = since && !Number.isNaN(+since) ? 'с нами с ' + since.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  $('profileChips').innerHTML = [
+    `<span class="pill">${esc(cur.symbol)} ${esc(cur.code)} · основная валюта</span>`,
+    u.full_name ? '' : '<button class="pill pill-action" data-pf-goto="personal" type="button">＋ Добавить имя</button>',
+    accounts.length > 1 ? `<button class="pill pill-action" data-pf-goto="accounts" type="button">${accounts.length} ${plural(accounts.length, 'аккаунт', 'аккаунта', 'аккаунтов')} на устройстве</button>` : '',
+  ].join('');
+  const avg = spent.counted ? spent.total / spent.counted : 0;
+  countTo($('profileReceipts'), receipts.length, intText, animate);
+  countTo($('profileSpent'), spent.total, n => approx(money(n), spent.converted), animate);
+  countTo($('profileAverage'), avg, n => approx(money(n), spent.converted), animate);
+  countTo($('profileDays'), days, intText, animate);
+  $('profileDaysLabel').textContent = plural(days, 'день', 'дня', 'дней') + ' с нами';
+  $('accountsCount').textContent = accounts.length;
+  $('dataCount').textContent = receipts.length;
+  renderActivity(); renderHabits(); renderStartSteps(); renderProfileAccounts(accounts); renderDataStats();
+}
+
+// Тепловая карта за полгода: колонка — неделя с понедельника, последняя — текущая
+function renderActivity() {
+  activityDays = {};
+  receipts.forEach(r => {
+    const d = new Date(r.iso || '');
+    if (Number.isNaN(+d)) return;
+    const s = activityDays[isoDay(d)] ||= { count: 0, total: 0 };
+    s.count++;
+    s.total += toBase(r, r.total) ?? 0;
+  });
+  const today = new Date(), todayKey = isoDay(today);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (today.getDay() + 6) % 7 - (ACTIVITY_WEEKS - 1) * 7);
+  const cells = [], months = [], weekdays = Array(7).fill(0);
+  let total = 0, best = 0, run = 0, lastMonth = null;
+  for (let i = 0; i < ACTIVITY_WEEKS * 7; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = isoDay(d), w = Math.floor(i / 7);
+    // Подпись месяца — над первой его неделей; у первой колонки — только если месяц успеет показаться
+    if (i % 7 === 0) {
+      if (d.getMonth() !== lastMonth && (w > 0 || d.getDate() <= 10)) months.push(`<span style="grid-column:${w + 1}">${esc(d.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', ''))}</span>`);
+      lastMonth = d.getMonth();
+    }
+    const future = key > todayKey, count = activityDays[key]?.count || 0;
+    if (!future) {
+      run = count ? run + 1 : 0;
+      best = Math.max(best, run);
+      total += count;
+      weekdays[d.getDay()] += count;
+    }
+    cells.push(`<i class="hm-cell${future ? ' future' : ''}${key === todayKey ? ' today' : ''}" data-l="${Math.min(4, count)}" data-day="${key}" style="--w:${w}"></i>`);
+  }
+  $('heatmap').parentElement.style.setProperty('--weeks', ACTIVITY_WEEKS);
+  $('heatmapMonths').innerHTML = months.join('');
+  $('heatmap').innerHTML = cells.join('');
+  $('heatmap').setAttribute('aria-label', `Активность за полгода: ${total} ${plural(total, 'чек', 'чека', 'чеков')}`);
+  const topDay = weekdays.indexOf(Math.max(...weekdays));
+  $('activityStats').innerHTML = [
+    ['За полгода', `${total} ${plural(total, 'чек', 'чека', 'чеков')}`],
+    ['Рекорд подряд', best ? `${best} ${plural(best, 'день', 'дня', 'дней')}` : '—'],
+    ['Чаще всего', total ? WEEKDAYS_ON[topDay] : '—'],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+$('heatmap').addEventListener('pointerover', e => {
+  const cell = e.target.closest('.hm-cell:not(.future)'), tip = $('heatTip');
+  if (!cell) { tip.hidden = true; return; }
+  const s = activityDays[cell.dataset.day], d = new Date(cell.dataset.day + 'T00:00');
+  tip.innerHTML = (s ? `${s.count} ${plural(s.count, 'чек', 'чека', 'чеков')} · ${esc(money(s.total))}` : 'Нет чеков')
+    + `<small>${esc(d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }))}</small>`;
+  const r = cell.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(r.left + r.width / 2, 90), window.innerWidth - 90) + 'px';
+  tip.style.top = r.top + 'px';
+  tip.hidden = false;
+});
+$('heatmap').addEventListener('pointerleave', () => { $('heatTip').hidden = true; });
+
+// «Привычки»: любимый магазин, топ-категория, самый крупный чек, сравнение с прошлым месяцем
+function renderHabits() {
+  if (!receipts.length) {
+    $('profileHabits').innerHTML = '<li class="pf-empty">Здесь появятся любимый магазин, топ-категория и самый крупный чек.<button class="btn small" data-pf-goto="upload" type="button">Добавить первый чек</button></li>';
+    return;
+  }
+  const stores = {};
+  receipts.forEach(r => { const name = String(r.store || '').trim(); if (name) (stores[name.toLowerCase()] ||= { name, count: 0 }).count++; });
+  const store = Object.values(stores).sort((a, b) => b.count - a.count)[0];
+  const sums = sumsByCategory(receipts), topKey = Object.keys(sums).filter(k => k !== '').sort((a, b) => sums[b] - sums[a])[0];
+  let biggest = null, biggestSum = 0;
+  receipts.forEach(r => { const v = toBase(r, r.total); if (v != null && v > biggestSum) { biggest = r; biggestSum = v; } });
+  const month = monthKey(new Date()), now = monthSpending(month).total, prev = monthSpending(shiftMonth(month, -1)).total;
+  const delta = prev ? Math.round((now - prev) / prev * 100) : null;
+  const rows = [
+    store && { habit: 'store', value: store.name, label: 'Любимый магазин', meta: `${store.count} ${plural(store.count, 'визит', 'визита', 'визитов')}`, data: store.name },
+    topKey != null && { habit: 'category', value: categoryLabel(categoryByKey(topKey)), label: 'Больше всего тратите на', meta: money(sums[topKey]) },
+    biggest && { habit: 'receipt', value: approx(money(biggestSum), curOf(biggest) !== baseCurrency()), label: 'Самый крупный чек', meta: biggest.store || fmtPurchase(biggest), data: biggest.id },
+    { habit: 'analysis', value: money(now), label: 'Этот месяц', cls: delta > 0 ? 'up' : delta < 0 ? 'down' : '',
+      meta: delta == null ? 'в прошлом месяце трат не было' : delta === 0 ? 'как в прошлом месяце' : `${delta > 0 ? '↑' : '↓'} ${Math.abs(delta)}% к прошлому` },
+  ].filter(Boolean);
+  $('profileHabits').innerHTML = rows.map((r, i) => `<li><button class="pf-row" data-habit="${r.habit}" data-value="${esc(r.data ?? '')}" type="button"><span class="pf-row-num">${pad2(i + 1)}</span><span class="pf-row-main"><small>${esc(r.label)}</small><b>${esc(r.value)}</b></span><span class="pf-row-meta ${r.cls || ''}">${esc(r.meta)}</span><span class="pf-row-arrow" aria-hidden="true">→</span></button></li>`).join('');
+}
+$('profileHabits').onclick = e => {
+  const b = e.target.closest('[data-habit]');
+  if (!b) return;
+  const habit = b.dataset.habit;
+  if (habit === 'store') { $('historySearch').value = b.dataset.value; $('historyPeriod').value = 'all'; showPage('history'); resetHistoryPage(); }
+  else if (habit === 'category') showPage('categories');
+  else if (habit === 'receipt') openReceipt(b.dataset.value);
+  else if (habit === 'analysis') { $('analysisPeriod').value = 'month'; showPage('analysis'); }
+};
+
+// «Первые шаги»: карточка пропадает, когда всё сделано
+function renderStartSteps() {
+  const steps = [
+    { done: !!currentUser.full_name, text: 'Указать имя', go: 'personal' },
+    { done: receipts.length > 0, text: 'Сохранить первый чек', go: 'upload' },
+    { done: overallLimit(budgets) > 0, text: 'Задать лимит на месяц', go: 'budgets' },
+    { done: categoryRules.length > 0, text: 'Перенести товар в нужную категорию', go: 'categories' },
+  ];
+  const done = steps.filter(s => s.done).length, all = done === steps.length;
+  $('profileStart').hidden = all;
+  $('profileGrid').classList.toggle('no-start', all);
+  $('startCount').textContent = `${done} из ${steps.length}`;
+  $('startBar').style.width = done / steps.length * 100 + '%';
+  $('startList').innerHTML = steps.map(s => `<li><button class="pf-step${s.done ? ' done' : ''}" data-pf-goto="${s.go}" type="button"><i aria-hidden="true">${s.done ? '✓' : ''}</i><span>${esc(s.text)}${s.done ? '<span class="sr-only"> — готово</span>' : ''}</span></button></li>`).join('');
+}
+
+function renderProfileAccounts(accounts) {
+  const id = currentUser.id;
+  $('profileAccounts').innerHTML = accounts.map(a => {
+    const me = a.user.id === id;
+    return `<div class="account-row${me ? ' current' : ''}">${avatarHtml(a.user)}<div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? '<span class="pill">Текущий</span>'
+      : `<button class="btn soft small" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="icon-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`;
+  }).join('');
   $('profileAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
   $('profileAccounts').querySelectorAll('[data-forget]').forEach(b => b.onclick = () => { forgetAccount(+b.dataset.forget); renderProfile(); renderAccountMenu(); });
 }
+
+function renderDataStats() {
+  const items = receipts.reduce((s, r) => s + (r.items || []).length, 0), n = receipts.length, c = categories.length;
+  $('dataStats').innerHTML = [['Чеков', n], ['Позиций', items], ['Категорий', c], ['Правил', categoryRules.length]]
+    .map(([k, v]) => `<div><dt>${k}</dt><dd>${intText(v)}</dd></div>`).join('');
+  $('exportAllJson').disabled = $('exportAllCsv').disabled = !n;
+  $('deleteSummary').textContent = (n ? `Удалятся ${n} ${plural(n, 'чек', 'чека', 'чеков')} с фото, ` : 'Удалятся ')
+    + `${c} ${plural(c, 'категория', 'категории', 'категорий')}, правила и лимиты. Восстановить их будет нельзя.`;
+}
+$('exportAllJson').onclick = () => {
+  const u = currentUser;
+  if (!u || !receipts.length) return;
+  const data = {
+    exported_at: new Date().toISOString(),
+    user: { email: u.email, full_name: u.full_name, base_currency: baseCurrency(), created_at: u.created_at },
+    receipts: receipts.map(({ iso, ...r }) => r), categories, category_rules: categoryRules, budgets,
+  };
+  downloadFile(JSON.stringify(data, null, 2), 'application/json', `checkai_export_${isoDay(new Date())}.json`);
+  toast('Выгрузка готова');
+};
+$('exportAllCsv').onclick = () => exportCsv(receipts);
+
+// --- Профиль: вкладки настроек ---
+const PF_TABS = ['personal', 'security', 'accounts', 'look', 'data', 'danger'];
+function openSettings(tab, scroll = false) {
+  document.querySelectorAll('[data-pf-tab]').forEach(b => {
+    const on = b.dataset.pfTab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('.pf-panel').forEach(p => { p.hidden = p.id !== 'pfPanel-' + tab; });
+  $('pfTab-' + tab).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (scroll) $('profileSettings').scrollIntoView({ behavior: prefersReducedMotion.matches ? 'auto' : 'smooth', block: 'start' });
+}
+$('pfTabs').onclick = e => { const b = e.target.closest('[data-pf-tab]'); if (b) openSettings(b.dataset.pfTab); };
+$('pfTabs').onkeydown = e => {
+  const i = PF_TABS.indexOf(document.activeElement?.dataset?.pfTab);
+  const next = i < 0 ? null : { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: PF_TABS.length - 1 }[e.key];
+  if (next == null) return;
+  e.preventDefault();
+  const tab = PF_TABS[(next + PF_TABS.length) % PF_TABS.length];
+  openSettings(tab);
+  $('pfTab-' + tab).focus();
+};
+// Чипы, «Первые шаги» и пустые состояния ведут во вкладку настроек или в другой раздел
+$('page-profile').addEventListener('click', e => {
+  const b = e.target.closest('[data-pf-goto]');
+  if (!b) return;
+  const to = b.dataset.pfGoto;
+  if (!PF_TABS.includes(to)) { showPage(to); return; }
+  openSettings(to, true);
+  if (to === 'personal') $('editName').focus({ preventScroll: true });
+});
+$('profileAddReceipt').onclick = () => showPage('upload');
+$('addAccountBtn').onclick = () => openAuth('login');
+
+// --- Профиль: формы ---
 function fillProfileForm() {
   if (!currentUser) return;
-  $('profileForm').reset();
+  ['profileForm', 'securityForm', 'deleteForm'].forEach(id => $(id).reset());
+  ['profileError', 'securityError', 'deleteError'].forEach(id => { $(id).hidden = true; });
   $('editName').value = currentUser.full_name || '';
-  $('editEmail').value = currentUser.email;
   $('editBaseCurrency').innerHTML = currencyOptions(baseCurrency());
-  $('profileError').hidden = true;
-  $('deleteForm').reset();
-  $('deleteError').hidden = true;
+  $('editEmail').value = currentUser.email;
+  hidePasswords();
+  updatePasswordMeter();
+  updatePersonalDirty();
 }
-$('profileReset').onclick = fillProfileForm;
-$('addAccountBtn').onclick = () => openAuth('login');
+// «Личное»: кнопки активны, только когда есть что сохранять
+function personalChanges() {
+  const u = currentUser, body = {};
+  if (!u) return body;
+  const name = $('editName').value.trim(), base = $('editBaseCurrency').value;
+  if (name !== (u.full_name || '')) body.full_name = name || null;
+  if (base && base !== baseCurrency()) body.base_currency = base;
+  return body;
+}
+function updatePersonalDirty() {
+  const dirty = Object.keys(personalChanges()).length > 0;
+  $('profileSave').disabled = $('profileReset').disabled = !dirty;
+  $('profileDirty').hidden = !dirty;
+}
+$('profileForm').oninput = $('profileForm').onchange = updatePersonalDirty;
+$('profileReset').onclick = () => {
+  $('editName').value = currentUser?.full_name || '';
+  $('editBaseCurrency').value = baseCurrency();
+  $('profileError').hidden = true;
+  updatePersonalDirty();
+};
+// PATCH /api/auth/me отвечает новой парой токенов и пользователем
+async function updateMe(body) {
+  const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
+  if (data.access_token) setSession(data);
+  const user = data.user || data;
+  setUser(user);
+  return user;
+}
+const updateMeError = err => notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message;
 $('profileForm').onsubmit = async e => {
   e.preventDefault();
-  const u = currentUser;
-  if (!u) return;
+  if (!currentUser) return;
   $('profileError').hidden = true;
-  const name = $('editName').value.trim(), email = $('editEmail').value.trim().toLowerCase(), password = $('editPassword').value, current = $('editCurrentPassword').value, body = {};
-  if (name !== (u.full_name || '')) body.full_name = name || null;
-  if (email !== u.email) body.email = email;
-  if (password) body.new_password = password;
-  const base = $('editBaseCurrency').value;
-  if (base !== baseCurrency()) body.base_currency = base;
-  if (!Object.keys(body).length) { showFormError('profileError', 'Вы ничего не изменили'); return; }
-  if ((body.email || body.new_password) && !current) { showFormError('profileError', 'Введите текущий пароль, чтобы сменить email или пароль'); return; }
-  if (current) body.current_password = current;
-  const btn = $('profileSave');
-  btn.disabled = true;
+  const body = personalChanges();
+  if (!Object.keys(body).length) return;
+  $('profileSave').disabled = true;
   try {
-    const data = await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
-    if (data.access_token) setSession(data);
-    const user = data.user || data;
-    setUser(user);
+    const user = await updateMe(body);
     if (body.base_currency) {
       // Старый сервер молча пропустит неизвестное поле — проверяем, что валюта действительно сменилась
       if (user.base_currency !== body.base_currency) { showFormError('profileError', 'Сервер пока не поддерживает основную валюту — остальные изменения сохранены.'); return; }
       // rate_to_base у чеков пересчитан сервером под новую валюту
       await loadReceipts();
     }
-    toast('Данные аккаунта обновлены');
+    toast('Данные сохранены');
   } catch (err) {
-    showFormError('profileError', notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message);
+    showFormError('profileError', updateMeError(err));
+  } finally { updatePersonalDirty(); }
+};
+
+// «Вход и пароль»: показ пароля и оценка его надёжности
+function passwordScore(p) {
+  if (!p) return 0;
+  if (p.length < 8) return 1;
+  let s = 1;
+  if (p.length >= 12) s++;
+  if (/[a-zа-яё]/.test(p) && /[A-ZА-ЯЁ]/.test(p)) s++;
+  if (/\d/.test(p) && /[^a-zа-яё\d]/i.test(p)) s++;
+  return s;
+}
+function updatePasswordMeter() {
+  const p = $('editPassword').value, s = passwordScore(p);
+  $('pwMeter').dataset.score = s;
+  $('editPasswordHint').textContent = !p ? 'Минимум 8 символов' : p.length < 8 ? 'Слишком короткий — минимум 8 символов' : ['', 'Слабый', 'Средний', 'Хороший', 'Надёжный'][s];
+}
+$('editPassword').oninput = updatePasswordMeter;
+function setPasswordShown(button, shown) {
+  $(button.dataset.pwToggle).type = shown ? 'text' : 'password';
+  button.textContent = shown ? 'Скрыть' : 'Показать';
+  button.setAttribute('aria-label', shown ? 'Скрыть пароль' : 'Показать пароль');
+}
+const hidePasswords = () => document.querySelectorAll('[data-pw-toggle]').forEach(b => setPasswordShown(b, false));
+document.querySelectorAll('[data-pw-toggle]').forEach(b => b.onclick = () => setPasswordShown(b, $(b.dataset.pwToggle).type === 'password'));
+$('securityForm').onsubmit = async e => {
+  e.preventDefault();
+  const u = currentUser;
+  if (!u) return;
+  $('securityError').hidden = true;
+  const email = $('editEmail').value.trim().toLowerCase(), password = $('editPassword').value, body = {};
+  if (email !== u.email) body.email = email;
+  if (password) body.new_password = password;
+  if (!Object.keys(body).length) { showFormError('securityError', 'Укажите новый email или новый пароль'); return; }
+  body.current_password = $('editCurrentPassword').value;
+  const btn = $('securitySave');
+  btn.disabled = true;
+  try {
+    await updateMe(body);
+    toast(body.new_password ? 'Пароль обновлён' : 'Email обновлён');
+  } catch (err) {
+    showFormError('securityError', updateMeError(err));
   } finally { btn.disabled = false; }
 };
 $('deleteForm').onsubmit = async e => {
@@ -438,12 +780,139 @@ $('deleteForm').onsubmit = async e => {
   btn.disabled = true;
   try {
     await apiRequest('/api/auth/me', { method: 'DELETE', body: JSON.stringify({ password: $('deletePassword').value }) });
-    try { localStorage.removeItem(budgetsKey(u.id)); } catch (e) {}
-    forgetAccount(u.id); removeToken(); setGuest(); showPage('upload');
+    try { localStorage.removeItem(budgetsKey(u.id)); localStorage.removeItem(avatarKey(u)); } catch (e) {}
+    forgetAccount(u.id); removeToken(); setGuest(); showPage('home');
     toast('Аккаунт удалён');
   } catch (err) {
     showFormError('deleteError', notSupported(err) ? 'Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).' : err.message);
   } finally { btn.disabled = false; }
+};
+
+// --- Фото профиля: выбор файла, камера, кадрирование ---
+// Кадр — квадрат AVATAR_SIZE: фото накрывает круг целиком, его можно двигать и приближать
+const AVATAR_SIZE = 256, AVATAR_MAX_FILE = 15 * 1024 * 1024;
+let avatarStream = null, avatarCrop = null;
+const avatarStep = step => { $('avatarModal').querySelector('.avatar-modal').dataset.step = step; $('avatarError').hidden = true; };
+function stopCamera() {
+  avatarStream?.getTracks().forEach(t => t.stop());
+  avatarStream = null;
+  $('avatarVideo').srcObject = null;
+}
+function openAvatar() {
+  if (!currentUser) return;
+  paintAvatar($('avatarCurrent'), currentUser);
+  $('avatarRemove').hidden = !localAvatar(currentUser);
+  avatarCrop = null;
+  avatarStep('choose');
+  openModal('avatarModal', $('avatarFileBtn'));
+}
+function closeAvatar() { stopCamera(); avatarCrop = null; closeModal('avatarModal'); }
+function refreshAvatars() { paintAvatar($('userAvatar'), currentUser); renderProfile(); renderAccountMenu(); }
+$('avatarBtn').onclick = openAvatar;
+$('avatarClose').onclick = closeAvatar;
+
+$('avatarFileBtn').onclick = () => $('avatarFile').click();
+$('avatarFile').onchange = $('avatarCapture').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return showFormError('avatarError', 'Это не изображение');
+  if (file.size > AVATAR_MAX_FILE) return showFormError('avatarError', 'Файл больше 15 МБ');
+  const url = URL.createObjectURL(file);
+  startCrop(url, () => URL.revokeObjectURL(url));
+};
+
+// Камера: getUserMedia с превью; где его нет — системная камера через <input capture>
+$('avatarCameraBtn').onclick = async () => {
+  if (!navigator.mediaDevices?.getUserMedia) { $('avatarCapture').click(); return; }
+  try {
+    avatarStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+  } catch (err) {
+    showFormError('avatarError', err.name === 'NotAllowedError' ? 'Нет доступа к камере — разрешите его в настройках браузера' : 'Камера не найдена или занята другим приложением');
+    return;
+  }
+  if ($('avatarModal').hidden) { stopCamera(); return; }
+  avatarStep('camera');
+  const video = $('avatarVideo');
+  // «Снять» доступна, когда камера отдала первый кадр
+  $('avatarShoot').disabled = true;
+  video.onloadeddata = () => { $('avatarShoot').disabled = false; $('avatarShoot').focus(); };
+  video.srcObject = avatarStream;
+  video.play().catch(() => {});
+  $('avatarCameraCancel').focus();
+};
+$('avatarCameraCancel').onclick = () => { stopCamera(); avatarStep('choose'); $('avatarCameraBtn').focus(); };
+$('avatarShoot').onclick = () => {
+  const v = $('avatarVideo');
+  if (!v.videoWidth) return;
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  const ctx = c.getContext('2d');
+  // Снимок — как в превью, зеркально
+  ctx.translate(c.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  stopCamera();
+  startCrop(c.toDataURL('image/jpeg', .92));
+};
+
+function startCrop(src, done) {
+  const img = $('avatarCropImg');
+  img.onload = () => {
+    done?.();
+    avatarStep('crop');
+    const S = $('avatarStage').clientWidth, w = img.naturalWidth, h = img.naturalHeight;
+    avatarCrop = { S, w, h, base: S / Math.min(w, h), z: 1, x: 0, y: 0 };
+    $('avatarZoom').value = 1;
+    layoutCrop();
+    $('avatarStage').focus();
+  };
+  img.onerror = () => { done?.(); avatarStep('choose'); showFormError('avatarError', 'Не удалось открыть изображение. Попробуйте JPG или PNG'); };
+  img.src = src;
+}
+// x, y — сдвиг центра фото от центра круга; фото не должно открывать края круга
+function layoutCrop() {
+  const c = avatarCrop, W = c.w * c.base * c.z, H = c.h * c.base * c.z;
+  c.x = Math.max(-(W - c.S) / 2, Math.min((W - c.S) / 2, c.x));
+  c.y = Math.max(-(H - c.S) / 2, Math.min((H - c.S) / 2, c.y));
+  c.left = (c.S - W) / 2 + c.x; c.top = (c.S - H) / 2 + c.y; c.W = W; c.H = H;
+  Object.assign($('avatarCropImg').style, { width: W + 'px', height: H + 'px', left: c.left + 'px', top: c.top + 'px' });
+}
+function setCropZoom(z) {
+  avatarCrop.z = Math.min(3, Math.max(1, z));
+  $('avatarZoom').value = avatarCrop.z;
+  layoutCrop();
+}
+$('avatarZoom').oninput = e => { if (avatarCrop) setCropZoom(+e.target.value); };
+$('avatarStage').onpointerdown = e => {
+  if (!avatarCrop) return;
+  const stage = e.currentTarget, sx = e.clientX - avatarCrop.x, sy = e.clientY - avatarCrop.y;
+  stage.setPointerCapture(e.pointerId);
+  stage.onpointermove = m => { avatarCrop.x = m.clientX - sx; avatarCrop.y = m.clientY - sy; layoutCrop(); };
+  stage.onpointerup = stage.onpointercancel = () => { stage.onpointermove = null; };
+};
+$('avatarStage').addEventListener('wheel', e => { if (!avatarCrop) return; e.preventDefault(); setCropZoom(avatarCrop.z - e.deltaY * .002); }, { passive: false });
+$('avatarStage').onkeydown = e => {
+  if (!avatarCrop) return;
+  const d = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[e.key];
+  if (d) { e.preventDefault(); avatarCrop.x += d[0]; avatarCrop.y += d[1]; layoutCrop(); }
+  else if (e.key === '+' || e.key === '=') setCropZoom(avatarCrop.z + .1);
+  else if (e.key === '-') setCropZoom(avatarCrop.z - .1);
+};
+$('avatarCropCancel').onclick = () => { avatarCrop = null; avatarStep('choose'); $('avatarFileBtn').focus(); };
+$('avatarSave').onclick = () => {
+  if (!avatarCrop) return;
+  const c = avatarCrop, k = AVATAR_SIZE / c.S, cv = document.createElement('canvas');
+  cv.width = cv.height = AVATAR_SIZE;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage($('avatarCropImg'), c.left * k, c.top * k, c.W * k, c.H * k);
+  try { localStorage.setItem(avatarKey(currentUser), cv.toDataURL('image/jpeg', .88)); }
+  catch (e) { showFormError('avatarError', 'В браузере не хватило места для фото'); return; }
+  refreshAvatars(); closeAvatar(); toast('Фото обновлено');
+};
+$('avatarRemove').onclick = () => {
+  try { localStorage.removeItem(avatarKey(currentUser)); } catch (e) {}
+  refreshAvatars(); closeAvatar(); toast('Фото удалено');
 };
 
 // --- Редактор чека: черновик и форма ---
@@ -528,7 +997,7 @@ function mountEditor(root, draft) {
         ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
         <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${it.category_source && CATEGORY_SOURCE_TEXT[it.category_source] ? `<small class="cat-source">${CATEGORY_SOURCE_TEXT[it.category_source]}</small>` : ''}</label>
       </div>
-    </div>`).join('') : '<div class="empty">Позиций нет. Добавьте их вручную или оставьте только итог.</div>';
+    </div>`).join('') : '<div class="empty">Позиций нет</div>';
     updateSum();
   };
   const updateSum = () => {
@@ -677,9 +1146,13 @@ async function loadReceipts() {
   } catch (e) { toast('Не удалось загрузить историю: ' + e.message); }
 }
 async function checkAuthOnStartup() {
-  if (!getToken()) { setGuest(); return; }
-  try { setUser(await apiRequest('/api/auth/me')); await loadReceipts(); }
-  catch (e) { setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
+  if (!getToken()) { authPending = false; setGuest(); return; }
+  try {
+    const user = await apiRequest('/api/auth/me');
+    authPending = false;
+    setUser(user);
+    await loadReceipts();
+  } catch (e) { authPending = false; setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
 }
 
 // --- Окна: фокус внутри окна и возврат фокуса после закрытия ---
@@ -749,6 +1222,7 @@ $('authForm').onsubmit = async e => {
     closeAuth();
     $('authForm').reset();
     toast(isLogin ? 'Добро пожаловать!' : 'Регистрация успешна!');
+    if ($('page-home').classList.contains('active')) showPage('upload');
     await loadReceipts();
     if (wasPending) await saveReceipt();
   } catch (err) {
@@ -770,7 +1244,8 @@ function showPage(name) {
   if (name === 'categories') renderCategories();
   if (name === 'analysis') renderAnalysis();
   if (name === 'budgets') renderBudgets();
-  if (name === 'profile') { renderProfile(); fillProfileForm(); }
+  if (name === 'profile') { renderProfile(true); fillProfileForm(); }
+  else $('heatTip').hidden = true;
 }
 function setMenu(open) {
   $('drawer').classList.toggle('open', open);
@@ -785,11 +1260,16 @@ function closeMenu() { if ($('drawer').classList.contains('open')) setMenu(false
 $('menuBtn').onclick = () => setMenu(!$('drawer').classList.contains('open'));
 $('overlay').onclick = closeMenu;
 document.querySelectorAll('.nav-link').forEach(b => b.onclick = () => showPage(b.dataset.page));
+$('brandLink').onclick = () => showPage(currentUser ? 'upload' : 'home');
+$('heroRegister').onclick = $('landingRegister').onclick = $('uploadRegisterBtn').onclick = () => openAuth('register');
+$('heroLogin').onclick = $('landingLogin').onclick = $('uploadLoginBtn').onclick = () => openAuth('login');
 document.addEventListener('keydown', e => {
   if (e.key === 'Tab') { trapFocus(e); return; }
   if (e.key !== 'Escape') return;
   const catMenu = $('categoryGrid').querySelector('.cat-menu:not([hidden])');
   if (!$('receiptModal').hidden) closeReceipt();
+  else if (!$('avatarModal').hidden) closeAvatar();
+  else if (!$('savedModal').hidden) closeModal('savedModal');
   else if (!$('authModal').hidden) closeAuth();
   else if (!$('categoryModal').hidden) closeModal('categoryModal');
   else if (!$('deleteCategoryModal').hidden) closeModal('deleteCategoryModal');
@@ -875,7 +1355,7 @@ function startSteps(withUpload) {
     const sinceUpload = Date.now() - uploadedAt;
     if (sinceUpload < OCR_STEP_MS) setStep('ocr', sinceUpload / OCR_STEP_MS);
     else setStep('ai', 1 - Math.exp(-(sinceUpload - OCR_STEP_MS) / 30000));
-    $('stepsNote').textContent = `Прошло ${seconds} с. Обычно распознавание занимает до минуты — не закрывайте страницу.`;
+    $('stepsNote').textContent = `${seconds} с`;
   };
   tick();
   stepsTimer = setInterval(tick, 400);
@@ -931,6 +1411,15 @@ function renderResult(data) {
   $('currencyHint').hidden = !hint;
   if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+// Обратное к renderResult: после сохранения чек нельзя сохранить второй раз
+function resetResult() {
+  lastResult = null;
+  $('resultContent').hidden = true;
+  $('resultPlaceholder').hidden = false;
+  $('resultEditor').innerHTML = '';
+  $('currencyHint').hidden = true;
+  clearFile();
+}
 // Гость может распознавать чеки, а для сохранения просим войти
 async function saveReceipt() {
   if (!lastResult) return;
@@ -943,16 +1432,20 @@ async function saveReceipt() {
     // В ответе — сохранённый чек с курсом к основной валюте (rate_to_base), он нужен для бюджетов
     const saved = await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(toPayload(lastResult)) });
     await loadReceipts();
+    resetResult();
     const alert = budgetAlert(saved);
-    if (alert) toast('Чек сохранён. ' + alert, 6000);
-    else toast('Чек сохранён в ваш аккаунт');
-    showPage('history');
+    $('savedModalText').textContent = alert;
+    $('savedModalText').hidden = !alert;
+    openModal('savedModal', $('savedToHistory'));
   } catch (e) {
     if (!getToken()) { pendingSave = true; openAuth('login'); }
     toast('Ошибка при сохранении: ' + e.message);
   } finally { btn.disabled = false; }
 }
 $('saveReceiptBtn').onclick = saveReceipt;
+$('savedToHistory').onclick = () => { closeModal('savedModal'); showPage('history'); };
+$('savedStay').onclick = $('savedModalClose').onclick = () => closeModal('savedModal');
+$('savedModal').onclick = e => { if (e.target.id === 'savedModal') closeModal('savedModal'); };
 // Пользователь сам выбрал валюту — подсказка «проверьте валюту» больше не нужна
 $('resultEditor').addEventListener('input', e => { if (e.target.dataset.f === 'currency') $('currencyHint').hidden = true; });
 $('downloadBtn').onclick = () => { if (lastResult) downloadJson(toPayload(lastResult), 'receipt_data.json'); };
@@ -986,9 +1479,9 @@ function renderHistory() {
   $('exportCsvBtn').disabled = !list.length;
   const shown = list.slice(0, historyShown);
   let empty;
-  if (!currentUser) empty = '<div class="card empty">История хранится в аккаунте. <button class="text-btn" data-open-auth type="button">Войдите или зарегистрируйтесь</button>, чтобы сохранять чеки.</div>';
-  else if (searching) empty = '<div class="card empty">Ничего не найдено. Попробуйте другое название магазина или товара.</div>';
-  else empty = '<div class="card empty">Пока нет чеков за этот период. Загрузите чек, чтобы начать историю.</div>';
+  if (!currentUser) empty = '<div class="card empty"><button class="text-btn" data-open-auth type="button">Войдите</button>, чтобы видеть историю.</div>';
+  else if (searching) empty = '<div class="card empty">Ничего не найдено</div>';
+  else empty = '<div class="card empty">Чеков пока нет</div>';
   $('historyList').innerHTML = shown.length
     ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}"><div><h3>${esc(r.store || 'Магазин не определён')}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
     : empty;
@@ -1024,8 +1517,8 @@ function csvCell(value) {
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 const csvNum = n => String(round2(n)).replace('.', ',');
-function exportCsv() {
-  const list = historyList();
+// По умолчанию — то, что видно в истории с фильтрами; из профиля — все чеки
+function exportCsv(list = historyList()) {
   if (!list.length) return;
   // Цены и суммы — в валюте чека, отдельная колонка — итог в основной валюте (пусто, если курса нет)
   const rows = [['Дата', 'Время', 'Магазин', 'Валюта', 'Итог чека', `Итог в ${baseCurrency()}`, 'Товар', 'Количество', 'Цена', 'Сумма', 'Категория']];
@@ -1041,7 +1534,7 @@ function exportCsv() {
   downloadFile(csv, 'text/csv;charset=utf-8', `checkai_${isoDay(new Date())}.csv`);
   toast(`Выгружено чеков: ${list.length}`);
 }
-$('exportCsvBtn').onclick = exportCsv;
+$('exportCsvBtn').onclick = () => exportCsv();
 
 // --- Категории и анализ ---
 // Траты по категориям в основной валюте, по ключу catKey; чеки без курса пропускаем (их показывает baseSummary)
@@ -1103,7 +1596,7 @@ function renderCategories() {
   if (openCategoryKey !== null && !cards.some(c => catKey(c) === openCategoryKey)) openCategoryKey = null;
   $('categoryGrid').innerHTML = cards.length
     ? cards.map((c, i) => categoryCard(c, i, sums[catKey(c)] || 0, rows[catKey(c)] || [], summary.converted)).join('')
-    : '<div class="card empty">Категорий нет. Добавьте первую кнопкой «Добавить категорию».</div>';
+    : '<div class="card empty">Категорий нет</div>';
   renderRules();
 }
 function categoryCard(c, index, sum, rows, converted) {
@@ -1118,7 +1611,7 @@ function categoryCard(c, index, sum, rows, converted) {
         <button class="menu-item danger-text" type="button" role="menuitem" data-cat-action="delete">✕ Удалить</button>
       </div>
     </div>` : '';
-  const desc = c.description || (own ? 'Без описания' : 'Товары, которые не попали ни в одну категорию');
+  const desc = c.description || (own ? '' : 'Не распределено');
   return `<div class="card category-row${open ? ' open' : ''}" data-cat="${esc(key)}">
     <button class="cat-open" type="button" aria-expanded="${open}" aria-controls="${esc(panelId)}">
       <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
@@ -1129,7 +1622,7 @@ function categoryCard(c, index, sum, rows, converted) {
 }
 function categoryItems(c, rows, id) {
   const key = catKey(c);
-  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">За этот период в категории нет товаров.</div></div>`;
+  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">Пусто</div></div>`;
   // Сначала свежие покупки
   const sorted = rows.slice().sort((a, b) => String(b.r.iso || '').localeCompare(String(a.r.iso || '')));
   const shown = sorted.slice(0, categoryItemsShown), rest = sorted.length - shown.length;
@@ -1379,7 +1872,7 @@ function renderRules() {
       return `<div class="rule-row"><span class="rule-pattern">«${esc(r.pattern)}»</span><span aria-hidden="true">→</span><span>${esc(categoryLabel(shown))}</span>
         <button class="text-btn" type="button" data-rule-del="${esc(r.id)}" aria-label="Удалить правило «${esc(r.pattern)}»">✕</button></div>`;
     }).join('')
-    : '<p class="rules-empty">Правил пока нет. Они появляются, когда вы переносите товар с галочкой «Запомнить».</p>';
+    : '<p class="rules-empty">Правил пока нет</p>';
 }
 $('rulesList').onclick = async e => {
   const b = e.target.closest('[data-rule-del]');
@@ -1417,7 +1910,7 @@ function renderAnalysis() {
   const maxSum = Math.max(...sorted.map(x => x[1]));
   $('breakdown').innerHTML = sorted.length
     ? sorted.map(([n, v]) => `<div class="legend-row"><i class="dot" aria-hidden="true"></i><div>${esc(categoryLabel(categoryByKey(n)))}<div class="progress" aria-hidden="true"><i style="width:${Math.round(v / maxSum * 100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join('')
-    : '<div class="empty">Нет данных для выбранного периода</div>';
+    : '<div class="empty">Нет данных</div>';
   const buckets = [], now = new Date();
   if (p === 'week') {
     for (let i = 6; i >= 0; i--) {
@@ -1582,7 +2075,7 @@ function renderBudgets() {
   $('budgetLeft').textContent = limit ? money(Math.abs(limit - spent)) : '—';
   $('budgetLeft').classList.toggle('over', !!limit && spent > limit);
   if (!hasBudgets(budgets)) {
-    $('budgetOverall').innerHTML = '<div class="card empty">Лимиты ещё не заданы. <button class="text-btn" type="button" data-budget-edit>Настроить лимиты</button></div>';
+    $('budgetOverall').innerHTML = '<div class="card empty"><button class="text-btn" type="button" data-budget-edit>Задать лимиты</button></div>';
   } else {
     const pct = budgetPct(spent, limit), title = budgets.total ? 'Весь месяц' : 'Категории с лимитом', forecast = budgetForecast(key, spent, limit);
     $('budgetOverall').innerHTML = `<div class="card budget-overall ${state}">
@@ -1664,5 +2157,36 @@ $('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) 
 $('budgetLoginBtn').onclick = () => openAuth('login');
 $('budgetMonth').onchange = renderBudgets;
 
+renderAccess();
 loadCurrencies();
 checkAuthOnStartup();
+
+// --- Эффекты интерфейса: только оформление, на данные не влияют ---
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Чек на главной наклоняется за курсором
+  const stage = document.querySelector('.receipt-stage');
+  if (stage && window.matchMedia('(hover: hover)').matches) {
+    window.addEventListener('pointermove', e => {
+      if (!$('page-home').classList.contains('active')) return;
+      const x = e.clientX / window.innerWidth - .5, y = e.clientY / window.innerHeight - .5;
+      stage.style.setProperty('--ry', (x * 18).toFixed(2) + 'deg');
+      stage.style.setProperty('--rx', (-y * 14).toFixed(2) + 'deg');
+    }, { passive: true });
+  }
+  // Блоки лендинга появляются, когда до них доходит прокрутка (без JS они просто видны)
+  if ('IntersectionObserver' in window) {
+    document.documentElement.classList.add('reveal-on');
+    const io = new IntersectionObserver(entries => entries.forEach(en => {
+      if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+    }), { threshold: .15, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+  }
+  // Подсветка карточки под курсором (CSS читает --mx/--my)
+  document.addEventListener('pointermove', e => {
+    const card = e.target.closest?.('.card');
+    if (!card) return;
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  }, { passive: true });
+}
