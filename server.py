@@ -382,7 +382,10 @@ def health_check(db: Session = Depends(database.get_db)):
     if use_ai in ("0", "false", "no", "off"):
         ollama_status = "disabled"
     else:
-        ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434").rstrip("/")
+        # Тот же адрес по умолчанию, что у клиента ollama в парсере (localhost). В Docker OLLAMA_HOST задаёт compose
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        if "://" not in ollama_host:
+            ollama_host = "http://" + ollama_host
         try:
             import httpx
             resp = httpx.get(f"{ollama_host}/api/version", timeout=1.0)
