@@ -26,7 +26,7 @@
 **P2**
 - [x] Очередь распознавания (RQ / Celery / `BackgroundTasks` + статус задачи). Добавлены `POST /api/analyze/async` и `GET /api/tasks/{task_id}` с менеджером задач `app/tasks.py`.
 - [x] Health-check `GET /api/health` с состоянием БД, OCR и Ollama — для Docker и мониторинга.
-- [x] Сброс пароля по email (`POST /api/auth/forgot-password`, `POST /api/auth/reset-password` с безопасным одноразовым токеном).
+- [x] Сброс пароля по коду восстановления без почты (`POST /api/auth/reset-password`, `POST /api/auth/recovery-code`). Прежний `forgot-password` отдавал токен в ответе и удалён.
 - [x] Переход на PostgreSQL для продакшена (Alembic готов, добавлен `psycopg2-binary`, `DATABASE_URL`, сервис `db` в `docker-compose.yml` под профилем `postgres`).
 
 ---

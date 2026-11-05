@@ -1,12 +1,13 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
 from app.dates import normalize_date_time
 from app.currencies import normalize_currency, DEFAULT_CURRENCY
 from app.categories import (
     DEFAULT_ICON, DESCRIPTION_MAX_LENGTH, ICON_MAX_LENGTH, NAME_MAX_LENGTH, UNCATEGORIZED_NAME,
 )
+from app import rates
 
 import re
 
@@ -23,6 +24,10 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_BYTES = 72
 
 
+# Кто выбрал категорию позиции (PROFILE_TASKS.md, п. 2.1). None — категории нет
+CategorySource = Literal["ai", "keywords", "rule", "user"]
+
+
 class ItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=500)
     quantity: Optional[float] = 1.0
@@ -31,6 +36,7 @@ class ItemIn(BaseModel):
     category_id: Optional[int] = None
     # Название — если category_id нет (гость распознал чек, вошёл и сохраняет)
     category: Optional[str] = Field(default=None, max_length=100)
+    category_source: Optional[CategorySource] = None
 
 
 class ItemOut(BaseModel):
@@ -43,10 +49,13 @@ class ItemOut(BaseModel):
     total_price: Optional[float] = 0.0
     category_id: Optional[int] = None
     category: Optional[str] = None
+    category_source: Optional[str] = None
 
 
 class ReceiptCreate(BaseModel):
     store: Optional[str] = Field(default=None, max_length=255)
+    # Каноническое имя сети от ML. Не пришло — сервер вычислит его из store
+    merchant: Optional[str] = Field(default=None, max_length=255)
     # Принимается в любом распознаваемом виде, сохраняется как YYYY-MM-DD
     date: Optional[str] = None
     time: Optional[str] = None
@@ -71,6 +80,7 @@ class ReceiptCreate(BaseModel):
 
 class ReceiptUpdate(BaseModel):
     store: Optional[str] = Field(default=None, max_length=255)
+    merchant: Optional[str] = Field(default=None, max_length=255)
     date: Optional[str] = None
     time: Optional[str] = None
     category_id: Optional[int] = None
@@ -98,6 +108,7 @@ class ReceiptOut(BaseModel):
     id: int
     user_id: Optional[int] = None
     store: Optional[str]
+    merchant: Optional[str] = None
     date: Optional[str]
     time: Optional[str]
     category_id: Optional[int] = None
@@ -110,6 +121,8 @@ class ReceiptOut(BaseModel):
     image_path: Optional[str] = None
     created_at: datetime
     items: List[ItemOut] = []
+    # Только в ответе POST /api/receipts/save: id похожего чека, сохранённого раньше (та же дата и сумма)
+    duplicate_of: Optional[int] = None
 
 
 class UserCreate(BaseModel):
@@ -135,12 +148,47 @@ class UserCreate(BaseModel):
         return value
 
 
+ThemeName = Literal["dark", "light", "system"]
+# Палитра каждого цвета — в frontend/static/css/app.css («Акцентные цвета»): новый цвет добавляется вместе с фронтом
+AccentName = Literal["violet", "red", "orange", "green", "blue", "pink"]
+
+
+class Preferences(BaseModel):
+    """Настройки оформления (PROFILE_TASKS.md, п. 1.2). Неизвестное значение — 422."""
+    theme: ThemeName = "system"
+    accent: AccentName = "violet"
+
+    @classmethod
+    def from_stored(cls, value: Any) -> "Preferences":
+        """Из колонки users.preferences: битые и устаревшие значения заменяются значениями по умолчанию."""
+        if isinstance(value, Preferences):
+            return value
+        stored = value if isinstance(value, dict) else {}
+        clean = {}
+        for key in cls.model_fields:
+            if key in stored:
+                try:
+                    cls.model_validate({key: stored[key]})
+                    clean[key] = stored[key]
+                except ValueError:
+                    pass
+        return cls(**clean)
+
+
+class PreferencesUpdate(BaseModel):
+    """PATCH /api/auth/me: меняются только пришедшие ключи, null у ключа — значение по умолчанию."""
+    theme: Optional[ThemeName] = None
+    accent: Optional[AccentName] = None
+
+
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, max_length=255)
     email: Optional[str] = None
     new_password: Optional[str] = None
     current_password: Optional[str] = None
     base_currency: Optional[str] = None
+    # {"accent": "red"} не сбрасывает тему; "preferences": null — вернуть всё по умолчанию
+    preferences: Optional[PreferencesUpdate] = None
 
     @field_validator("base_currency", mode="before")
     @classmethod
@@ -189,6 +237,23 @@ class UserOut(BaseModel):
     full_name: Optional[str] = None
     base_currency: str = DEFAULT_CURRENCY
     created_at: datetime
+    last_login_at: Optional[datetime] = None
+    # "/avatars/<uuid>.jpg" или null (PROFILE_TASKS.md, п. 1.1)
+    avatar_url: Optional[str] = None
+    # false — кода восстановления нет, сбросить забытый пароль не получится: стоит предложить создать
+    has_recovery_code: bool = False
+    preferences: Preferences = Preferences()
+
+    @field_validator("preferences", mode="before")
+    @classmethod
+    def _stored_preferences(cls, v: Any) -> Preferences:
+        return Preferences.from_stored(v)
+
+    @computed_field
+    @property
+    def rates_pending(self) -> bool:
+        """True, пока после смены основной валюты докачиваются курсы: суммы временно неполные (п. 1.6)."""
+        return rates.user_rates_pending(self.id)
 
 
 class TokenOut(BaseModel):
@@ -196,6 +261,8 @@ class TokenOut(BaseModel):
     refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserOut
+    # Только в ответах регистрации и сброса пароля: новый код восстановления. Сервер показывает его один раз
+    recovery_code: Optional[str] = None
 
 
 class RefreshTokenInput(BaseModel):
@@ -217,20 +284,57 @@ class AnalyticsOut(BaseModel):
     unconverted: List[Dict[str, Any]] = []
 
 
-class ForgotPasswordRequest(BaseModel):
-    email: str
+class UnconvertedCount(BaseModel):
+    currency: str
+    count: int
 
-    @field_validator("email")
-    @classmethod
-    def _validate_email(cls, v: str) -> str:
-        v = v.strip().lower()
-        if not _EMAIL_REGEX.match(v):
-            raise ValueError("Введите корректный email (например, user@example.com)")
-        return v
+
+class ActivityDay(BaseModel):
+    date: str
+    count: int
+    total: float
+
+
+class TopStore(BaseModel):
+    name: str
+    count: int
+
+
+class TopCategory(BaseModel):
+    id: int
+    total: float
+
+
+class BiggestReceipt(BaseModel):
+    id: int
+    total: float
+    store: Optional[str] = None
+
+
+class ProfileStatsOut(BaseModel):
+    """GET /api/profile/stats (PROFILE_TASKS.md, п. 1.3). Все суммы — в основной валюте."""
+    base_currency: str
+    receipts_count: int
+    items_count: int
+    total_spent: float
+    average_receipt: float
+    unconverted: List[UnconvertedCount] = []
+    first_receipt_at: Optional[str] = None
+    last_receipt_at: Optional[str] = None
+    activity: List[ActivityDay] = []
+    longest_streak: int = 0
+    top_weekday: Optional[int] = None
+    top_store: Optional[TopStore] = None
+    top_category: Optional[TopCategory] = None
+    biggest_receipt: Optional[BiggestReceipt] = None
+    month_total: float = 0.0
+    prev_month_total: float = 0.0
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
+    """Сброс забытого пароля по коду восстановления."""
+    email: str
+    recovery_code: str = Field(max_length=64)
     new_password: str
 
     @field_validator("new_password")
@@ -241,6 +345,15 @@ class ResetPasswordRequest(BaseModel):
         if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
             raise ValueError("Пароль слишком длинный")
         return value
+
+
+class RecoveryCodeRequest(BaseModel):
+    """Новый код восстановления — только с текущим паролем."""
+    password: str
+
+
+class RecoveryCodeOut(BaseModel):
+    recovery_code: str
 
 
 class HealthCheckOut(BaseModel):

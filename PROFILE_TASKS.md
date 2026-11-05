@@ -6,6 +6,32 @@
 
 ---
 
+## Статус на 05.11.2026 (ветка `feat/profile-backend`)
+
+Сделано: **1.1, 1.2, 1.3, 1.6, 1.8 (`last_login_at`), 2.1, 2.2**.
+
+**Решили не делать** (проект не для продакшена): 1.4 «выйти везде», 1.5 выгрузка ZIP, 1.7 в виде писем. Также не сделаны `email_verified` (1.8) и `confidence` (2.3).
+
+**1.7 сделан иначе — кодом восстановления, без почты.** `forgot-password` удалён (он отдавал токен в ответе). Контракт — в [BACKEND_GUIDE.md](BACKEND_GUIDE.md), раздел 7.
+
+Миграции: `0006_profile` (`users.avatar_path`, `preferences`, `last_login_at`, `recovery_code_hash`) и `0007_item_source_merchant` (`receipt_items.category_source`, `receipts.merchant`). Новая необязательная переменная окружения: `AVATARS_DIR`. В `requirements.txt` добавлены `pillow` и `tzdata`.
+
+**Уточнения контракта. Фронту прочитать до перехода:**
+
+| Пункт | Как сделано |
+|---|---|
+| 1.1 | PNG и WEBP тоже принимаются, но сохраняются как JPEG (сторона ≤ 512 px, EXIF удаляется). > 2 МБ → `413`, не картинка или GIF → `400`. `DELETE` без фото → тоже `200`. |
+| 1.2 | `PATCH /api/auth/me` с `preferences` меняет **только пришедшие ключи**: `{"accent": "red"}` тему не сбрасывает. `null` у ключа — значение по умолчанию, `"preferences": null` — сбросить всё. Неизвестное значение → `422`. |
+| 1.3 | `unconverted` — `[{currency, count}]`, как в примере выше (в `AnalyticsOut` ключ называется `receipts`). `activity`, `longest_streak` и `top_weekday` считаются за последние 182 дня, включая сегодня (как тепловая карта). `top_category` не бывает «Без категории». Неизвестный `tz` → `422`. У старых чеков без `merchant` имя сети для `top_store` вычисляется на лету. |
+| 1.6 | `rates_pending` есть в `UserOut`, то есть и в `GET /api/auth/me`, и в `user` ответа `PATCH`/`login`. Флаг хранится в памяти процесса, после перезапуска он `false`. |
+| 2.1 | Если у позиции не определилась категория, сервер сохраняет `category_source = null`, даже если клиент прислал источник. Перенос через `/api/items/move` ставит `user`, перенос в «Без категории» — `null`. При удалении категории с `move_to` позиции получают `user`, без `move_to` — `null`. |
+| 1.7 | Регистрация отдаёт `recovery_code` (один раз), в `UserOut` — `has_recovery_code`. `POST /api/auth/reset-password` `{email, recovery_code, new_password}` → `TokenOut` с новым `recovery_code`. `POST /api/auth/recovery-code` `{password}` → `{recovery_code}`. |
+| 2.2 | Канонизация — `ml/app/merchant.py` (`canonical_merchant`). Если клиент не прислал `merchant` в `save`/`PUT`, сервер вычисляет его из `store`. Поиск `q` ищет и по `merchant`. |
+
+**Сверх файла:** `duplicate_of` в ответах `/api/analyze`, `/api/tasks/{id}` и `/api/receipts/save` — id уже сохранённого похожего чека (та же дата и сумма; время и сеть — если есть у обоих), иначе `null`. Чек сохраняется в любом случае. `/api/analytics` больше не загружает все позиции, ответ прежний.
+
+---
+
 ## Содержание
 
 0. [Что сделал фронтенд](#0-что-сделал-фронтенд)
@@ -346,11 +372,8 @@ class Preferences(BaseModel):
 | 1.3 | `GET /api/profile/stats` | Бэк | **Высокий** | — |
 | 2.1 | `category_source` до базы | ML + бэк | Средний | — |
 | 1.6 | `rates_pending` | Бэк | Средний | — |
-| 1.7 | Сброс пароля письмом | Бэк | Средний (до продакшена — обязательно) | SMTP |
 | 1.2 | `preferences` (тема, акцент) | Бэк | Средний | Миграция из 1.1 |
 | 2.2 | `merchant` | ML + бэк | Средний | — |
-| 1.4 | Выйти везде | Бэк | Низкий | — |
-| 1.5 | Выгрузка ZIP | Бэк | Низкий | 1.1 (аватар в архиве) |
 | 1.8, 2.3 | Мелочи, confidence | Бэк / ML | Низкий | — |
 
 Миграции удобно собрать так: `0006` — `avatar_path` + `preferences` + `token_version` (всё в `users`); `0007` — `receipt_items.category_source` + `receipts.merchant`.
