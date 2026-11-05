@@ -48,3 +48,9 @@ TRUST_PROXY = _bool_env("TRUST_PROXY", False)
 # Как часто удалять фото чеков, которые распознали, но не сохранили (часы). 0 — не удалять.
 # Удаляются только файлы старше суток.
 ORPHAN_CLEANUP_HOURS = _int_env("ORPHAN_CLEANUP_HOURS", 6)
+
+# Фото профиля (PROFILE_TASKS.md, п. 1.1). Раздаётся статикой только эта папка, не data/ целиком.
+AVATARS_DIR = os.getenv("AVATARS_DIR", "").strip() or os.path.join(DATA_DIR, "avatars")
+AVATARS_URL_PREFIX = "/avatars"
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+

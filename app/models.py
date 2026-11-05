@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -17,9 +17,25 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     base_currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
     created_at = Column(DateTime, default=utcnow)
+    # Фото профиля: "/avatars/<uuid>.jpg" (PROFILE_TASKS.md, п. 1.1)
+    avatar_path = Column(String(500), nullable=True)
+    # Тема и акцентный цвет: {"theme": ..., "accent": ...} (п. 1.2, значения — schemas.Preferences)
+    preferences = Column(JSON, nullable=False, default=dict, server_default="{}")
+    last_login_at = Column(DateTime, nullable=True)
+    # bcrypt-хеш кода восстановления (сброс пароля без почты). NULL — код ещё не создан
+    recovery_code_hash = Column(String(255), nullable=True)
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     categories = relationship("Category", cascade="all, delete-orphan", order_by="Category.position")
+
+    @property
+    def has_recovery_code(self) -> bool:
+        return self.recovery_code_hash is not None
+
+    @property
+    def avatar_url(self):
+        """Адрес фото для UserOut: файл раздаётся статикой по тому же пути."""
+        return self.avatar_path
 
 
 class Category(Base):
@@ -63,6 +79,8 @@ class Receipt(_CategoryName, Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     store = Column(String(255), nullable=True)
+    # Каноническое имя сети («Magnum» для «ТОО "MAGNUM CASH&CARRY"»), см. ml/app/merchant.py
+    merchant = Column(String(255), nullable=True, index=True)
     # Дата покупки в формате YYYY-MM-DD (см. app/dates.py)
     date = Column(String(20), nullable=True, index=True)
     # Время покупки в формате HH:MM
@@ -76,7 +94,8 @@ class Receipt(_CategoryName, Base):
     created_at = Column(DateTime, default=utcnow)
     
     user = relationship("User", back_populates="receipts")
-    items = relationship("ReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
+    # Порядок позиций — как на чеке. Без order_by PostgreSQL после UPDATE отдаёт их вперемешку
+    items = relationship("ReceiptItem", back_populates="receipt", cascade="all, delete-orphan", order_by="ReceiptItem.id")
     category_rel = relationship("Category")
 
 class ReceiptItem(_CategoryName, Base):
@@ -88,6 +107,8 @@ class ReceiptItem(_CategoryName, Base):
     price_per_unit = Column(Float, nullable=True, default=0.0)
     total_price = Column(Float, nullable=True, default=0.0)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Кто выбрал категорию: ai | keywords | rule | user, NULL — категории нет (п. 2.1)
+    category_source = Column(String(16), nullable=True)
     receipt = relationship("Receipt", back_populates="items")
     category_rel = relationship("Category")
 

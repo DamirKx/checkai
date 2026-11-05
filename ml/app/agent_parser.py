@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 import ollama
 
+from .merchant import canonical_merchant
+
 
 MODEL = "qwen2.5:3b"
 
@@ -1572,5 +1574,8 @@ def parse_receipt_with_correction(
     ocr_total = extract_total_from_ocr(ocr_text)
     if ocr_total is not None:
         data["total"] = ocr_total
+
+    # store — как напечатано на чеке, merchant — каноническое имя сети (PROFILE_TASKS.md, п. 2.2)
+    data["merchant"] = canonical_merchant(data.get("store"))
 
     return data

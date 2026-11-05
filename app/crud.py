@@ -1,5 +1,6 @@
 import time
-from datetime import date, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
+from types import SimpleNamespace
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -12,6 +13,12 @@ from app.categories import (
     main_category_id, normalize_item_name, resolve_category_id,
 )
 from app.currencies import DEFAULT_CURRENCY
+
+try:
+    from ml.app.merchant import canonical_merchant
+except ImportError:  # ML-пакет не установлен: merchant берётся только из запроса
+    def canonical_merchant(store: Optional[str]) -> Optional[str]:
+        return None
 
 # Все операции с чеками требуют user_id: анонимы с историей не работают
 # (эндпоинты защищены через auth.get_current_user).
@@ -32,6 +39,7 @@ def create_user(
     hashed_password: str,
     full_name: Optional[str] = None,
     base_currency: str = DEFAULT_CURRENCY,
+    recovery_code_hash: Optional[str] = None,
 ) -> models.User:
     """Создание нового пользователя."""
     user = models.User(
@@ -39,6 +47,7 @@ def create_user(
         hashed_password=hashed_password,
         full_name=full_name.strip() if full_name else None,
         base_currency=base_currency or DEFAULT_CURRENCY,
+        recovery_code_hash=recovery_code_hash,
     )
     create_default_categories(db, user)
     db.add(user)
@@ -134,16 +143,25 @@ def attach_base_rates(
 
 def _build_items(db: Session, user_id: int, items: List[schemas.ItemIn]) -> List[models.ReceiptItem]:
     """Позиции чека с category_id пользователя. Чужой category_id — CategoryError(422)."""
-    return [
-        models.ReceiptItem(
+    built = []
+    for item_data in items:
+        category_id = resolve_category_id(db, user_id, item_data.category_id, item_data.category)
+        built.append(models.ReceiptItem(
             name=item_data.name,
             quantity=item_data.quantity or 1.0,
             price_per_unit=item_data.price_per_unit or 0.0,
             total_price=item_data.total_price or 0.0,
-            category_id=resolve_category_id(db, user_id, item_data.category_id, item_data.category),
-        )
-        for item_data in items
-    ]
+            category_id=category_id,
+            # Нет категории — нет и источника (PROFILE_TASKS.md, п. 2.1)
+            category_source=item_data.category_source if category_id is not None else None,
+        ))
+    return built
+
+
+def _merchant(merchant: Optional[str], store: Optional[str]) -> Optional[str]:
+    """Имя сети из запроса, а если его нет — вычисленное из store (п. 2.2)."""
+    merchant = (merchant or "").strip()
+    return merchant[:255] if merchant else canonical_merchant(store)
 
 
 def _receipt_category_id(
@@ -171,6 +189,7 @@ def create_receipt(
     receipt = models.Receipt(
         user_id=user_id,
         store=data.store,
+        merchant=_merchant(data.merchant, data.store),
         date=data.date,  # уже YYYY-MM-DD (см. ReceiptCreate)
         time=data.time,
         category_id=category_id,
@@ -185,6 +204,41 @@ def create_receipt(
     db.refresh(receipt)
     _ensure_rates_later(cur, data.date)
     return receipt
+
+
+def find_duplicate(
+    db: Session,
+    user_id: int,
+    date: Optional[str],
+    total: Optional[float],
+    time: Optional[str] = None,
+    store: Optional[str] = None,
+    merchant: Optional[str] = None,
+    exclude_id: Optional[int] = None,
+) -> Optional[int]:
+    """id уже сохранённого чека, похожего на этот, или None.
+
+    Похожий — та же дата и сумма; время и сеть сравниваются, только если они есть у обоих чеков.
+    Без даты или суммы дубль не ищем: совпадений «на пустом месте» будет слишком много.
+    """
+    if not date or not total or total <= 0:
+        return None
+    query = db.query(models.Receipt).filter(
+        models.Receipt.user_id == user_id,
+        models.Receipt.date == date[:10],
+        models.Receipt.total.between(total - 0.005, total + 0.005),
+    )
+    if exclude_id is not None:
+        query = query.filter(models.Receipt.id != exclude_id)
+    name = (merchant or canonical_merchant(store) or store or "").strip().lower()
+    for r in query.order_by(models.Receipt.created_at.desc()):
+        if time and r.time and time != r.time:
+            continue
+        other = (r.merchant or canonical_merchant(r.store) or r.store or "").strip().lower()
+        if name and other and name != other:
+            continue
+        return r.id
+    return None
 
 
 def _receipts_order():
@@ -238,6 +292,7 @@ def get_all_receipts(
         term = f"%{_escape_like(q.strip())}%"
         query = query.filter(
             models.Receipt.store.ilike(term, escape="\\") |
+            models.Receipt.merchant.ilike(term, escape="\\") |
             models.Receipt.items.any(models.ReceiptItem.name.ilike(term, escape="\\"))
         )
 
@@ -273,6 +328,7 @@ def update_receipt(
 
     receipt.currency = cur
     receipt.store = data.store
+    receipt.merchant = _merchant(data.merchant, data.store)
     receipt.date = data.date
     receipt.time = data.time
     receipt.category_id = category_id
@@ -312,26 +368,40 @@ def count_receipts_with_image(db: Session, image_path: str) -> int:
     return db.query(func.count(models.Receipt.id)).filter(models.Receipt.image_path == image_path).scalar() or 0
 
 
+def _light_receipts(db: Session, user_id: int) -> List[SimpleNamespace]:
+    """Чеки пользователя только нужными для сводок колонками, без позиций, с rate_to_base. От новых к старым."""
+    R = models.Receipt
+    rows = (
+        db.query(R.id, R.store, R.merchant, R.date, R.created_at, R.total, R.currency, R.rate_to_kzt, R.category_id)
+        .filter(R.user_id == user_id)
+        .order_by(*_receipts_order())
+    )
+    return [SimpleNamespace(**row._asdict()) for row in rows]
+
+
+def _item_sums(db: Session, user_id: int) -> List[tuple]:
+    """(receipt_id, category_id, сумма позиций) — группировка в SQL, а не загрузка всех позиций."""
+    I = models.ReceiptItem
+    return (
+        db.query(I.receipt_id, I.category_id, func.sum(I.total_price))
+        .join(models.Receipt)
+        .filter(models.Receipt.user_id == user_id)
+        .group_by(I.receipt_id, I.category_id)
+        .all()
+    )
+
+
 def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None) -> Dict[str, Any]:
     """Сводка аналитики с пересчётом всех сумм в основную валюту пользователя.
-    
-    Чеки без курса не суммируются, а группируются в unconverted.
+
+    Чеки без курса не суммируются, а группируются в unconverted. Позиции целиком не загружаются:
+    суммы по категориям считает SQL, а для recent_items читаются позиции только последних чеков.
     """
     if not base_currency:
         user = get_user_by_id(db, user_id)
         base_currency = user.base_currency if user else DEFAULT_CURRENCY
 
-    receipts = (
-        db.query(models.Receipt)
-        .options(
-            joinedload(models.Receipt.category_rel),
-            selectinload(models.Receipt.items).joinedload(models.ReceiptItem.category_rel),
-        )
-        .filter(models.Receipt.user_id == user_id)
-        .order_by(*_receipts_order())
-        .all()
-    )
-
+    receipts = _light_receipts(db, user_id)
     if not receipts:
         return {
             "total_spent": 0.0,
@@ -348,6 +418,11 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
         }
 
     attach_base_rates(db, receipts, base_currency)
+    names = dict(db.query(models.Category.id, models.Category.name).filter(models.Category.user_id == user_id))
+    rate_by_id = {r.id: r.rate_to_base for r in receipts}
+
+    def category_name(category_id: Optional[int]) -> str:
+        return names.get(category_id) or UNCATEGORIZED_NAME
 
     total_spent = 0.0
     counted_receipts = 0
@@ -356,14 +431,21 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
     by_category: Dict[str, float] = {}
     unconverted_counts: Dict[str, int] = {}
 
+    with_items = set()
+    for receipt_id, category_id, amount in _item_sums(db, user_id):
+        with_items.add(receipt_id)
+        rate = rate_by_id.get(receipt_id)
+        if rate is not None:
+            cat = category_name(category_id)
+            by_category[cat] = by_category.get(cat, 0.0) + (amount or 0.0) * rate
+
     for r in receipts:
         if r.rate_to_base is None:
             cur = r.currency or DEFAULT_CURRENCY
             unconverted_counts[cur] = unconverted_counts.get(cur, 0) + 1
             continue
 
-        rate = r.rate_to_base
-        rec_total = (r.total or 0.0) * rate
+        rec_total = (r.total or 0.0) * r.rate_to_base
         total_spent += rec_total
         counted_receipts += 1
 
@@ -374,32 +456,35 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
             m = r.date[:7]
             by_month[m] = by_month.get(m, 0.0) + rec_total
 
-        if r.items:
-            for item in r.items:
-                cat = item.category or UNCATEGORIZED_NAME
-                by_category[cat] = by_category.get(cat, 0.0) + (item.total_price or 0.0) * rate
-        else:
-            cat = r.category or UNCATEGORIZED_NAME
+        if r.id not in with_items:
+            cat = category_name(r.category_id)
             by_category[cat] = by_category.get(cat, 0.0) + rec_total
 
     top_store = max(by_store, key=by_store.get) if by_store else None
 
+    # Пять последних позиций: у каждого чека с позициями их хотя бы одна, так что хватит пяти чеков.
+    # Позиции чеков без курса не показываем: их цены нельзя выразить в основной валюте
+    recent_receipts = [r for r in receipts if r.rate_to_base is not None and r.id in with_items][:5]
     recent_items: List[Dict[str, Any]] = []
-    for r in receipts:
-        # Позиции чеков без курса не показываем: их цены нельзя выразить в основной валюте
-        if r.rate_to_base is None:
-            continue
-        rate = r.rate_to_base
-        for item in r.items:
-            recent_items.append({
-                "name": item.name,
-                "price": round((item.total_price or 0.0) * rate, 2),
-                "store": r.store,
-            })
+    if recent_receipts:
+        items_by_receipt: Dict[int, List[models.ReceiptItem]] = {}
+        for item in (
+            db.query(models.ReceiptItem)
+            .filter(models.ReceiptItem.receipt_id.in_([r.id for r in recent_receipts]))
+            .order_by(models.ReceiptItem.id)
+        ):
+            items_by_receipt.setdefault(item.receipt_id, []).append(item)
+        for r in recent_receipts:
+            for item in items_by_receipt.get(r.id, []):
+                recent_items.append({
+                    "name": item.name,
+                    "price": round((item.total_price or 0.0) * r.rate_to_base, 2),
+                    "store": r.store,
+                })
+                if len(recent_items) == 5:
+                    break
             if len(recent_items) == 5:
                 break
-        if len(recent_items) == 5:
-            break
 
     unconverted = [
         {"currency": cur, "receipts": count}
@@ -418,6 +503,145 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
         "recent_items": recent_items,
         "base_currency": base_currency,
         "unconverted": unconverted,
+    }
+
+
+# --- Сводка профиля (PROFILE_TASKS.md, п. 1.3) ---
+
+ACTIVITY_DAYS = 182  # 26 недель
+
+
+def _stats_day(r: Any, tz: tzinfo) -> str:
+    """Дата чека для профиля: дата покупки, без неё — created_at в часовом поясе пользователя."""
+    if r.date:
+        return r.date[:10]
+    return r.created_at.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%Y-%m-%d")
+
+
+def _month_shift(month: str, delta: int) -> str:
+    year, mon = int(month[:4]), int(month[5:7]) - 1 + delta
+    return f"{year + mon // 12:04d}-{mon % 12 + 1:02d}"
+
+
+def get_profile_stats(db: Session, user: models.User, tz: tzinfo) -> Dict[str, Any]:
+    """Цифры, активность и привычки для профиля одним запросом.
+
+    Чеки читаются только нужными колонками (без позиций), суммы позиций по категориям считает SQL.
+    Пересчёт в основную валюту — attach_base_rates, как в /api/analytics; чеки без курса не входят
+    в суммы и перечисляются в unconverted.
+    """
+    base = user.base_currency or DEFAULT_CURRENCY
+    receipts = _light_receipts(db, user.id)
+    attach_base_rates(db, receipts, base)
+
+    items_count = (
+        db.query(func.count(models.ReceiptItem.id)).join(models.Receipt)
+        .filter(models.Receipt.user_id == user.id).scalar() or 0
+    )
+    item_sums = _item_sums(db, user.id)
+
+    today = datetime.now(tz).date()
+    window_start = (today - timedelta(days=ACTIVITY_DAYS - 1)).isoformat()
+    today_iso = today.isoformat()
+    month = today_iso[:7]
+    prev_month = _month_shift(month, -1)
+
+    total_spent = 0.0
+    converted = 0
+    month_total = prev_month_total = 0.0
+    unconverted: Dict[str, int] = {}
+    activity: Dict[str, Dict[str, Any]] = {}
+    stores: Dict[str, Dict[str, Any]] = {}
+    days: List[str] = []
+    biggest = None
+    rate_by_id: Dict[int, Optional[float]] = {}
+
+    for r in receipts:
+        rate_by_id[r.id] = r.rate_to_base
+        day = _stats_day(r, tz)
+        days.append(day)
+        value = (r.total or 0.0) * r.rate_to_base if r.rate_to_base is not None else None
+
+        if value is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            unconverted[cur] = unconverted.get(cur, 0) + 1
+        else:
+            total_spent += value
+            converted += 1
+            if day[:7] == month:
+                month_total += value
+            elif day[:7] == prev_month:
+                prev_month_total += value
+            if value > 0 and (biggest is None or value > biggest[1]):
+                biggest = (r, value)
+
+        if window_start <= day <= today_iso:
+            cell = activity.setdefault(day, {"date": day, "count": 0, "total": 0.0})
+            cell["count"] += 1
+            cell["total"] += value or 0.0
+
+        # Без учёта регистра и пробелов по краям; сеть (merchant) важнее строки с чека.
+        # У чеков, сохранённых до появления merchant, имя сети вычисляется на лету.
+        # Чеки идут от новых к старым — показываем самое свежее написание
+        name = (r.merchant or canonical_merchant(r.store) or r.store or "").strip()
+        if name:
+            entry = stores.setdefault(name.lower(), {"name": name, "count": 0})
+            entry["count"] += 1
+
+    # Категории: позиции — по сумме позиций, чек без позиций — целиком по своей категории (как в аналитике)
+    by_category: Dict[Optional[int], float] = {}
+    with_items = set()
+    for receipt_id, category_id, amount in item_sums:
+        with_items.add(receipt_id)
+        rate = rate_by_id.get(receipt_id)
+        if rate is not None:
+            by_category[category_id] = by_category.get(category_id, 0.0) + (amount or 0.0) * rate
+    for r in receipts:
+        if r.id not in with_items and r.rate_to_base is not None:
+            by_category[r.category_id] = by_category.get(r.category_id, 0.0) + (r.total or 0.0) * r.rate_to_base
+    # «Без категории» в топ не попадает
+    top_category = max(
+        ((cid, s) for cid, s in by_category.items() if cid is not None and s > 0),
+        key=lambda pair: pair[1], default=None,
+    )
+
+    # Рекорд подряд и любимый день недели — за то же окно, что и тепловая карта
+    longest = run = 0
+    weekdays = [0] * 7
+    day_cursor = today - timedelta(days=ACTIVITY_DAYS - 1)
+    while day_cursor <= today:
+        count = activity.get(day_cursor.isoformat(), {}).get("count", 0)
+        run = run + 1 if count else 0
+        longest = max(longest, run)
+        # 0 = воскресенье … 6 = суббота, как Date.getDay() в JS
+        weekdays[(day_cursor.weekday() + 1) % 7] += count
+        day_cursor += timedelta(days=1)
+    top_weekday = weekdays.index(max(weekdays)) if any(weekdays) else None
+
+    top_store = max(stores.values(), key=lambda s: s["count"], default=None)
+
+    return {
+        "base_currency": base,
+        "receipts_count": len(receipts),
+        "items_count": items_count,
+        "total_spent": round(total_spent, 2),
+        "average_receipt": round(total_spent / converted, 2) if converted else 0.0,
+        "unconverted": [{"currency": c, "count": n} for c, n in sorted(unconverted.items())],
+        "first_receipt_at": min(days) if days else None,
+        "last_receipt_at": max(days) if days else None,
+        "activity": [
+            {**cell, "total": round(cell["total"], 2)} for _, cell in sorted(activity.items())
+        ],
+        "longest_streak": longest,
+        "top_weekday": top_weekday,
+        "top_store": top_store,
+        "top_category": {"id": top_category[0], "total": round(top_category[1], 2)} if top_category else None,
+        "biggest_receipt": (
+            {"id": biggest[0].id, "total": round(biggest[1], 2), "store": biggest[0].merchant or biggest[0].store}
+            if biggest else None
+        ),
+        "month_total": round(month_total, 2),
+        "prev_month_total": round(prev_month_total, 2),
     }
 
 
@@ -629,6 +853,8 @@ def delete_category(
         )
         for item in items:
             item.category_id = move_to
+            # Перенос при удалении категории выбрал пользователь; без move_to категории больше нет
+            item.category_source = "user" if move_to is not None else None
         affected = {item.receipt_id for item in items}
 
         for receipt in (
@@ -699,6 +925,7 @@ def move_items(
     try:
         for item in items:
             item.category_id = category_id
+            item.category_source = "user" if category_id is not None else None
 
         rules_saved = 0
         if remember and category_id is not None:

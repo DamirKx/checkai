@@ -233,3 +233,37 @@ def run_in_background(fn: Callable[..., Any], *args: Any) -> None:
         threading.Thread(target=_worker, name="currency-rates", daemon=True).start()
     else:
         _worker()
+
+
+# --- Пересчёт чеков пользователя после смены основной валюты (PROFILE_TASKS.md, п. 1.6) ---
+# Счётчик, а не множество: если валюту сменили дважды подряд, флаг держится до конца последней задачи.
+# Хранится в памяти процесса — как и сами фоновые потоки; после перезапуска сервера задач нет.
+_pending_users: Dict[int, int] = {}
+_pending_lock = threading.Lock()
+
+
+def user_rates_pending(user_id: Optional[int]) -> bool:
+    """True, пока для пользователя докачиваются курсы (UserOut.rates_pending)."""
+    if user_id is None:
+        return False
+    with _pending_lock:
+        return _pending_users.get(user_id, 0) > 0
+
+
+def run_user_backfill(fn: Callable[..., Any], user_id: int) -> None:
+    """run_in_background(fn, user_id) с флагом user_rates_pending на время работы."""
+    with _pending_lock:
+        _pending_users[user_id] = _pending_users.get(user_id, 0) + 1
+
+    def _tracked(db: Session, uid: int) -> None:
+        try:
+            fn(db, uid)
+        finally:
+            with _pending_lock:
+                left = _pending_users.get(uid, 0) - 1
+                if left > 0:
+                    _pending_users[uid] = left
+                else:
+                    _pending_users.pop(uid, None)
+
+    run_in_background(_tracked, user_id)

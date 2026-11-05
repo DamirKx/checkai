@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import bcrypt
@@ -97,20 +98,40 @@ def user_from_refresh_token(token: str, db: Session) -> Optional[models.User]:
     return _user_from_token(token, db, token_type="refresh")
 
 
-PASSWORD_RESET_EXPIRE_MINUTES = 30
+# --- Код восстановления: сброс пароля без почты ---
+# Сервер показывает код один раз (при регистрации или по запросу из настроек), в базе хранится только bcrypt-хеш.
+# Без I, O, 0 и 1 — их легко перепутать при переписывании с экрана. 16 символов из 32 — 80 бит, перебором не подобрать.
+RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+RECOVERY_GROUPS, RECOVERY_GROUP_LEN = 4, 4
+# Хеш для сравнения, когда пользователя с таким email нет: ответ занимает столько же времени
+_DUMMY_RECOVERY_HASH = bcrypt.hashpw(b"no-such-user", bcrypt.gensalt()).decode("utf-8")
 
 
-def create_password_reset_token(user: models.User, expires_delta: Optional[timedelta] = None) -> str:
-    """Создание одноразового JWT токена для сброса пароля (30 минут)."""
-    to_encode = {"sub": str(user.id), "email": user.email, "pwd": password_fingerprint(user)}
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire, "type": "password_reset"})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def generate_recovery_code() -> str:
+    """Новый код вида K7QF-2M9X-HD4P-WN3C."""
+    return "-".join(
+        "".join(secrets.choice(RECOVERY_ALPHABET) for _ in range(RECOVERY_GROUP_LEN))
+        for _ in range(RECOVERY_GROUPS)
+    )
 
 
-def user_from_reset_token(token: str, db: Session) -> Optional[models.User]:
-    """Проверка токена сброса пароля. После смены пароля отпечаток меняется, и токен перестаёт действовать."""
-    return _user_from_token(token, db, token_type="password_reset")
+def normalize_recovery_code(code: str) -> str:
+    """Регистр, пробелы и дефисы не важны: «k7qf 2m9x…» = «K7QF-2M9X-…»."""
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())
+
+
+def hash_recovery_code(code: str) -> str:
+    return bcrypt.hashpw(normalize_recovery_code(code).encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_recovery_code(code: str, hashed: Optional[str]) -> bool:
+    """Сверка кода с хешем. Без хеша (код не создан) всё равно тратит время на bcrypt и возвращает False."""
+    normalized = normalize_recovery_code(code).encode("utf-8")
+    try:
+        ok = bcrypt.checkpw(normalized, (hashed or _DUMMY_RECOVERY_HASH).encode("utf-8"))
+    except ValueError:
+        return False
+    return ok and hashed is not None
 
 
 def get_current_user(

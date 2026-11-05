@@ -146,6 +146,14 @@ def analyze_receipt(
     if not parsed:
         parsed = parse_receipt(lines)
 
+    # Каноническое имя сети считаем всегда: запасной парсер app.parser его не отдаёт
+    try:
+        from ml.app.merchant import canonical_merchant
+        parsed["merchant"] = canonical_merchant(parsed.get("store"))
+    except Exception as e:
+        logger.warning("Ошибка в canonical_merchant: %s", e)
+        parsed.setdefault("merchant", None)
+
     # Определение валюты чека
     currency, source = None, "default"
     try:

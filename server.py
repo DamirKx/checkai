@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import time
@@ -7,6 +8,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.orm import Session
 import uvicorn
 
@@ -74,8 +77,18 @@ IMAGE_PATH_RE = re.compile(
 FRONTEND_TEMPLATES_DIR = os.path.join(BASE_DIR, "frontend", "templates")
 os.makedirs(FRONTEND_TEMPLATES_DIR, exist_ok=True)
 
-# Статикой раздаём ТОЛЬКО фото чеков. Папка data/ целиком закрыта — там лежит checkai.db.
+# Статикой раздаём ТОЛЬКО фото чеков и фото профиля. Папка data/ целиком закрыта — там лежит checkai.db.
 app.mount(RECEIPTS_URL_PREFIX, StaticFiles(directory=UPLOADS_DIR), name="receipts")
+AVATARS_DIR = config.AVATARS_DIR
+os.makedirs(AVATARS_DIR, exist_ok=True)
+app.mount(config.AVATARS_URL_PREFIX, StaticFiles(directory=AVATARS_DIR), name="avatars")
+# Фото профиля всегда сохраняется как <uuid>.jpg
+AVATAR_PATH_RE = re.compile(rf"^{re.escape(config.AVATARS_URL_PREFIX)}/([0-9a-f]{{32}}\.jpg)$")
+# Фронт присылает квадрат 256×256; больше этого на сервере не храним
+AVATAR_MAX_SIDE = 512
+AVATAR_MAX_PIXELS = 40_000_000
+AVATAR_FORMATS = {"JPEG", "PNG", "WEBP"}
+AVATAR_TOO_BIG = f"Фото слишком большое. Максимум — {config.MAX_AVATAR_BYTES // (1024 * 1024)} МБ"
 # Стили и скрипты интерфейса
 FRONTEND_STATIC_DIR = os.path.join(BASE_DIR, "frontend", "static")
 os.makedirs(FRONTEND_STATIC_DIR, exist_ok=True)
@@ -87,14 +100,15 @@ templates = Jinja2Templates(directory=FRONTEND_TEMPLATES_DIR)
 RATE_LIMIT_RULES = {
     "/api/auth/login": (10, 60),            # защита от перебора паролей
     "/api/auth/register": (10, 60),         # защита от спама регистраций
-    "/api/auth/forgot-password": (5, 60),   # защита от спама сброса паролей
-    "/api/auth/reset-password": (5, 60),    # защита от перебора токенов сброса
+    "/api/auth/reset-password": (5, 60),    # защита от перебора кодов восстановления
+    "/api/auth/recovery-code": (5, 60),     # защита от перебора пароля
     "/api/analyze": (15, 60),               # защита от перегрузки OCR
     "/api/analyze/async": (15, 60),         # защита от перегрузки OCR
 }
 # Лимиты, которые зависят и от метода (GET того же пути не ограничиваем)
 RATE_LIMIT_METHOD_RULES = {
     ("POST", "/api/categories"): (30, 60),  # защита от спама категориями
+    ("POST", "/api/auth/me/avatar"): (20, 60),  # перекодирование картинки — не бесплатное
 }
 
 
@@ -123,6 +137,10 @@ async def upload_limit_and_headers(request: Request, call_next):
                 status_code=413,
                 content={"detail": f"Файл слишком большой. Максимум — {config.MAX_UPLOAD_MB} МБ"},
             )
+    if request.url.path == "/api/auth/me/avatar" and request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > config.MAX_AVATAR_BYTES + 64 * 1024:
+            return JSONResponse(status_code=413, content={"detail": AVATAR_TOO_BIG})
     response = await call_next(request)
     # Браузер не должен «угадывать» тип загруженных файлов
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -190,6 +208,8 @@ def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
         data["currency_source"] = "default"
     else:
         data["currency_source"] = data.get("currency_source") or "default"
+    # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id} (PROFILE_TASKS.md, п. 2.1, 2.2)
+    data.setdefault("merchant", None)
     for item in data.get("items") or []:
         for key in ("category_id", "category", "category_source"):
             item.setdefault(key, None)
@@ -201,7 +221,20 @@ def _analyze(db: Session, image_path: str, user: Optional[models.User]) -> dict:
     data = _run_ocr(image_path, _categories_for(user))
     if user is not None:
         apply_rules(db, user.id, data.get("items") or [])
+    _mark_duplicate(db, user.id if user else None, data)
     return data
+
+
+def _mark_duplicate(db: Session, user_id: Optional[int], data: dict) -> None:
+    """duplicate_of в ответе распознавания: такой чек, похоже, уже сохранён. У гостя всегда null."""
+    data["duplicate_of"] = None
+    if user_id is None:
+        return
+    total = data.get("total")
+    data["duplicate_of"] = crud.find_duplicate(
+        db, user_id, data.get("date"), total if isinstance(total, (int, float)) else None,
+        time=data.get("time"), store=data.get("store"), merchant=data.get("merchant"),
+    )
 
 
 def _remove_quietly(path: str) -> None:
@@ -389,13 +422,14 @@ def get_currencies():
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
-def _token_response(user: models.User) -> schemas.TokenOut:
+def _token_response(user: models.User, recovery_code: Optional[str] = None) -> schemas.TokenOut:
     access_token, refresh_token = auth.issue_tokens(user)
     return schemas.TokenOut(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
         user=schemas.UserOut.model_validate(user),
+        recovery_code=recovery_code,
     )
 
 # --- Аутентификация (Регистрация, Вход, Профиль) ---
@@ -410,14 +444,17 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(database.get_d
         raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
 
     hashed_pw = auth.hash_password(user_data.password)
+    # Код восстановления показывается один раз — фронт просит его сохранить
+    recovery_code = auth.generate_recovery_code()
     user = crud.create_user(
         db=db,
         email=email,
         hashed_password=hashed_pw,
-        full_name=user_data.full_name
+        full_name=user_data.full_name,
+        recovery_code_hash=auth.hash_recovery_code(recovery_code),
     )
 
-    return _token_response(user)
+    return _token_response(user, recovery_code)
 
 @app.post("/api/auth/login", response_model=schemas.TokenOut, tags=["Auth"])
 def login(user_data: schemas.UserLogin, db: Session = Depends(database.get_db)):
@@ -427,6 +464,9 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(database.get_db)):
     if not user or not auth.verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Неверный email или пароль")
 
+    user.last_login_at = models.utcnow()
+    db.commit()
+    db.refresh(user)
     return _token_response(user)
 
 @app.post("/api/auth/refresh", response_model=schemas.TokenOut, tags=["Auth"])
@@ -473,10 +513,23 @@ def update_me(
     if base_changed:
         current_user.base_currency = user_data.base_currency
 
+    # Тема и акцент — не данные входа, текущий пароль для них не нужен (PROFILE_TASKS.md, п. 1.2)
+    if "preferences" in user_data.model_fields_set:
+        if user_data.preferences is None:
+            current_user.preferences = {}
+        else:
+            merged = {**schemas.Preferences.from_stored(current_user.preferences).model_dump(),
+                      **user_data.preferences.model_dump(exclude_unset=True)}
+            # null у ключа — значение по умолчанию; новый dict, чтобы SQLAlchemy заметил изменение JSON
+            current_user.preferences = schemas.Preferences.from_stored(
+                {k: v for k, v in merged.items() if v is not None}
+            ).model_dump()
+
     db.commit()
     if base_changed:
-        # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted
-        rates.run_in_background(crud.backfill_user_rates, current_user.id)
+        # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted,
+        # а UserOut.rates_pending = true (п. 1.6)
+        rates.run_user_backfill(crud.backfill_user_rates, current_user.id)
     db.refresh(current_user)
 
     return _token_response(current_user)
@@ -487,59 +540,164 @@ def delete_me(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Удаление аккаунта текущего пользователя со всеми его чеками и их фото."""
+    """Удаление аккаунта текущего пользователя со всеми его чеками, их фото и фото профиля."""
     if not auth.verify_password(data.password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Неверный пароль")
 
+    avatar_path = current_user.avatar_path
     image_paths = crud.delete_user(db, current_user)
     for path in set(image_paths):
         if crud.count_receipts_with_image(db, path) == 0:
             _delete_image_file(path)
+    _delete_avatar_file(avatar_path)
 
     return {"success": True}
 
 
-@app.post("/api/auth/forgot-password", tags=["Auth"])
-def forgot_password(
-    data: schemas.ForgotPasswordRequest,
+# --- Фото профиля (PROFILE_TASKS.md, п. 1.1) ---
+
+def _avatar_file(avatar_path: Optional[str]) -> Optional[str]:
+    """Путь на диске по avatar_path или None, если путь не наш."""
+    match = AVATAR_PATH_RE.match(avatar_path or "")
+    return os.path.join(AVATARS_DIR, match.group(1)) if match else None
+
+
+def _delete_avatar_file(avatar_path: Optional[str]) -> None:
+    path = _avatar_file(avatar_path)
+    if path:
+        _remove_quietly(path)
+
+
+def _read_avatar(file: UploadFile) -> Image.Image:
+    """Читает загруженное фото и проверяет, что это действительно JPEG/PNG/WEBP — по содержимому, а не по Content-Type."""
+    data = file.file.read(config.MAX_AVATAR_BYTES + 1)
+    if len(data) > config.MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail=AVATAR_TOO_BIG)
+    if not data:
+        raise HTTPException(status_code=400, detail="Файл пустой")
+    unsupported = HTTPException(status_code=400, detail="Загрузите фото в формате JPG, PNG или WEBP")
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            if probe.format not in AVATAR_FORMATS:
+                raise unsupported
+            if probe.width * probe.height > AVATAR_MAX_PIXELS:
+                raise HTTPException(status_code=400, detail="Фото слишком большого разрешения")
+            probe.verify()
+        # После verify() картинку нужно открыть заново
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        raise unsupported
+    return image
+
+
+@app.post("/api/auth/me/avatar", response_model=schemas.UserOut, tags=["Auth"])
+def upload_avatar(
+    file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Запрос на сброс пароля. Генерирует одноразовый токен сброса."""
-    email = data.email.strip().lower()
-    user = crud.get_user_by_email(db, email=email)
+    """Загрузка фото профиля (multipart, поле file). Сохраняется JPEG без метаданных под новым именем."""
+    image = _read_avatar(file)
+    try:
+        # Поворот по EXIF, затем без EXIF (там бывают координаты съёмки)
+        image = ImageOps.exif_transpose(image)
+        if image.mode != "RGB":
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            rgba = image.convert("RGBA")
+            background.paste(rgba, mask=rgba.getchannel("A"))
+            image = background
+        image.thumbnail((AVATAR_MAX_SIDE, AVATAR_MAX_SIDE))
+        # Каждый раз новое имя: браузер не покажет старое фото из кэша
+        filename = f"{uuid.uuid4().hex}.jpg"
+        file_path = os.path.join(AVATARS_DIR, filename)
+        image.save(file_path, "JPEG", quality=88, optimize=True)
+    finally:
+        image.close()
 
-    reset_token = None
-    if user:
-        reset_token = auth.create_password_reset_token(user)
-        logger.info("Сгенерирован токен сброса пароля для %s", email)
+    old_path = current_user.avatar_path
+    current_user.avatar_path = f"{config.AVATARS_URL_PREFIX}/{filename}"
+    try:
+        db.commit()
+    except Exception:
+        _remove_quietly(file_path)
+        raise
+    _delete_avatar_file(old_path)
+    db.refresh(current_user)
+    return current_user
 
-    return {
-        "success": True,
-        "message": "Если пользователь с таким email зарегистрирован, ссылка для сброса пароля сформирована.",
-        # Токен отдаётся в ответе для удобства тестирования и интеграции без почтового SMTP-сервера
-        "reset_token": reset_token,
-    }
+
+@app.delete("/api/auth/me/avatar", response_model=schemas.UserOut, tags=["Auth"])
+def delete_avatar(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Удаление фото профиля. Без фото — тоже 200, avatar_url: null."""
+    old_path = current_user.avatar_path
+    current_user.avatar_path = None
+    db.commit()
+    _delete_avatar_file(old_path)
+    db.refresh(current_user)
+    return current_user
 
 
-@app.post("/api/auth/reset-password", tags=["Auth"])
+# --- Профиль: сводка ---
+
+@app.get("/api/profile/stats", response_model=schemas.ProfileStatsOut, tags=["Profile"])
+def get_profile_stats(
+    tz: Optional[str] = Query(None, description="Часовой пояс IANA, например Asia/Almaty (по умолчанию UTC)"),
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Цифры, тепловая карта и привычки профиля одним запросом (PROFILE_TASKS.md, п. 1.3)."""
+    try:
+        zone = ZoneInfo(tz.strip()) if tz and tz.strip() else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=422, detail="Параметр tz: укажите часовой пояс, например Asia/Almaty")
+    return crud.get_profile_stats(db, current_user, zone)
+
+
+@app.post("/api/auth/recovery-code", response_model=schemas.RecoveryCodeOut, tags=["Auth"])
+def create_recovery_code(
+    data: schemas.RecoveryCodeRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Новый код восстановления (старый перестаёт действовать). Нужен текущий пароль."""
+    if not auth.verify_password(data.password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Неверный пароль")
+    recovery_code = auth.generate_recovery_code()
+    current_user.recovery_code_hash = auth.hash_recovery_code(recovery_code)
+    db.commit()
+    return {"recovery_code": recovery_code}
+
+
+@app.post("/api/auth/reset-password", response_model=schemas.TokenOut, tags=["Auth"])
 def reset_password(
     data: schemas.ResetPasswordRequest,
     db: Session = Depends(database.get_db),
 ):
-    """Сброс пароля по одноразовому токену."""
-    user = auth.user_from_reset_token(data.token, db)
-    if user is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Ссылка для сброса пароля недействительна или срок её действия истёк",
-        )
+    """Сброс забытого пароля по email и коду восстановления — без почты.
 
+    Код одноразовый: в ответе новый код, пара токенов (пользователь сразу входит) и пользователь.
+    Старые токены перестают действовать — пароль сменился.
+    """
+    user = crud.get_user_by_email(db, email=data.email)
+    # Проверка кода идёт и для несуществующего email — по времени ответа не понять, есть ли такой пользователь
+    if not auth.verify_recovery_code(data.recovery_code, user.recovery_code_hash if user else None):
+        raise HTTPException(status_code=400, detail="Неверный email или код восстановления")
+
+    recovery_code = auth.generate_recovery_code()
     user.hashed_password = auth.hash_password(data.new_password)
+    user.recovery_code_hash = auth.hash_recovery_code(recovery_code)
+    user.last_login_at = models.utcnow()
     db.commit()
     db.refresh(user)
 
-    logger.info("Пароль успешно сброшен для пользователя id=%s", user.id)
-    return {"success": True, "message": "Пароль успешно изменён. Войдите с новым паролем."}
+    logger.info("Пароль сброшен по коду восстановления, пользователь id=%s", user.id)
+    return _token_response(user, recovery_code)
 
 # --- Распознавание чеков (доступно и гостям) ---
 # Эндпоинты объявлены через def, а не async def: FastAPI выполняет их в пуле потоков,
@@ -607,9 +765,10 @@ def analyze_receipt_async_endpoint(
     def _worker_fn(task_id: str) -> dict:
         task_manager.update_task(task_id, step="ocr", progress=40)
         data = _run_ocr(file_path, categories)
-        if user_id is not None:
-            with database.SessionLocal() as db:
+        with database.SessionLocal() as db:
+            if user_id is not None:
                 apply_rules(db, user_id, data.get("items") or [])
+            _mark_duplicate(db, user_id, data)
         data["image_path"] = image_url
         return data
 
@@ -651,6 +810,11 @@ def save_receipt(
     """Сохранение чека в аккаунт текущего пользователя."""
     image_path = _resolve_image_path(receipt.image_path)
     saved = crud.create_receipt(db=db, data=receipt, user_id=current_user.id, image_path=image_path)
+    # Чек сохраняется в любом случае; duplicate_of — подсказка фронту «похоже, такой чек уже есть»
+    saved.duplicate_of = crud.find_duplicate(
+        db, current_user.id, saved.date, saved.total, time=saved.time,
+        store=saved.store, merchant=saved.merchant, exclude_id=saved.id,
+    )
     return crud.attach_base_rates(db, saved, current_user.base_currency)
 
 def _iso_query_date(value: Optional[str], name: str) -> Optional[str]:
