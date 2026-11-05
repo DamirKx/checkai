@@ -10,6 +10,19 @@ logger = logging.getLogger("checkai.db")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+def _with_driver(url: str) -> str:
+    """postgresql://… → postgresql+psycopg2://…
+
+    SQLAlchemy 2.1 для адреса без драйвера берёт psycopg (v3), а в requirements.txt стоит psycopg2-binary.
+    postgres:// (так пишут Heroku и некоторые хостинги) SQLAlchemy не понимает вовсе.
+    """
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg2://" + url[len(prefix):]
+    return url
+
+
+DATABASE_URL = _with_driver(DATABASE_URL)
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
