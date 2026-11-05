@@ -7,6 +7,8 @@
 import re
 from typing import Optional
 
+from .textfix import fix_mixed_script
+
 # Известные сети: каноническое имя → варианты написания (в нижнем регистре, латиницей и кириллицей).
 # Вариант ищется как отдельное слово в любом месте строки, поэтому «Magnum Cash&Carry» → Magnum.
 KNOWN_CHAINS = {
@@ -49,10 +51,8 @@ _ADDRESS_RE = re.compile(r",.*$|\s(?:г|ул|пр|пр-т|мкр|д)\.\s?.*$|\s(
 # OCR путает похожие буквы латиницы и кириллицы: «МAГНУМ», «АBТOKAФE»
 _CYR_TWINS = "АВЕКМНОРСТУХавекмнорстух"
 _LAT_TWINS = "ABEKMHOPCTYXabekmhopctyx"
+# Только для сравнения с вариантами написания сетей; исправление слов для показа — app.textfix
 _CYR_TO_LAT = str.maketrans(_CYR_TWINS, _LAT_TWINS)
-_LAT_TO_CYR = str.maketrans(_LAT_TWINS, _CYR_TWINS)
-_CYR = re.compile(r"[а-яёА-ЯЁ]")
-_LAT = re.compile(r"[a-zA-Z]")
 # Кавычки с названием внутри: ТОО «Ромашка», ООО "Автокафе"
 _QUOTED_RE = re.compile(r"[\"«“„](.{3,}?)[\"»”“]")
 
@@ -66,17 +66,6 @@ _CHAIN_PATTERNS = [
     (name, re.compile(r"(?<![\w])(?:" + "|".join(re.escape(_skeleton(a)) for a in aliases) + r")(?![\w])"))
     for name, aliases in KNOWN_CHAINS.items()
 ]
-
-
-def _fix_mixed_word(word: str) -> str:
-    """Слово из букв обеих раскладок приводит к одной: «АBТOKAФE» → «АВТОКАФЕ»."""
-    if not (_CYR.search(word) and _LAT.search(word)):
-        return word
-    has_pure_cyr = any(_CYR.match(ch) and ch not in _CYR_TWINS for ch in word)
-    has_pure_lat = any(_LAT.match(ch) and ch not in _LAT_TWINS for ch in word)
-    if has_pure_cyr or (not has_pure_lat and len(_CYR.findall(word)) >= len(_LAT.findall(word))):
-        return word.translate(_LAT_TO_CYR)
-    return word.translate(_CYR_TO_LAT)
 
 
 def _clean(store: str) -> str:
@@ -114,5 +103,5 @@ def canonical_merchant(store: Optional[str]) -> Optional[str]:
     cleaned = _clean(raw)
     if not cleaned or not re.search(r"\w", cleaned):
         return None
-    cleaned = " ".join(_fix_mixed_word(w) for w in cleaned.split(" "))
+    cleaned = fix_mixed_script(cleaned)
     return _one_case(cleaned)[:255]

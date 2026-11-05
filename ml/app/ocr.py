@@ -15,6 +15,7 @@ from app.currency import detect_currency, SUPPORTED
 
 # Подключаем модуль распределения по категориям
 from app.categorize import categorize_items
+from app.preprocess import prepare_for_ocr
 
 
 
@@ -97,7 +98,8 @@ def ocr_image(
         #
         # PaddleOCR показывает DeprecationWarning,
         # но это не мешает работе.
-        result = ocr.ocr(image_path)
+        # Масштаб и контраст перед OCR (app/preprocess.py, OCR_PREPROCESS=0 — выключить)
+        result = ocr.ocr(prepare_for_ocr(image_path))
 
     finally:
 

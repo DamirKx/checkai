@@ -61,7 +61,13 @@ def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
         image_path = image_input
 
     try:
-        result = ocr.ocr(image_path)
+        try:
+            from ml.app.preprocess import prepare_for_ocr
+            ocr_input = prepare_for_ocr(image_path)
+        except ImportError:
+            ocr_input = image_path
+        # Масштаб и контраст перед OCR (ml/app/preprocess.py, OCR_PREPROCESS=0 — выключить)
+        result = ocr.ocr(ocr_input)
     finally:
         if temp_path and os.path.exists(temp_path):
             try:
@@ -146,9 +152,12 @@ def analyze_receipt(
     if not parsed:
         parsed = parse_receipt(lines)
 
-    # Каноническое имя сети считаем всегда: запасной парсер app.parser его не отдаёт
+    # Каноническое имя сети и исправление «Lепог» → «Lenor» — для любого парсера,
+    # запасной app.parser сам этого не делает
     try:
         from ml.app.merchant import canonical_merchant
+        from ml.app.textfix import fix_item_names
+        fix_item_names(parsed.get("items"))
         parsed["merchant"] = canonical_merchant(parsed.get("store"))
     except Exception as e:
         logger.warning("Ошибка в canonical_merchant: %s", e)
