@@ -208,8 +208,9 @@ def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
         data["currency_source"] = "default"
     else:
         data["currency_source"] = data.get("currency_source") or "default"
-    # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id} (PROFILE_TASKS.md, п. 2.1, 2.2)
+    # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id} (PROFILE_TASKS.md, п. 2.1, 2.2, 2.3)
     data.setdefault("merchant", None)
+    data.setdefault("confidence", None)
     for item in data.get("items") or []:
         for key in ("category_id", "category", "category_source"):
             item.setdefault(key, None)
