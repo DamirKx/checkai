@@ -47,3 +47,12 @@ def test_parser_returns_merchant_next_to_store():
     result = parse_receipt(['ТОО "MAGNUM CASH&CARRY"', "Хлеб", "100.00 * 1шт. = 100.00", "ИТОГ", "100.00"])
     assert result["store"] == "MAGNUM CASH&CARRY"
     assert result["merchant"] == "Magnum"
+
+
+if __name__ == "__main__":
+    test_magnum_variants("MAGNUM")
+    test_known_chains("SMALL", "Small")
+    test_unknown_stores_heuristics('000 "Автокафе"', "Автокафе")
+    test_empty(None)
+    test_parser_returns_merchant_next_to_store()
+    print("Все тесты merchant пройдены!")

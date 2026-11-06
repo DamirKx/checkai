@@ -4,7 +4,7 @@ import json
 import time
 import tempfile
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 # КРИТИЧНО: Отключаем багнутые фичи PaddlePaddle 3.x ДО импорта PaddleOCR
 os.environ['FLAGS_enable_pir_api'] = '0'
@@ -45,12 +45,11 @@ def init_ocr() -> PaddleOCR:
     )
 
 
-def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
+def ocr_image_with_scores(ocr: PaddleOCR, image_input) -> Tuple[List[str], List[float]]:
     """
     Принимает путь к файлу (str) или байты (bytes).
-    Возвращает список распознанных строк текста.
+    Возвращает кортеж: (список строк текста, список уверенностей строк).
     """
-    # Если на вход пришли байты — сохраняем во временный файл
     temp_path = None
     if isinstance(image_input, (bytes, bytearray)):
         with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
@@ -76,23 +75,20 @@ def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
                 pass
 
     if not result or not result[0]:
-        return []
+        return [], []
 
     ocr_result = result[0]
-
-    # PaddleOCR 3.x возвращает dict с ключами rec_texts/rec_scores
-    # PaddleOCR 2.x возвращает список [ [box, (text, score)], ... ]
     lines = []
+    line_scores = []
     if isinstance(ocr_result, dict) and 'rec_texts' in ocr_result:
-        # Формат 3.x
         texts = ocr_result['rec_texts']
-        scores = ocr_result['rec_scores']
+        scores = ocr_result.get('rec_scores', [])
         for text, score in zip(texts, scores):
             t = str(text).strip()
             if t and float(score) >= 0.2:
                 lines.append(t)
+                line_scores.append(float(score))
     elif isinstance(ocr_result, list):
-        # Формат 2.x (fallback)
         for element in ocr_result:
             if len(element) >= 2:
                 text_info = element[1]
@@ -101,7 +97,17 @@ def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
                     t = str(text).strip()
                     if t and float(score) >= 0.2:
                         lines.append(t)
+                        line_scores.append(float(score))
 
+    return lines, line_scores
+
+
+def ocr_image(ocr: PaddleOCR, image_input) -> List[str]:
+    """
+    Принимает путь к файлу (str) или байты (bytes).
+    Возвращает список распознанных строк текста.
+    """
+    lines, _ = ocr_image_with_scores(ocr, image_input)
     return lines
 
 
@@ -123,7 +129,7 @@ def analyze_receipt(
         ocr = init_ocr()
 
     t_ocr_start = time.perf_counter()
-    lines = ocr_image(ocr, image_input)
+    lines, line_scores = ocr_image_with_scores(ocr, image_input)
     ocr_elapsed = time.perf_counter() - t_ocr_start
     raw_text = "\n".join(lines)
 
@@ -181,6 +187,20 @@ def analyze_receipt(
     except Exception as e:
         logger.warning("Ошибка в categorize_items: %s", e)
     cat_elapsed = time.perf_counter() - t_cat_start
+
+    # Уверенность распознавания чека (PROFILE_TASKS.md, п. 2.3)
+    try:
+        from ml.app.confidence import compute_confidence
+        parsed["confidence"] = compute_confidence(line_scores, parsed.get("items") or [], parsed.get("total"))
+    except Exception as e:
+        logger.warning("Ошибка в compute_confidence: %s", e)
+        parsed.setdefault("confidence", None)
+
+    # Гарантия наличия category_id, category, category_source (PROFILE_TASKS.md, п. 2.1)
+    for it in parsed.get("items") or []:
+        it.setdefault("category_id", None)
+        it.setdefault("category", None)
+        it.setdefault("category_source", None)
 
     items_list = parsed.get("items") or []
     logger.info(

@@ -123,16 +123,6 @@ def test_categorize_empty_inputs():
     assert items[0]["category_source"] is None
 
 
-if __name__ == "__main__":
-    test_normalize_item_name()
-    test_custom_category_beats_builtin_keywords()
-    test_qwen_out_of_range_falls_back_to_keywords()
-    test_guest_categories_have_none_id()
-    test_categorize_empty_inputs()
-    print("Все тесты категоризации пройдены!")
-
-
-
 def _assert_source_invariant(items):
     """У каждой позиции есть category_source; он None тогда и только тогда, когда категории нет (PROFILE_TASKS.md, п. 2.1)."""
     for item in items:
@@ -176,3 +166,13 @@ def test_category_source_present_for_every_item():
     categorize_items(items, [])
     _assert_source_invariant(items)
     assert all(i["category_source"] is None for i in items)
+
+
+if __name__ == "__main__":
+    test_normalize_item_name()
+    test_custom_category_beats_builtin_keywords()
+    test_qwen_out_of_range_falls_back_to_keywords()
+    test_guest_categories_have_none_id()
+    test_categorize_empty_inputs()
+    test_category_source_present_for_every_item()
+    print("Все тесты категоризации пройдены!")

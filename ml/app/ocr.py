@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import tempfile
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from paddleocr import PaddleOCR
 
@@ -16,6 +16,7 @@ from app.currency import detect_currency, SUPPORTED
 # Подключаем модуль распределения по категориям
 from app.categorize import categorize_items
 from app.preprocess import prepare_for_ocr
+from app.confidence import compute_confidence
 
 
 
@@ -54,92 +55,70 @@ def init_ocr() -> PaddleOCR:
         text_recognition_model_name="eslav_PP-OCRv5_mobile_rec",
     )
 
+def ocr_image_with_scores(
+    ocr: PaddleOCR,
+    image_input
+) -> Tuple[List[str], List[float]]:
+    """
+    Выполняет OCR изображения.
+    Возвращает кортеж: (список строк, список уверенностей строк).
+    """
+    temp_path = None
+    if isinstance(image_input, (bytes, bytearray)):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(image_input)
+            temp_path = tmp.name
+        image_path = temp_path
+    else:
+        image_path = image_input
+
+    try:
+        result = ocr.ocr(prepare_for_ocr(image_path))
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+    if not result or not result[0]:
+        return [], []
+
+    ocr_result = result[0]
+    lines = []
+    line_scores = []
+
+    if isinstance(ocr_result, dict) and "rec_texts" in ocr_result:
+        texts = ocr_result["rec_texts"]
+        scores = ocr_result.get("rec_scores", [])
+        for text, score in zip(texts, scores):
+            text = str(text).strip()
+            if text and float(score) >= 0.2:
+                lines.append(text)
+                line_scores.append(float(score))
+    elif isinstance(ocr_result, list):
+        for element in ocr_result:
+            if len(element) >= 2:
+                text_info = element[1]
+                if isinstance(text_info, (tuple, list)) and len(text_info) >= 2:
+                    text, score = text_info[0], text_info[1]
+                    text = str(text).strip()
+                    if text and float(score) >= 0.2:
+                        lines.append(text)
+                        line_scores.append(float(score))
+
+    return lines, line_scores
+
+
 def ocr_image(
     ocr: PaddleOCR,
     image_input
 ) -> List[str]:
     """
     Выполняет OCR изображения.
-
-    image_input может быть:
-- путем к изображению;
-- bytes;
-- bytearray.
-
     Возвращает список распознанных строк.
     """
-
-    temp_path = None
-
-    # Если изображение пришло как bytes,
-    # временно сохраняем его в файл.
-    if isinstance(
-        image_input,
-        (bytes, bytearray)
-    ):
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".jpg"
-        ) as tmp:
-
-            tmp.write(image_input)
-            temp_path = tmp.name
-
-        image_path = temp_path
-
-    else:
-        image_path = image_input
-
-    try:
-
-        # Пока используем .ocr(),
-        # потому что на нем наш пайплайн уже протестирован.
-        #
-        # PaddleOCR показывает DeprecationWarning,
-        # но это не мешает работе.
-        # Масштаб и контраст перед OCR (app/preprocess.py, OCR_PREPROCESS=0 — выключить)
-        result = ocr.ocr(prepare_for_ocr(image_path))
-
-    finally:
-
-        # Удаляем временный файл,
-        # если на вход пришли bytes.
-        if (
-            temp_path
-            and os.path.exists(temp_path)
-        ):
-
-            try:
-                os.remove(temp_path)
-
-            except Exception:
-                pass
-
-    if not result or not result[0]:
-        return []
-
-    ocr_result = result[0]
-
-    texts = ocr_result["rec_texts"]
-    scores = ocr_result["rec_scores"]
-
-    lines = []
-
-    for text, score in zip(
-        texts,
-        scores
-    ):
-
-        text = str(text).strip()
-
-        # Убираем совсем неуверенные результаты OCR.
-        if (
-            text
-            and float(score) >= 0.2
-        ):
-            lines.append(text)
-
+    lines, _ = ocr_image_with_scores(ocr, image_input)
     return lines
 
 
@@ -179,8 +158,8 @@ def analyze_receipt(
     if ocr is None:
         ocr = init_ocr()
 
-    # 1. OCR
-    lines = ocr_image(
+    # 1. OCR (получаем строки и уверенности от PaddleOCR)
+    lines, scores = ocr_image_with_scores(
         ocr,
         image_input
     )
@@ -203,6 +182,15 @@ def analyze_receipt(
     parsed["currency"] = currency
     parsed["currency_source"] = currency_source
     parsed["raw_lines"] = lines
+
+    # 6. Уверенность распознавания чека (PROFILE_TASKS.md, п. 2.3)
+    parsed["confidence"] = compute_confidence(scores, parsed.get("items") or [], parsed.get("total"))
+
+    # 7. Гарантируем category_source, category_id, category у каждой позиции (PROFILE_TASKS.md, п. 2.1)
+    for it in parsed.get("items") or []:
+        it.setdefault("category_id", None)
+        it.setdefault("category", None)
+        it.setdefault("category_source", None)
 
     return parsed
 
