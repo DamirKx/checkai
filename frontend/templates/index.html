@@ -7,8 +7,8 @@
     // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=avatar-1">
-  <script src="/static/js/app.js?v=avatar-1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=dup-1">
+  <script src="/static/js/app.js?v=dup-1" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -131,6 +131,7 @@
                 <button class="btn soft" id="chooseBtn" type="button">Выбрать</button>
                 <button class="btn soft touch-only" id="cameraBtn" type="button">Сфотографировать</button>
               </div>
+              <p class="manual-or">нет фото? <button class="text-btn" id="manualBtn" type="button">Ввести вручную</button></p>
             </div>
             <div id="previewBox" hidden>
               <img id="imagePreview" class="preview" alt="Предпросмотр чека">
@@ -156,11 +157,13 @@
           <div id="uploadMessage" class="notice" role="alert" hidden></div>
         </div>
         <div class="card result-card" id="resultCard" aria-labelledby="resultTitle">
-          <div class="card-kicker"><span>02</span>Результат</div>
+          <div class="card-kicker" id="resultKicker"><span>02</span>Результат</div>
           <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b></div>
           <div id="resultContent" hidden>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>
+            <div class="notice dup-hint" id="duplicateHint" role="status" hidden><span id="duplicateHintText"></span> <button class="text-btn" id="duplicateHintOpen" type="button">Открыть</button></div>
             <div id="resultEditor"></div>
+            <div class="auth-error" id="resultError" role="alert" style="margin-top:14px" hidden></div>
             <div class="button-row" style="margin-top:18px">
               <button class="btn" id="saveReceiptBtn" type="button">Сохранить</button>
               <button class="btn soft" id="downloadBtn" type="button">JSON</button>
@@ -176,6 +179,7 @@
         <div class="filterbar">
           <input id="historySearch" type="search" placeholder="Магазин или товар" aria-label="Поиск по магазину или товару">
           <select id="historyPeriod" aria-label="Период"><option value="all">За всё время</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="year">Этот год</option></select>
+          <select id="historyCategory" aria-label="Категория"><option value="all">Все категории</option></select>
           <button class="btn soft small" id="exportCsvBtn" type="button">Экспорт CSV</button>
         </div>
       </div>
@@ -217,6 +221,13 @@
           <select id="analysisCategory" aria-label="Категория"><option value="all">Все категории</option></select>
         </div>
       </div>
+      <section class="card insights" id="insights" aria-labelledby="insightsTitle" hidden>
+        <div class="ins-head">
+          <div><span class="block-idx">/советы</span><h2 id="insightsTitle">Рекомендации</h2></div>
+          <button class="btn soft small" id="insightsRefresh" type="button" hidden>Обновить</button>
+        </div>
+        <div id="insightsBody" aria-live="polite"></div>
+      </section>
       <div class="summary-grid">
         <div class="card stat"><span>Расходы</span><strong id="analysisTotal">0</strong></div>
         <div class="card stat"><span>Топ категория</span><strong id="analysisTop">—</strong></div>
@@ -279,6 +290,8 @@
         <div class="pf-fact"><b id="profileAverage">0</b><span>средний чек</span></div>
         <div class="pf-fact"><b id="profileDays">0</b><span id="profileDaysLabel">дней с нами</span></div>
       </div>
+
+      <button class="card pf-insights" id="profileInsights" type="button" hidden><span class="pf-ins-ico" aria-hidden="true">✦</span><span class="pf-ins-text"><small>Рекомендации</small><b id="profileInsightsText"></b></span><span class="pf-row-arrow" aria-hidden="true">→</span></button>
 
       <div class="pf-grid" id="profileGrid">
         <div class="card pf-card pf-activity">
@@ -480,6 +493,18 @@
       <div class="auth-error" id="avatarError" role="alert" hidden></div>
       <input id="avatarFile" type="file" accept="image/jpeg,image/png,image/webp,image/*" hidden>
       <input id="avatarCapture" type="file" accept="image/*" capture="user" hidden>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="duplicateModal" hidden>
+    <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="duplicateTitle" aria-describedby="duplicateText">
+      <button class="icon-btn modal-close" id="duplicateClose" type="button" aria-label="Закрыть">✕</button>
+      <h2 id="duplicateTitle">Похоже, этот чек уже есть</h2>
+      <div class="auth-form">
+        <p id="duplicateText"></p>
+        <div class="dup-card" id="duplicateCard"></div>
+        <div class="button-row"><button class="btn" id="duplicateCancel" type="button">Не сохранять</button><button class="btn soft" id="duplicateOpen" type="button">Открыть тот чек</button><button class="btn soft" id="duplicateSave" type="button">Всё равно сохранить</button></div>
+      </div>
     </div>
   </div>
 
