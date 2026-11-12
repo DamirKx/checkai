@@ -3,8 +3,11 @@ import os
 import re
 import time
 import uuid
+import hashlib
 import logging
+import math
 import threading
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
@@ -28,11 +31,13 @@ from app import crud
 from app import auth
 from app import currencies
 from app import rates
+from app import insights as insights_service
 from app.categories import CategoryError, DEFAULT_CATEGORIES, apply_rules
+from app.duplicates import fiscal_id_from
 from app.rate_limit import limiter, get_client_ip
 from app.dates import normalize_date_time, split_date_time
 from app.ocr import init_ocr, analyze_receipt
-from app.tasks import task_manager
+from app.tasks import task_manager, insights_task_manager
 
 logger = logging.getLogger("checkai")
 
@@ -47,6 +52,7 @@ async def lifespan(_app: FastAPI):
     if stop_cleanup is not None:
         stop_cleanup.set()
     task_manager._executor.shutdown(wait=False)
+    insights_task_manager._executor.shutdown(wait=False)
 
 
 app = FastAPI(title="CheckAI — Анализ кассовых чеков", version="2.1.0", lifespan=lifespan)
@@ -159,8 +165,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         errors.append(err_dict)
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder(errors)},
+        content={"detail": _json_safe(jsonable_encoder(errors))},
     )
+
+
+def _json_safe(value):
+    """NaN и Infinity из присланного input нельзя записать в JSON: без этого ответ 422 стал бы 500."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    return value
 
 
 @app.exception_handler(CategoryError)
@@ -211,31 +228,70 @@ def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
     # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id} (PROFILE_TASKS.md, п. 2.1, 2.2, 2.3)
     data.setdefault("merchant", None)
     data.setdefault("confidence", None)
+    # Реквизиты фискального чека от ML (NEXT_WEEK_TASKS.md, C.3) или null
+    data.setdefault("fiscal", None)
     for item in data.get("items") or []:
         for key in ("category_id", "category", "category_source"):
             item.setdefault(key, None)
     return data
 
 
-def _analyze(db: Session, image_path: str, user: Optional[models.User]) -> dict:
+def _analyze(db: Session, image_path: str, user: Optional[models.User], image_hash: Optional[str] = None) -> dict:
     """Распознавание с категориями. Правила пользователя важнее ML и применяются вне блокировки OCR."""
     data = _run_ocr(image_path, _categories_for(user))
     if user is not None:
         apply_rules(db, user.id, data.get("items") or [])
-    _mark_duplicate(db, user.id if user else None, data)
+    _mark_duplicate(db, user.id if user else None, data, image_hash)
     return data
 
 
-def _mark_duplicate(db: Session, user_id: Optional[int], data: dict) -> None:
-    """duplicate_of в ответе распознавания: такой чек, похоже, уже сохранён. У гостя всегда null."""
+def _mark_duplicate(db: Session, user_id: Optional[int], data: dict, image_hash: Optional[str]) -> None:
+    """duplicate_of в ответе распознавания (C.2.2): у пользователя уже есть чек с тем же фото
+    или фискальным номером. По содержимому здесь не ищем — это делает фронт, а при сохранении сервер.
+    У гостя и без совпадений — null. Распознавание не прерывается."""
     data["duplicate_of"] = None
     if user_id is None:
         return
-    total = data.get("total")
-    data["duplicate_of"] = crud.find_duplicate(
-        db, user_id, data.get("date"), total if isinstance(total, (int, float)) else None,
-        time=data.get("time"), store=data.get("store"), merchant=data.get("merchant"),
+    found = crud.find_duplicate(
+        db, user_id, data, image_hash=image_hash, fiscal_id=fiscal_id_from(data.get("fiscal")), by_content=False,
     )
+    data["duplicate_of"] = found.id if found is not None else None
+
+
+# Фискальный номер распознанного, но ещё не сохранённого чека: фронт его обратно не присылает.
+# В памяти процесса — после перезапуска сервера номер теряется, и чек просто проверяется по содержимому
+_FISCAL_BY_IMAGE: "OrderedDict[str, str]" = OrderedDict()
+_FISCAL_CACHE_MAX = 2000
+_fiscal_lock = threading.Lock()
+
+
+def _remember_fiscal(image_url: str, data: dict) -> None:
+    fiscal_id = fiscal_id_from(data.get("fiscal"))
+    if not fiscal_id:
+        return
+    with _fiscal_lock:
+        _FISCAL_BY_IMAGE[image_url] = fiscal_id
+        _FISCAL_BY_IMAGE.move_to_end(image_url)
+        while len(_FISCAL_BY_IMAGE) > _FISCAL_CACHE_MAX:
+            _FISCAL_BY_IMAGE.popitem(last=False)
+
+
+def _fiscal_for(image_url: Optional[str]) -> Optional[str]:
+    if not image_url:
+        return None
+    with _fiscal_lock:
+        return _FISCAL_BY_IMAGE.get(image_url)
+
+
+def _file_sha256(path: str) -> Optional[str]:
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 def _remove_quietly(path: str) -> None:
@@ -255,12 +311,14 @@ def _pick_extension(file: UploadFile) -> str:
     raise HTTPException(status_code=415, detail="Поддерживаются изображения JPG, PNG, WEBP, BMP или TIFF")
 
 
-def _save_upload(file: UploadFile) -> Tuple[str, str]:
-    """Сохраняет файл как <uuid>.<ext> с проверкой размера. Возвращает (путь на диске, имя файла)."""
+def _save_upload(file: UploadFile) -> Tuple[str, str, str]:
+    """Сохраняет файл как <uuid>.<ext> с проверкой размера. Возвращает (путь на диске, имя файла, SHA-256)."""
     ext = _pick_extension(file)
     filename = f"{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOADS_DIR, filename)
     size = 0
+    # Хеш считается, пока файл пишется на диск: по нему ищется тот же чек (C.2.2)
+    digest = hashlib.sha256()
     try:
         with open(file_path, "wb") as buffer:
             while chunk := file.file.read(1024 * 1024):
@@ -270,6 +328,7 @@ def _save_upload(file: UploadFile) -> Tuple[str, str]:
                         status_code=413,
                         detail=f"Файл слишком большой. Максимум — {config.MAX_UPLOAD_MB} МБ",
                     )
+                digest.update(chunk)
                 buffer.write(chunk)
     except BaseException:
         _remove_quietly(file_path)
@@ -277,7 +336,7 @@ def _save_upload(file: UploadFile) -> Tuple[str, str]:
     if size == 0:
         _remove_quietly(file_path)
         raise HTTPException(status_code=422, detail="Файл пустой")
-    return file_path, filename
+    return file_path, filename, digest.hexdigest()
 
 
 def _resolve_image_path(image_path: Optional[str]) -> Optional[str]:
@@ -296,6 +355,17 @@ def _resolve_image_path(image_path: Optional[str]) -> Optional[str]:
             if ext in ALLOWED_EXTENSIONS and os.path.isfile(os.path.join(UPLOADS_DIR, filename)):
                 return image_path
     raise HTTPException(status_code=422, detail="Некорректный путь к изображению чека")
+
+
+def _image_disk_path(image_path: Optional[str]) -> Optional[str]:
+    """Файл на диске для пути, уже проверенного _resolve_image_path."""
+    prefix = f"{RECEIPTS_URL_PREFIX}/"
+    if not image_path or not image_path.startswith(prefix):
+        return None
+    filename = image_path[len(prefix):]
+    if not filename or os.path.basename(filename) != filename:
+        return None
+    return os.path.join(UPLOADS_DIR, filename)
 
 
 def _delete_image_file(image_path: Optional[str]) -> None:
@@ -529,6 +599,11 @@ def update_me(
                 {k: v for k, v in merged.items() if v is not None}
             ).model_dump()
 
+    # Согласие на ИИ-анализ (B.2.5) — то же поле preferences.ai_insights, пароль не нужен
+    if user_data.ai_insights_consent is not None:
+        prefs = schemas.Preferences.from_stored(current_user.preferences).model_dump()
+        current_user.preferences = {**prefs, "ai_insights": user_data.ai_insights_consent}
+
     db.commit()
     if base_changed:
         # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted,
@@ -715,7 +790,7 @@ def analyze_test_receipt(
     if not os.path.isfile(TEST_IMAGE_PATH):
         raise HTTPException(status_code=404, detail="Демо-файл images.jpeg не найден")
     try:
-        data = _analyze(db, TEST_IMAGE_PATH, current_user)
+        data = _analyze(db, TEST_IMAGE_PATH, current_user, _file_sha256(TEST_IMAGE_PATH))
     except HTTPException:
         raise
     except Exception:
@@ -732,9 +807,9 @@ def analyze_receipt_endpoint(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Загрузите изображение чека")
 
-    file_path, filename = _save_upload(file)
+    file_path, filename, image_hash = _save_upload(file)
     try:
-        data = _analyze(db, file_path, current_user)
+        data = _analyze(db, file_path, current_user, image_hash)
     except HTTPException:
         _remove_quietly(file_path)
         raise
@@ -745,6 +820,7 @@ def analyze_receipt_endpoint(
 
     # Путь к картинке клиент вернёт при сохранении чека
     data["image_path"] = f"{RECEIPTS_URL_PREFIX}/{filename}"
+    _remember_fiscal(data["image_path"], data)
     return {"success": True, "data": data}
 
 
@@ -758,7 +834,7 @@ def analyze_receipt_async_endpoint(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Загрузите изображение чека")
 
-    file_path, filename = _save_upload(file)
+    file_path, filename, image_hash = _save_upload(file)
     image_url = f"{RECEIPTS_URL_PREFIX}/{filename}"
     task = task_manager.create_task(file_path=file_path, image_url=image_url)
     # Сессия запроса закроется раньше, чем задача выполнится: категории берём сейчас,
@@ -772,8 +848,9 @@ def analyze_receipt_async_endpoint(
         with database.SessionLocal() as db:
             if user_id is not None:
                 apply_rules(db, user_id, data.get("items") or [])
-            _mark_duplicate(db, user_id, data)
+            _mark_duplicate(db, user_id, data, image_hash)
         data["image_path"] = image_url
+        _remember_fiscal(image_url, data)
         return data
 
     task_manager.submit(task.id, _worker_fn)
@@ -790,8 +867,9 @@ def analyze_receipt_async_endpoint(
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.TaskStatusOut, tags=["OCR"])
 def get_task_status(task_id: str):
-    """Проверка статуса задачи из очереди распознавания."""
-    task = task_manager.get_task(task_id)
+    """Статус фоновой задачи: распознавание чека или ИИ-анализ расходов. Без авторизации —
+    поэтому в result анализа ничего личного нет (B.2.4)."""
+    task = task_manager.get_task(task_id) or insights_task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена или устарела")
     return schemas.TaskStatusOut(
@@ -805,20 +883,57 @@ def get_task_status(task_id: str):
 
 # --- Сохранение, просмотр и аналитика чеков (только для авторизованных) ---
 
-@app.post("/api/receipts/save", response_model=schemas.ReceiptOut, tags=["Receipts"])
+# Проверка на дубликат и запись чека — под одной блокировкой на пользователя: иначе двойной клик
+# или повтор после обрыва сети проходят проверку оба (C.2.6). Хватает одного процесса uvicorn;
+# с несколькими воркерами или Postgres нужна блокировка в базе (SELECT … FOR UPDATE / advisory lock)
+_receipt_locks: dict = {}
+_receipt_locks_guard = threading.Lock()
+
+
+def _receipt_lock(user_id: int) -> threading.Lock:
+    with _receipt_locks_guard:
+        return _receipt_locks.setdefault(user_id, threading.Lock())
+
+
+def _duplicate_response(db: Session, user: models.User, duplicate: models.Receipt) -> JSONResponse:
+    """409 с найденным чеком на верхнем уровне тела, а не внутри detail (C.2.4)."""
+    out = schemas.ReceiptOut.model_validate(crud.attach_base_rates(db, duplicate, user.base_currency))
+    return JSONResponse(status_code=409, content={
+        "detail": "Похоже, этот чек уже сохранён",
+        "duplicate_of": duplicate.id,
+        "duplicate": jsonable_encoder(out),
+    })
+
+
+@app.post(
+    "/api/receipts/save", response_model=schemas.ReceiptOut, tags=["Receipts"],
+    responses={409: {"description": "Похоже, этот чек уже сохранён: duplicate_of и duplicate (ReceiptOut)"}},
+)
 def save_receipt(
     receipt: schemas.ReceiptCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    """Сохранение чека в аккаунт текущего пользователя."""
+    """Сохранение чека в аккаунт текущего пользователя.
+
+    Такой чек уже есть (то же фото, фискальный номер или содержимое) — 409; allow_duplicate: true —
+    сохранить всё равно.
+    """
     image_path = _resolve_image_path(receipt.image_path)
-    saved = crud.create_receipt(db=db, data=receipt, user_id=current_user.id, image_path=image_path)
-    # Чек сохраняется в любом случае; duplicate_of — подсказка фронту «похоже, такой чек уже есть»
-    saved.duplicate_of = crud.find_duplicate(
-        db, current_user.id, saved.date, saved.total, time=saved.time,
-        store=saved.store, merchant=saved.merchant, exclude_id=saved.id,
-    )
+    # Хеш считает сервер по файлу, с фронта не принимается
+    image_hash = _file_sha256(_image_disk_path(image_path)) if image_path else None
+    fiscal_id = _fiscal_for(image_path)
+    with _receipt_lock(current_user.id):
+        if not receipt.allow_duplicate:
+            duplicate = crud.find_duplicate(
+                db, current_user.id, receipt, image_hash=image_hash, fiscal_id=fiscal_id,
+            )
+            if duplicate is not None:
+                return _duplicate_response(db, current_user, duplicate)
+        saved = crud.create_receipt(
+            db=db, data=receipt, user_id=current_user.id, image_path=image_path,
+            image_hash=image_hash, fiscal_id=fiscal_id,
+        )
     return crud.attach_base_rates(db, saved, current_user.base_currency)
 
 def _iso_query_date(value: Optional[str], name: str) -> Optional[str]:
@@ -867,18 +982,30 @@ def read_receipt(
         raise HTTPException(status_code=404, detail="Чек не найден")
     return crud.attach_base_rates(db, receipt, current_user.base_currency)
 
-@app.put("/api/receipts/{receipt_id}", response_model=schemas.ReceiptOut, tags=["Receipts"])
+@app.put(
+    "/api/receipts/{receipt_id}", response_model=schemas.ReceiptOut, tags=["Receipts"],
+    responses={409: {"description": "Правка сделала чек копией другого: duplicate_of и duplicate"}},
+)
 def update_receipt(
     receipt_id: int,
     data: schemas.ReceiptUpdate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Редактирование сохранённого чека (магазин, дата, время, категория, позиции)."""
+    """Редактирование сохранённого чека (магазин, дата, время, категория, позиции).
+
+    Правка сделала чек копией другого — 409, как при сохранении (C.2.5). Фото и фискальный номер
+    правкой не меняются, поэтому проверяется только содержимое.
+    """
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
     if receipt is None:
         raise HTTPException(status_code=404, detail="Чек не найден")
-    updated = crud.update_receipt(db=db, receipt=receipt, data=data)
+    with _receipt_lock(current_user.id):
+        if not data.allow_duplicate:
+            duplicate = crud.find_duplicate(db, current_user.id, data, exclude_id=receipt.id)
+            if duplicate is not None:
+                return _duplicate_response(db, current_user, duplicate)
+        updated = crud.update_receipt(db=db, receipt=receipt, data=data)
     return crud.attach_base_rates(db, updated, current_user.base_currency)
 
 @app.get("/api/analytics", response_model=schemas.AnalyticsOut, tags=["Analytics"])
@@ -1043,6 +1170,145 @@ def delete_category_rule(
     if not crud.delete_rule(db, current_user.id, rule_id):
         raise HTTPException(status_code=404, detail="Правило не найдено")
     return {"success": True}
+
+
+
+# --- Автокатегория для товаров, вписанных руками (NEXT_WEEK_TASKS.md, A.2.3) ---
+
+CATEGORIZE_RATE = (30, 60)  # запросов на пользователя за столько секунд
+
+
+@app.post("/api/categorize", response_model=schemas.CategorizeOut, tags=["Categories"])
+def categorize(
+    data: schemas.CategorizeIn,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Категории для названий без фото: правила пользователя, затем ML (ИИ или ключевые слова).
+
+    Ответ — по элементу на каждое название в том же порядке; не нашли — category_id, category
+    и category_source равны null. ИИ недоступен — то, что нашлось по правилам и ключевым словам, а не 500.
+    """
+    allowed, retry_after = limiter.check_limit(f"categorize:{current_user.id}", *CATEGORIZE_RATE)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Слишком много запросов. Пожалуйста, попробуйте позже."},
+            headers={"Retry-After": str(retry_after)},
+        )
+    items = [
+        {"name": it.name.strip(), "category_id": None, "category": None, "category_source": None}
+        for it in data.items
+    ]
+    named = [it for it in items if it["name"]]
+    apply_rules(db, current_user.id, named)
+    rest = [it for it in named if it["category_source"] != "rule"]
+    if rest:
+        try:
+            from ml.app.categorize import categorize_items
+            categorize_items(rest, _categories_for(current_user))
+        except Exception as e:
+            logger.warning("Автокатегория не сработала (%s): %s", type(e).__name__, e)
+            for it in rest:
+                it.update(category_id=None, category=None, category_source=None)
+    return {"items": items}
+
+
+# --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2) ---
+
+# Пользователь → id его задачи анализа, пока она идёт: повторный POST не запускает вторую
+_insights_running: dict = {}
+_insights_running_lock = threading.Lock()
+
+
+def _insights_out(insight: models.Insight, current_hash: str) -> dict:
+    """InsightsOut: сохранённый анализ и stale — после него менялись чеки или лимиты."""
+    return {
+        "insights": insight.data,
+        "created_at": jsonable_encoder(insight.created_at),
+        "model": insight.model,
+        "stale": insight.snapshot_hash != current_hash,
+    }
+
+
+def _snapshot(db: Session, user: models.User) -> Tuple[dict, str]:
+    snapshot = crud.build_finance_snapshot(db, user)
+    return snapshot, crud.snapshot_hash(snapshot)
+
+
+@app.get("/api/insights", tags=["Insights"])
+def get_insights(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Последний анализ ({insights, created_at, model, stale}) или {"insights": null}, если его ещё нет."""
+    insight = crud.get_latest_insight(db, current_user.id)
+    if insight is None:
+        return {"insights": None}
+    _, digest = _snapshot(db, current_user)
+    return _insights_out(insight, digest)
+
+
+@app.post("/api/insights", tags=["Insights"], status_code=202, responses={
+    200: {"description": "Данные не изменились — прежний анализ (InsightsOut)"},
+    403: {"description": "Нет согласия на анализ"},
+    429: {"description": "Слишком часто: retry_after — через сколько секунд можно"},
+})
+def start_insights(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Запуск нового анализа в фоне: {"task_id"}, статус — GET /api/tasks/{task_id}.
+
+    Данные не изменились с прошлого анализа — сразу 200 с прежним анализом, без запроса к ИИ.
+    Не чаще одного нового анализа за INSIGHTS_REFRESH_HOURS часов — иначе 429.
+    """
+    if not current_user.ai_insights_consent:
+        raise HTTPException(status_code=403, detail="Нужно согласие на анализ")
+    user_id = current_user.id
+    with _insights_running_lock:
+        running = _insights_running.get(user_id)
+        if running and (task := insights_task_manager.get_task(running)) and task.status in ("pending", "processing"):
+            return JSONResponse(status_code=202, content={"task_id": running})
+
+        snapshot, digest = _snapshot(db, current_user)
+        last = crud.get_latest_insight(db, user_id)
+        if last is not None and last.snapshot_hash == digest:
+            return JSONResponse(status_code=200, content=_insights_out(last, digest))
+        if last is not None and config.INSIGHTS_REFRESH_HOURS > 0:
+            wait = int(config.INSIGHTS_REFRESH_HOURS * 3600 - (models.utcnow() - last.created_at).total_seconds())
+            if wait > 0:
+                hours = -(-wait // 3600)
+                text = f"{hours} ч" if wait >= 3600 else f"{-(-wait // 60)} мин"
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"Обновить советы можно через {text}", "retry_after": wait},
+                    headers={"Retry-After": str(wait)},
+                )
+
+        base = current_user.base_currency or currencies.DEFAULT_CURRENCY
+        kzt_per_base = 1.0 if base == "KZT" else (rates.rate_to_kzt(db, base, snapshot["today"], fetch=False) or 1.0)
+        task = insights_task_manager.create_task(step="ai")
+        _insights_running[user_id] = task.id
+
+    def _worker(_task_id: str) -> dict:
+        try:
+            model, result = insights_service.generate(snapshot, kzt_per_base)
+            # Сначала запись в базу, потом статус completed: фронт сразу перечитает GET /api/insights
+            with database.SessionLocal() as worker_db:
+                crud.save_insight(worker_db, user_id, model, result, digest)
+        except Exception:
+            logger.exception("Не удалось подготовить рекомендации")
+            raise HTTPException(status_code=500, detail="Не удалось подготовить советы. Попробуйте позже")
+        finally:
+            with _insights_running_lock:
+                if _insights_running.get(user_id) == _task_id:
+                    del _insights_running[user_id]
+        # Задачу видит любой, кто знает id: в result ничего личного
+        return {"ok": True}
+
+    insights_task_manager.submit(task.id, _worker)
+    return JSONResponse(status_code=202, content={"task_id": task.id})
 
 
 if __name__ == "__main__":

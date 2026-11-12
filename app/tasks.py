@@ -36,15 +36,16 @@ class Task:
 class TaskManager:
     """Менеджер фоновых задач распознавания чеков с очередью выполнения."""
 
-    def __init__(self, max_workers: int = 1):
+    def __init__(self, max_workers: int = 1, name: str = "ocr", first_step: str = "ocr"):
         self._tasks: Dict[str, Task] = {}
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ocr-worker")
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f"{name}-worker")
+        self._first_step = first_step
 
-    def create_task(self, file_path: str, image_url: str) -> Task:
+    def create_task(self, file_path: Optional[str] = None, image_url: Optional[str] = None, step: str = "upload") -> Task:
         self.cleanup_old_tasks()
         task_id = uuid.uuid4().hex
-        task = Task(id=task_id, file_path=file_path, image_url=image_url)
+        task = Task(id=task_id, file_path=file_path, image_url=image_url, step=step)
         with self._lock:
             self._tasks[task_id] = task
         return task
@@ -65,7 +66,7 @@ class TaskManager:
         self._executor.submit(self._run_wrapper, task_id, run_fn)
 
     def _run_wrapper(self, task_id: str, run_fn):
-        self.update_task(task_id, status="processing", step="ocr", progress=35)
+        self.update_task(task_id, status="processing", step=self._first_step, progress=35)
         try:
             result = run_fn(task_id)
             self.update_task(
@@ -76,7 +77,7 @@ class TaskManager:
                 result=result,
             )
         except Exception as e:
-            logger.exception("Ошибка фонового распознавания чека в задаче %s", task_id)
+            logger.exception("Ошибка фоновой задачи %s", task_id)
             self.update_task(
                 task_id,
                 status="failed",
@@ -97,3 +98,5 @@ class TaskManager:
 
 
 task_manager = TaskManager(max_workers=1)
+# ИИ-рекомендации (NEXT_WEEK_TASKS.md, B.2.4): своя очередь, чтобы анализ не ждал распознавания чеков и наоборот
+insights_task_manager = TaskManager(max_workers=2, name="insights", first_step="ai")

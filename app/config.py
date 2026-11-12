@@ -54,3 +54,14 @@ AVATARS_DIR = os.getenv("AVATARS_DIR", "").strip() or os.path.join(DATA_DIR, "av
 AVATARS_URL_PREFIX = "/avatars"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
+
+# --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2.1) ---
+# gemini | ollama | off. off — только шаблонные советы по фактам, данные никуда не уходят
+AI_PROVIDER = (os.getenv("AI_PROVIDER", "").strip().lower() or "gemini")
+if AI_PROVIDER not in ("gemini", "ollama", "off"):
+    raise RuntimeError(f"AI_PROVIDER должен быть gemini, ollama или off, получено: {AI_PROVIDER!r}")
+# Ключ только на сервере: во фронт и в логи не попадает. Читает ML (ml/app/llm.py)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
+# Не чаще одного нового анализа на пользователя за столько часов
+INSIGHTS_REFRESH_HOURS = _int_env("INSIGHTS_REFRESH_HOURS", 6)

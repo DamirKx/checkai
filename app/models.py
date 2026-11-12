@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import JSON, Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, Column, Integer, String, Float, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -27,6 +27,14 @@ class User(Base):
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     categories = relationship("Category", cascade="all, delete-orphan", order_by="Category.position")
+    # ИИ-рекомендации (NEXT_WEEK_TASKS.md, B.2.3) удаляются вместе с аккаунтом
+    insights = relationship("Insight", cascade="all, delete-orphan", passive_deletes=True)
+
+    @property
+    def ai_insights_consent(self) -> bool:
+        """Согласие на ИИ-анализ расходов хранится в preferences.ai_insights (B.2.5)."""
+        prefs = self.preferences if isinstance(self.preferences, dict) else {}
+        return prefs.get("ai_insights") is True
 
     @property
     def has_recovery_code(self) -> bool:
@@ -76,6 +84,12 @@ class _CategoryName:
 
 class Receipt(_CategoryName, Base):
     __tablename__ = "receipts"
+    # Поиск дубликатов по фото и фискальному номеру (NEXT_WEEK_TASKS.md, C.2). Не уникальные:
+    # «Всё равно сохранить» должно работать
+    __table_args__ = (
+        Index("ix_receipts_user_image_hash", "user_id", "image_hash"),
+        Index("ix_receipts_user_fiscal_id", "user_id", "fiscal_id"),
+    )
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     store = Column(String(255), nullable=True)
@@ -91,8 +105,14 @@ class Receipt(_CategoryName, Base):
     currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
     rate_to_kzt = Column(Float, nullable=True)
     image_path = Column(String(500), nullable=True)
+    # photo | manual: чек распознан с фото или введён руками (NEXT_WEEK_TASKS.md, A.2.1)
+    source = Column(String(10), nullable=False, default="photo", server_default="photo")
+    # SHA-256 файла фото — считает сервер, с фронта не принимается (C.2.2)
+    image_hash = Column(String(64), nullable=True)
+    # «РНМ:номер:ФП» из реквизитов фискального чека (C.3), NULL — реквизиты не распознаны
+    fiscal_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utcnow)
-    
+
     user = relationship("User", back_populates="receipts")
     # Порядок позиций — как на чеке. Без order_by PostgreSQL после UPDATE отдаёт их вперемешку
     items = relationship("ReceiptItem", back_populates="receipt", cascade="all, delete-orphan", order_by="ReceiptItem.id")
@@ -140,3 +160,17 @@ class ExchangeRate(Base):
     rate_to_kzt = Column(Float, nullable=False)
     fetched_at = Column(DateTime, default=utcnow, nullable=False)
 
+
+
+class Insight(Base):
+    """Сохранённый ИИ-анализ расходов (NEXT_WEEK_TASKS.md, B.2.3). Показывается последний."""
+    __tablename__ = "insights"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    # gemini-… | ollama-… | rules
+    model = Column(String(100), nullable=False)
+    # {"summary": ..., "items": [...]} — поле insights из InsightsOut
+    data = Column(JSON, nullable=False)
+    # Хеш сводки (crud.snapshot_hash): данные не изменились — повторно не генерируем
+    snapshot_hash = Column(String(64), nullable=False)

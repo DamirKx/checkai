@@ -1,0 +1,104 @@
+[
+  {
+    "name": "тот же чек",
+    "a": {"store": "Magnum", "date": "2026-11-05", "time": "18:30", "total": 4500, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Молоко", "total_price": 4200}]},
+    "b": {"store": "Magnum", "date": "2026-11-05", "time": "18:30", "total": 4500, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Молоко", "total_price": 4200}]},
+    "expected": true
+  },
+  {
+    "name": "правовая форма и кавычки в названии",
+    "a": {"store": "ТОО «MAGNUM»", "date": "2026-11-05", "time": "18:30", "total": 4500, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Молоко", "total_price": 4200}]},
+    "b": {"store": "Magnum", "date": "2026-11-05", "time": "18:31", "total": 4500, "currency": "KZT",
+          "items": [{"name": "хлеб", "total_price": 300}, {"name": "МОЛОКО", "total_price": 4200}]},
+    "expected": true
+  },
+  {
+    "name": "одно название содержит другое, ё и е",
+    "a": {"store": "Magnum Cash&Carry", "date": "2026-11-05", "total": 1200, "currency": "KZT",
+          "items": [{"name": "Свёкла", "total_price": 1200}]},
+    "b": {"store": "magnum", "date": "2026-11-05", "total": 1200.4, "currency": "KZT",
+          "items": [{"name": "Свекла", "total_price": 1200}]},
+    "expected": true
+  },
+  {
+    "name": "время отличается на 3 часа",
+    "a": {"store": "Magnum", "date": "2026-11-05", "time": "09:00", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-05", "time": "12:00", "total": 4500, "currency": "KZT", "items": []},
+    "expected": false
+  },
+  {
+    "name": "время отличается ровно на 2 минуты",
+    "a": {"store": "Magnum", "date": "2026-11-05", "time": "09:00", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-05", "time": "09:02", "total": 4500, "currency": "KZT", "items": []},
+    "expected": true
+  },
+  {
+    "name": "другой итог (тенге: разница 1)",
+    "a": {"store": "Magnum", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-05", "total": 4501, "currency": "KZT", "items": []},
+    "expected": false
+  },
+  {
+    "name": "доллары: разница в цент — другой итог",
+    "a": {"store": "Starbucks", "date": "2026-11-05", "total": 4.50, "currency": "USD", "items": []},
+    "b": {"store": "Starbucks", "date": "2026-11-05", "total": 4.51, "currency": "USD", "items": []},
+    "expected": false
+  },
+  {
+    "name": "другая дата",
+    "a": {"store": "Magnum", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-06", "total": 4500, "currency": "KZT", "items": []},
+    "expected": false
+  },
+  {
+    "name": "другой магазин",
+    "a": {"store": "Magnum", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Small", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "expected": false
+  },
+  {
+    "name": "позиции совпадают меньше чем на 60%",
+    "a": {"store": "Magnum", "date": "2026-11-05", "total": 900, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Сок", "total_price": 300}, {"name": "Сыр", "total_price": 300}]},
+    "b": {"store": "Magnum", "date": "2026-11-05", "total": 900, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Чай", "total_price": 300}, {"name": "Кофе", "total_price": 300}]},
+    "expected": false
+  },
+  {
+    "name": "нет даты у одного, состав тот же",
+    "a": {"store": "Magnum", "total": 600, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Сок", "total_price": 300}]},
+    "b": {"store": "Magnum", "date": "2026-11-05", "total": 600, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Сок", "total_price": 300}]},
+    "expected": true
+  },
+  {
+    "name": "нет даты у одного и нет позиций",
+    "a": {"store": "Magnum", "total": 600, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-05", "total": 600, "currency": "KZT", "items": []},
+    "expected": false
+  },
+  {
+    "name": "нет даты, состав совпал на 2 из 3 (меньше 0,8)",
+    "a": {"store": "Magnum", "total": 900, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Сок", "total_price": 300}, {"name": "Сыр", "total_price": 300}]},
+    "b": {"store": "Magnum", "total": 900, "currency": "KZT",
+          "items": [{"name": "Хлеб", "total_price": 300}, {"name": "Сок", "total_price": 300}, {"name": "Чай", "total_price": 300}]},
+    "expected": false
+  },
+  {
+    "name": "магазин неизвестен у одного",
+    "a": {"store": "", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "b": {"store": "Magnum", "date": "2026-11-05", "total": 4500, "currency": "KZT", "items": []},
+    "expected": true
+  },
+  {
+    "name": "сумма строки округляется как Math.round в JS (2.5 → 3)",
+    "a": {"store": "Kiosk", "date": "2026-11-05", "total": 2.5, "currency": "USD", "items": [{"name": "Gum", "total_price": 2.5}]},
+    "b": {"store": "Kiosk", "date": "2026-11-05", "total": 2.5, "currency": "USD", "items": [{"name": "Gum", "total_price": 3.4}]},
+    "expected": true
+  }
+]

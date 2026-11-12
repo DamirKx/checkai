@@ -1,3 +1,5 @@
+import hashlib
+import json
 import time
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from types import SimpleNamespace
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app import models
 from app import schemas
 from app import rates
+from app.duplicates import field, match_score, total_tolerance
 from app.categories import (
     CategoryError, DEFAULT_ICON, MAX_CATEGORIES, UNCATEGORIZED_NAME,
     create_default_categories, find_category_by_name, get_user_category,
@@ -148,7 +151,8 @@ def _build_items(db: Session, user_id: int, items: List[schemas.ItemIn]) -> List
         category_id = resolve_category_id(db, user_id, item_data.category_id, item_data.category)
         built.append(models.ReceiptItem(
             name=item_data.name,
-            quantity=item_data.quantity or 1.0,
+            # Количество уже проверено схемой (> 0): 0 — это 422, а не «молча 1» (A.2.2)
+            quantity=item_data.quantity,
             price_per_unit=item_data.price_per_unit or 0.0,
             total_price=item_data.total_price or 0.0,
             category_id=category_id,
@@ -178,6 +182,8 @@ def create_receipt(
     data: schemas.ReceiptCreate,
     user_id: int,
     image_path: Optional[str] = None,
+    image_hash: Optional[str] = None,
+    fiscal_id: Optional[str] = None,
 ) -> models.Receipt:
     # Категории проверяем до запроса курса: на чужой категории незачем ждать Нацбанк
     items = _build_items(db, user_id, data.items)
@@ -197,6 +203,10 @@ def create_receipt(
         currency=cur,
         rate_to_kzt=rate,
         image_path=image_path,
+        # Без фото чек всегда введён вручную, что бы ни прислал клиент (A.2.1)
+        source=data.source if image_path else "manual",
+        image_hash=image_hash if image_path else None,
+        fiscal_id=fiscal_id,
     )
     receipt.items = items
     db.add(receipt)
@@ -209,36 +219,60 @@ def create_receipt(
 def find_duplicate(
     db: Session,
     user_id: int,
-    date: Optional[str],
-    total: Optional[float],
-    time: Optional[str] = None,
-    store: Optional[str] = None,
-    merchant: Optional[str] = None,
+    data: Any,
+    image_hash: Optional[str] = None,
+    fiscal_id: Optional[str] = None,
     exclude_id: Optional[int] = None,
-) -> Optional[int]:
-    """id уже сохранённого чека, похожего на этот, или None.
+    by_content: bool = True,
+) -> Optional[models.Receipt]:
+    """Уже сохранённый чек пользователя, который совпадает с data, или None (NEXT_WEEK_TASKS.md, C.2.3).
 
-    Похожий — та же дата и сумма; время и сеть сравниваются, только если они есть у обоих чеков.
-    Без даты или суммы дубль не ищем: совпадений «на пустом месте» будет слишком много.
+    По убыванию надёжности: тот же файл фото, тот же фискальный номер, то же содержимое
+    (правило C.0, app/duplicates.py). data — ReceiptCreate / ReceiptUpdate или словарь распознавания.
+    by_content=False — только фото и фискальный номер (так проверяется ответ распознавания).
     """
-    if not date or not total or total <= 0:
-        return None
-    query = db.query(models.Receipt).filter(
-        models.Receipt.user_id == user_id,
-        models.Receipt.date == date[:10],
-        models.Receipt.total.between(total - 0.005, total + 0.005),
-    )
+    base = db.query(models.Receipt).filter(models.Receipt.user_id == user_id)
     if exclude_id is not None:
-        query = query.filter(models.Receipt.id != exclude_id)
-    name = (merchant or canonical_merchant(store) or store or "").strip().lower()
-    for r in query.order_by(models.Receipt.created_at.desc()):
-        if time and r.time and time != r.time:
-            continue
-        other = (r.merchant or canonical_merchant(r.store) or r.store or "").strip().lower()
-        if name and other and name != other:
-            continue
-        return r.id
-    return None
+        base = base.filter(models.Receipt.id != exclude_id)
+
+    for column, value in ((models.Receipt.image_hash, image_hash), (models.Receipt.fiscal_id, fiscal_id)):
+        if value:
+            found = base.filter(column == value).order_by(models.Receipt.created_at.desc()).first()
+            if found is not None:
+                return found
+    if not by_content:
+        return None
+
+    total = field(data, "total")
+    if isinstance(total, bool) or not isinstance(total, (int, float)) or total <= 0:
+        return None
+    currency = field(data, "currency")
+    if currency is None and exclude_id is not None:
+        # Правка без валюты оставляет валюту чека
+        own = db.get(models.Receipt, exclude_id)
+        currency = own.currency if own is not None else None
+    currency = currency or DEFAULT_CURRENCY
+    draft = {
+        "total": total, "currency": currency,
+        "date": field(data, "date"), "time": field(data, "time"), "store": field(data, "store"),
+        "items": field(data, "items") or [],
+    }
+    # Кандидаты — SQL-запросом, остальное (время, магазин, позиции) — в Python
+    tolerance = total_tolerance(currency)
+    query = base.options(selectinload(models.Receipt.items)).filter(
+        models.Receipt.currency == currency,
+        models.Receipt.total > total - tolerance,
+        models.Receipt.total < total + tolerance,
+    )
+    if draft["date"]:
+        query = query.filter((models.Receipt.date == str(draft["date"])[:10]) | models.Receipt.date.is_(None))
+
+    best, best_score = None, -1.0
+    for candidate in query.order_by(*_receipts_order()):
+        score = match_score(draft, candidate)
+        if score is not None and score > best_score:
+            best, best_score = candidate, score
+    return best
 
 
 def _receipts_order():
@@ -316,6 +350,7 @@ def update_receipt(
     receipt: models.Receipt,
     data: schemas.ReceiptUpdate,
 ) -> models.Receipt:
+    # source не меняется: он определён при создании чека (A.2.1)
     items = _build_items(db, receipt.user_id, data.items)
     category_id = _receipt_category_id(db, receipt.user_id, items, data.category_id)
 
@@ -982,3 +1017,169 @@ def delete_rule(db: Session, user_id: int, rule_id: int) -> bool:
     ).delete(synchronize_session=False)
     db.commit()
     return deleted > 0
+
+# --- Сводка для ИИ-рекомендаций (NEXT_WEEK_TASKS.md, B.2.2) ---
+
+SNAPSHOT_MONTHS = 6
+# С каким числом прошлых месяцев сравнивается текущий
+SNAPSHOT_PREV_MONTHS = 3
+SNAPSHOT_TOP_STORES = 5
+SNAPSHOT_SMALL_GROUPS = 5
+# «Мелкая покупка» — чек дешевле этой суммы в тенге (детектор frequent_small)
+SMALL_PURCHASE_KZT = 2000
+# Названия магазинов приходят из OCR или от пользователя — в сводку только обрезанными
+SNAPSHOT_NAME_MAX = 60
+
+
+def _snapshot_day(r: Any) -> str:
+    """День чека для сводки: дата покупки, без неё — день сохранения (UTC)."""
+    return r.date[:10] if r.date else r.created_at.strftime("%Y-%m-%d")
+
+
+def _store_name(r: Any) -> str:
+    name = (r.merchant or canonical_merchant(r.store) or r.store or "").strip()
+    return name[:SNAPSHOT_NAME_MAX]
+
+
+def build_finance_snapshot(
+    db: Session, user: models.User, months: int = SNAPSHOT_MONTHS, today: Optional[date] = None
+) -> Dict[str, Any]:
+    """Обезличенная сводка расходов для ИИ: только агрегаты в основной валюте, без email, имени и id пользователя.
+
+    Пересчёт валют — attach_base_rates, как в get_analytics; чеки без курса только перечисляются в unconverted.
+    """
+    base = user.base_currency or DEFAULT_CURRENCY
+    today = today or datetime.now(timezone.utc).date()
+    month = today.isoformat()[:7]
+    window = [_month_shift(month, -i) for i in range(months - 1, -1, -1)]
+    window_set = set(window)
+    prev = [_month_shift(month, -i) for i in range(1, SNAPSHOT_PREV_MONTHS + 1)]
+
+    receipts = [r for r in _light_receipts(db, user.id) if _snapshot_day(r)[:7] in window_set]
+    attach_base_rates(db, receipts, base)
+    by_id = {r.id: r for r in receipts}
+
+    month_totals = {m: {"month": m, "total": 0.0, "receipts": 0} for m in window}
+    unconverted: Dict[str, int] = {}
+    stores: Dict[str, Dict[str, Any]] = {}
+    # Мелкие покупки этого месяца по (категория чека, магазин)
+    kzt_per_base = 1.0 if base == "KZT" else rates.rate_to_kzt(db, base, today.isoformat(), fetch=False)
+    small_limit = SMALL_PURCHASE_KZT / kzt_per_base if kzt_per_base else None
+    small: Dict[tuple, Dict[str, Any]] = {}
+    for r in receipts:
+        if r.rate_to_base is None:
+            cur = r.currency or DEFAULT_CURRENCY
+            unconverted[cur] = unconverted.get(cur, 0) + 1
+            continue
+        value = (r.total or 0.0) * r.rate_to_base
+        m = _snapshot_day(r)[:7]
+        month_totals[m]["total"] += value
+        month_totals[m]["receipts"] += 1
+        name = _store_name(r)
+        if name:
+            entry = stores.setdefault(name.lower(), {"name": name, "total": 0.0, "count": 0})
+            entry["total"] += value
+            entry["count"] += 1
+        if m == month and small_limit is not None and 0 < value < small_limit:
+            group = small.setdefault((r.category_id, name), {
+                "category_id": r.category_id, "store": name or None, "count": 0, "total": 0.0,
+            })
+            group["count"] += 1
+            group["total"] += value
+
+    # Траты по категориям и месяцам: позиции — по сумме позиций, чек без позиций — целиком (как в аналитике)
+    spent: Dict[tuple, float] = {}
+    receipts_in_category: Dict[Optional[int], set] = {}
+    with_items = set()
+
+    def add(category_id: Optional[int], r: Any, amount: float) -> None:
+        m = _snapshot_day(r)[:7]
+        spent[(category_id, m)] = spent.get((category_id, m), 0.0) + amount
+        if m == month:
+            receipts_in_category.setdefault(category_id, set()).add(r.id)
+
+    for receipt_id, category_id, amount in _item_sums(db, user.id):
+        r = by_id.get(receipt_id)
+        if r is None:
+            continue
+        with_items.add(receipt_id)
+        if r.rate_to_base is not None:
+            add(category_id, r, (amount or 0.0) * r.rate_to_base)
+    for r in receipts:
+        if r.id not in with_items and r.rate_to_base is not None:
+            add(r.category_id, r, (r.total or 0.0) * r.rate_to_base)
+
+    limits = {b.category_id: b.limit for b in get_user_budgets(db, user.id)}
+    categories = []
+    for c in get_categories(db, user.id):
+        row = {
+            "id": c.id,
+            "name": c.name,
+            "this_month": round(spent.get((c.id, month), 0.0), 2),
+            "prev_months": [round(spent.get((c.id, m), 0.0), 2) for m in prev],
+            "limit": limits.get(c.id),
+            "receipts": len(receipts_in_category.get(c.id, ())),
+        }
+        # Категории без трат за полгода и без лимита ИИ не нужны
+        if row["limit"] is not None or any(v for (cid, _), v in spent.items() if cid == c.id):
+            categories.append(row)
+
+    categorized_total = sum(spent.values())
+    uncategorized = sum(v for (cid, _), v in spent.items() if cid is None)
+
+    return {
+        "base_currency": base,
+        "today": today.isoformat(),
+        "months": [{**m, "total": round(m["total"], 2)} for m in month_totals.values()],
+        "categories": categories,
+        "total_limit": limits.get(None),
+        "top_stores": [
+            {**s, "total": round(s["total"], 2)}
+            for s in sorted(stores.values(), key=lambda s: s["total"], reverse=True)[:SNAPSHOT_TOP_STORES]
+        ],
+        "small_purchases": [
+            {**g, "total": round(g["total"], 2)}
+            for g in sorted(small.values(), key=lambda g: g["count"], reverse=True)[:SNAPSHOT_SMALL_GROUPS]
+        ],
+        "uncategorized_share": round(uncategorized / categorized_total, 3) if categorized_total > 0 else 0.0,
+        "unconverted": [{"currency": c, "count": n} for c, n in sorted(unconverted.items())],
+    }
+
+
+def snapshot_hash(snapshot: Dict[str, Any]) -> str:
+    """Хеш сводки без точного дня: в пределах месяца те же данные — тот же анализ (B.2.4)."""
+    stable = {**snapshot, "today": str(snapshot.get("today", ""))[:7]}
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+# --- Сохранённые анализы (B.2.3) ---
+
+INSIGHTS_KEEP = 3
+
+
+def get_latest_insight(db: Session, user_id: int) -> Optional[models.Insight]:
+    return (
+        db.query(models.Insight)
+        .filter(models.Insight.user_id == user_id)
+        .order_by(models.Insight.created_at.desc(), models.Insight.id.desc())
+        .first()
+    )
+
+
+def save_insight(db: Session, user_id: int, model: str, data: Dict[str, Any], digest: str) -> models.Insight:
+    """Новый анализ; старше последних INSIGHTS_KEEP удаляются."""
+    insight = models.Insight(user_id=user_id, model=model[:100], data=data, snapshot_hash=digest)
+    db.add(insight)
+    db.flush()
+    old = (
+        db.query(models.Insight.id)
+        .filter(models.Insight.user_id == user_id)
+        .order_by(models.Insight.created_at.desc(), models.Insight.id.desc())
+        .offset(INSIGHTS_KEEP)
+        .all()
+    )
+    if old:
+        db.query(models.Insight).filter(models.Insight.id.in_([row.id for row in old])).delete(synchronize_session=False)
+    db.commit()
+    db.refresh(insight)
+    return insight

@@ -307,7 +307,7 @@ class TestCurrencyAPI(unittest.TestCase):
         """После ошибки сети повторное сохранение за тот же день не ждёт Нацбанк снова."""
         mock_fetch.side_effect = Exception("No network")
         for _ in range(2):
-            r = self.client.post("/api/receipts/save", json={"date": "2026-10-08", "currency": "USD", "total": 5.0}, headers=self.headers_a)
+            r = self.client.post("/api/receipts/save", json={"date": "2026-10-08", "currency": "USD", "total": 5.0, "allow_duplicate": True}, headers=self.headers_a)
             self.assertEqual(r.status_code, 200)
             self.assertIsNone(r.json()["rate_to_kzt"])
         self.assertEqual(mock_fetch.call_count, 1)
