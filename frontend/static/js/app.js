@@ -249,7 +249,7 @@ const STATUS_TEXT = {
   503: 'Сервер временно недоступен. Попробуйте позже',
   504: 'Сервер не ответил вовремя. Попробуйте ещё раз',
 };
-const FIELD_NAMES = { email: 'Email', password: 'Пароль', full_name: 'Имя', name: 'Название товара', store: 'Магазин', category: 'Категория', total: 'Итог', quantity: 'Количество', price_per_unit: 'Цена', total_price: 'Сумма' };
+const FIELD_NAMES = { email: 'Email', password: 'Пароль', full_name: 'Имя', name: 'Название товара', store: 'Магазин', category: 'Категория', total: 'Итог', quantity: 'Количество', price_per_unit: 'Цена', total_price: 'Сумма', date: 'Дата покупки', time: 'Время', currency: 'Валюта' };
 const hasCyrillic = s => /[а-яё]/i.test(s);
 // Ошибки валидации FastAPI приходят списком на английском или с приставкой «Value error,»
 function validationMessage(d) {
@@ -267,6 +267,8 @@ function makeError(status, data) {
   const detail = Array.isArray(data.detail) ? data.detail.map(validationMessage).join('; ') : data.detail;
   const err = new Error((typeof detail === 'string' && detail) || STATUS_TEXT[status] || `Ошибка сервера (${status})`);
   err.status = status;
+  // Тело ответа целиком: например, retry_after у 429 от /api/insights
+  err.data = data;
   return err;
 }
 function handleResponse(status, data, token) {
@@ -368,6 +370,8 @@ function downloadJson(obj, filename) {
 }
 function setUser(user) {
   currentUser = user;
+  // Другой пользователь — рекомендации загружаем заново; тот же (после PATCH /api/auth/me) — оставляем
+  if (insights.userId !== user.id) { resetInsights(user.id); loadInsights(); }
   rememberAccount(getToken(), user);
   const name = user.full_name || user.email;
   paintAvatar($('userAvatar'), user);
@@ -384,6 +388,7 @@ function setUser(user) {
 }
 function setGuest() {
   currentUser = null; receipts = []; budgets = emptyBudgets(); budgetsLocal = false; categoryRules = [];
+  resetInsights(null);
   closeAccountMenu(); closeReceipt(); closeBudgetEditor(); closeCategoryModals();
   loadCategories();
   $('loginBtn').hidden = false;
@@ -405,7 +410,7 @@ function renderAccess() {
   if (guest && !onHome) showPage('home');
   else if (!guest && onHome) showPage('upload');
 }
-function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); }
+function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); renderInsights(); }
 function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
 
 // --- Смена аккаунта ---
@@ -576,7 +581,7 @@ $('profileHabits').onclick = e => {
   const b = e.target.closest('[data-habit]');
   if (!b) return;
   const habit = b.dataset.habit;
-  if (habit === 'store') { $('historySearch').value = b.dataset.value; $('historyPeriod').value = 'all'; showPage('history'); resetHistoryPage(); }
+  if (habit === 'store') openHistory({ search: b.dataset.value });
   else if (habit === 'category') showPage('categories');
   else if (habit === 'receipt') openReceipt(b.dataset.value);
   else if (habit === 'analysis') { $('analysisPeriod').value = 'month'; showPage('analysis'); }
@@ -780,7 +785,10 @@ $('deleteForm').onsubmit = async e => {
   btn.disabled = true;
   try {
     await apiRequest('/api/auth/me', { method: 'DELETE', body: JSON.stringify({ password: $('deletePassword').value }) });
-    try { localStorage.removeItem(budgetsKey(u.id)); localStorage.removeItem(avatarKey(u)); } catch (e) {}
+    try {
+      localStorage.removeItem(budgetsKey(u.id)); localStorage.removeItem(avatarKey(u));
+      [insightsRetryKey, insightsHiddenKey, insightsSeenKey].forEach(k => localStorage.removeItem(k(u.id)));
+    } catch (e) {}
     forgetAccount(u.id); removeToken(); setGuest(); showPage('home');
     toast('Аккаунт удалён');
   } catch (err) {
@@ -928,6 +936,12 @@ function toDraft(src) {
     // Откуда распознавание взяло валюту: symbol | country | default (у сохранённых чеков нет)
     currency_source: src.currency_source || null,
     image_path: src.image_path || null,
+    // id сохранённого чека с тем же фото или фискальным номером — сервер сообщает при распознавании (C.2)
+    duplicate_of: src.duplicate_of ?? null,
+    // photo | manual: без фото чек считается введённым вручную (так же решает сервер)
+    source: src.source || (src.image_path ? 'photo' : 'manual'),
+    // Итог считается из позиций, пока его не поменяли руками; у распознанного и сохранённого чека итог свой
+    totalAuto: !(num(src.total) > 0),
     items: (src.items || []).map(it => {
       const quantity = it.quantity == null ? 1 : num(it.quantity);
       const total = it.total_price == null ? round2(quantity * num(it.price_per_unit)) : round2(it.total_price);
@@ -946,6 +960,8 @@ function toPayload(draft) {
       // Есть id — отправляем его; нет (гость) — название, сервер найдёт категорию пользователя
       if (i.category_id != null) item.category_id = i.category_id;
       else item.category = i.category || null;
+      // Откуда категория: ai | keywords | rule | user (PROFILE_TASKS.md, п. 2.1). Старый сервер поле пропустит
+      if (i.category_source) item.category_source = i.category_source;
       return item;
     });
   // Категорию чека сервер вычисляет сам — по позиции с наибольшей суммой
@@ -956,21 +972,79 @@ function toPayload(draft) {
     total: round2(draft.total),
     currency: draft.currency,
     image_path: draft.image_path,
+    source: draft.image_path ? 'photo' : 'manual',
     items,
   };
 }
-// Текст ошибки или null, если черновик можно сохранять
+// Пределы — те же, что проверяет сервер (NEXT_WEEK_TASKS.md, A.2.2)
+const MAX_AMOUNT = 1e9, MAX_QUANTITY = 100000;
+// Текст ошибки или null, если черновик можно сохранять; field — поле позиции index, куда поставить фокус
 function draftProblem(draft) {
+  const named = draft.items.filter(i => i.name.trim());
+  if (!named.length && !(num(draft.total) > 0)) return { message: 'Добавьте хотя бы одну позицию с названием или укажите итог чека', index: draft.items.length ? 0 : null };
   const unnamed = draft.items.findIndex(i => !i.name.trim() && num(i.total_price));
   if (unnamed >= 0) return { message: `У позиции №${unnamed + 1} нет названия`, index: unnamed };
-  if (draft.items.some(i => num(i.quantity) < 0 || num(i.price_per_unit) < 0 || num(i.total_price) < 0) || num(draft.total) < 0) return { message: 'Суммы и количество не могут быть отрицательными' };
+  const amounts = [num(draft.total), ...draft.items.flatMap(i => [num(i.quantity), num(i.price_per_unit), num(i.total_price)])];
+  if (amounts.some(n => n < 0)) return { message: 'Суммы и количество не могут быть отрицательными' };
+  if (amounts.some(n => n > MAX_AMOUNT)) return { message: 'Слишком большое число: суммы — не больше 1 000 000 000' };
+  const noQty = draft.items.findIndex(i => i.name.trim() && !(num(i.quantity) > 0));
+  if (noQty >= 0) return { message: `У позиции №${noQty + 1} количество должно быть больше нуля`, index: noQty, field: 'quantity' };
+  const bigQty = draft.items.findIndex(i => num(i.quantity) > MAX_QUANTITY);
+  if (bigQty >= 0) return { message: `У позиции №${bigQty + 1} слишком большое количество (не больше ${intText(MAX_QUANTITY)})`, index: bigQty, field: 'quantity' };
   return null;
 }
+// Дата покупки в будущем — не ошибка, но переспрашиваем. false — пользователь передумал сохранять
+function confirmDraft(draft) {
+  if (!draft.date || draft.date <= isoDay(new Date())) return true;
+  const d = parseDate(draft.date);
+  return confirm(`Дата покупки ${d ? d.toLocaleDateString('ru-RU') : draft.date} — в будущем. Точно сохранить?`);
+}
 const numInput = (key, value, label) => `<label>${label}<input class="field" type="number" min="0" step="any" inputmode="decimal" data-k="${key}" value="${esc(value)}"></label>`;
+// Подсказки в редакторе из уже загруженной истории: магазины и товары, у товара — последняя цена и категория
+const HINTS_MAX = 400;
+function historyHints() {
+  const items = new Map(), stores = new Map();
+  receipts.slice().sort((a, b) => String(b.iso || '').localeCompare(String(a.iso || ''))).forEach(r => {
+    const store = String(r.store || '').trim();
+    if (store && !stores.has(store.toLowerCase())) stores.set(store.toLowerCase(), store);
+    (r.items || []).forEach(it => {
+      const name = String(it.name || '').trim(), key = name.toLowerCase();
+      if (!name || items.has(key)) return;
+      items.set(key, { name, price: num(it.price_per_unit ?? it.total_price), currency: curOf(r), category_id: it.category_id ?? null, category: it.category ?? null });
+    });
+  });
+  return { items, stores };
+}
+const datalist = (id, values) => `<datalist id="${esc(id)}">${values.slice(0, HINTS_MAX).map(v => `<option value="${esc(v)}"></option>`).join('')}</datalist>`;
+
+// Автокатегория для вписанных руками названий: POST /api/categorize (NEXT_WEEK_TASKS.md, A.2.3)
+const CATEGORIZE_DELAY_MS = 500;
+// Нет эндпоинта (404/405) — больше не спрашиваем до перезагрузки страницы
+let categorizeSupported = true;
+async function categorizeNames(names) {
+  if (!categorizeSupported || !currentUser) return null;
+  try {
+    const res = await apiRequest('/api/categorize', { method: 'POST', body: JSON.stringify({ items: names.map(name => ({ name })) }) });
+    return Array.isArray(res?.items) ? res.items : null;
+  } catch (e) {
+    if (notSupported(e)) categorizeSupported = false;
+    // 429, сеть, ИИ недоступен — категорию просто не подставляем
+    return null;
+  }
+}
+// Категорию, выбранную руками или взятую из истории (источник неизвестен), автокатегория не трогает
+const AUTO_SOURCES = ['ai', 'keywords', 'rule'];
+const canAutoCategorize = it => it.category_source !== 'user' && (itemCategory(it) === UNCATEGORIZED || AUTO_SOURCES.includes(it.category_source));
+function catSourceHtml(source) {
+  const text = source && CATEGORY_SOURCE_TEXT[source];
+  return text ? `<small class="cat-source">${esc(text)}</small>` : '';
+}
+
 function mountEditor(root, draft) {
+  const hints = historyHints(), listId = root.id + 'Items', storesId = root.id + 'Stores';
   root.innerHTML = `<div class="editor">
     <div class="edit-head">
-      <label>Магазин<input class="field" data-f="store" maxlength="255" value="${esc(draft.store)}" placeholder="Название магазина"></label>
+      <label>Магазин<input class="field" data-f="store" maxlength="255" value="${esc(draft.store)}" placeholder="Название магазина" list="${esc(storesId)}" autocomplete="off"></label>
       <label>Дата покупки<input class="field" type="date" data-f="date" value="${esc(draft.date)}"></label>
       <label>Время<input class="field" type="time" data-f="time" value="${esc(draft.time)}"></label>
     </div>
@@ -981,34 +1055,84 @@ function mountEditor(root, draft) {
       <label>Валюта<select class="field" data-f="currency">${currencyOptions(draft.currency)}</select></label>
       <div class="edit-sum" data-sum aria-live="polite"></div>
     </div>
+    ${datalist(storesId, [...hints.stores.values()])}${datalist(listId, [...hints.items.values()].map(h => h.name))}
   </div>`;
   // Обработчики вешаем на новый элемент, чтобы повторный mountEditor не дублировал их
   const editor = root.firstElementChild;
   const list = editor.querySelector('[data-items]'), sumBox = editor.querySelector('[data-sum]'), totalInput = editor.querySelector('[data-f="total"]');
+  const rowOf = item => list.querySelector(`[data-i="${draft.items.indexOf(item)}"]`);
   const renderItems = () => {
     const sym = currencyInfo(draft.currency).symbol;
     editor.querySelector('[data-total-label]').textContent = `Итог чека, ${sym}`;
     list.innerHTML = draft.items.length ? draft.items.map((it, i) => `<div class="edit-item" data-i="${i}">
       <div class="edit-name">
-        <label>Название<input class="field" data-k="name" maxlength="500" value="${esc(it.name)}" placeholder="Товар или услуга"></label>
+        <label>Название<input class="field" data-k="name" maxlength="500" value="${esc(it.name)}" placeholder="Товар или услуга" list="${esc(listId)}" autocomplete="off"></label>
         <button class="icon-btn remove-item" type="button" data-remove aria-label="Удалить позицию ${esc(it.name || '№' + (i + 1))}">✕</button>
       </div>
       <div class="edit-nums">
         ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
-        <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${it.category_source && CATEGORY_SOURCE_TEXT[it.category_source] ? `<small class="cat-source">${CATEGORY_SOURCE_TEXT[it.category_source]}</small>` : ''}</label>
+        <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${catSourceHtml(it.category_source)}</label>
       </div>
     </div>`).join('') : '<div class="empty">Позиций нет</div>';
     updateSum();
   };
   const updateSum = () => {
-    const sum = itemsSum(draft.items), mismatch = draft.items.length && sumMismatch(sum, num(draft.total), draft.currency);
-    sumBox.innerHTML = `Сумма позиций: <b>${money(sum, draft.currency)}</b>` + (mismatch ? ` — не совпадает с итогом. <button class="text-btn" type="button" data-fix-total>Сделать итогом</button>` : '');
+    const sum = itemsSum(draft.items);
+    // Итог не трогали руками — он равен сумме позиций
+    if (draft.totalAuto) { draft.total = sum; totalInput.value = sum; }
+    const diff = round2(num(draft.total) - sum), mismatch = draft.items.length && sumMismatch(sum, num(draft.total), draft.currency);
+    sumBox.innerHTML = `Сумма позиций: <b>${money(sum, draft.currency)}</b>` + (mismatch
+      ? ` — итог не совпадает с позициями на ${money(Math.abs(diff), draft.currency)}. <button class="text-btn" type="button" data-fix-total>Сделать итогом</button>`
+      : '');
+  };
+  // Категория в строке без перерисовки списка, чтобы не терять фокус в поле ввода
+  const showCategory = item => {
+    const row = rowOf(item);
+    if (!row) return;
+    const select = row.querySelector('[data-k="category"]');
+    select.value = catKey(itemCategory(item));
+    row.querySelector('.cat-source')?.remove();
+    select.insertAdjacentHTML('afterend', catSourceHtml(item.category_source));
+  };
+  const scheduleCategorize = item => {
+    clearTimeout(item._catTimer);
+    const name = item.name.trim();
+    if (name.length < 2 || !canAutoCategorize(item) || !categorizeSupported || !currentUser) return;
+    item._catTimer = setTimeout(async () => {
+      const found = (await categorizeNames([name]))?.[0];
+      // Пока ждали ответ, строку удалили, переименовали или выбрали категорию руками
+      if (!found || !draft.items.includes(item) || item.name.trim() !== name || !canAutoCategorize(item)) return;
+      if (found.category_id == null && !found.category) return;
+      Object.assign(item, { category_id: found.category_id ?? null, category: found.category ?? null, category_source: found.category_source || 'ai' });
+      showCategory(item);
+    }, CATEGORIZE_DELAY_MS);
+  };
+  // Выбрали товар из подсказки: последняя цена (если валюта та же) и категория из истории
+  const applyHint = (item, row, hint) => {
+    if (hint.currency === draft.currency && hint.price > 0 && !num(item.price_per_unit)) {
+      item.price_per_unit = round2(hint.price);
+      item.total_price = round2(num(item.quantity) * item.price_per_unit);
+      row.querySelector('[data-k="price_per_unit"]').value = item.price_per_unit;
+      row.querySelector('[data-k="total_price"]').value = item.total_price;
+      updateSum();
+    }
+    if (item.category_source === 'user') return;
+    const cat = hint.category_id != null ? categoryById(hint.category_id) : categories.find(c => c.name === hint.category) || UNCATEGORIZED;
+    if (cat === UNCATEGORIZED) { scheduleCategorize(item); return; }
+    clearTimeout(item._catTimer);
+    Object.assign(item, { category_id: cat.id, category: cat.name, category_source: null });
+    showCategory(item);
+  };
+  const addItem = () => {
+    draft.items.push({ name: '', quantity: 1, price_per_unit: 0, total_price: 0, category_id: null, category: null, category_source: null });
+    renderItems();
+    list.querySelector(`[data-i="${draft.items.length - 1}"] [data-k="name"]`).focus();
   };
   editor.addEventListener('input', e => {
     const t = e.target;
     if (t.dataset.f) {
       draft[t.dataset.f] = t.dataset.f === 'total' ? num(t.value) : t.value;
-      if (t.dataset.f === 'total') updateSum();
+      if (t.dataset.f === 'total') { draft.totalAuto = false; updateSum(); }
       // Подписи «Цена, $» и сумма позиций — в новой валюте
       if (t.dataset.f === 'currency') renderItems();
       return;
@@ -1017,31 +1141,55 @@ function mountEditor(root, draft) {
     if (!row || !t.dataset.k) return;
     const item = draft.items[+row.dataset.i], k = t.dataset.k;
     if (k === 'category') {
-      // Выбрали вручную — пометка «определил ИИ» больше не про эту категорию
+      // Выбрали вручную — автокатегория эту позицию больше не трогает
       const c = categoryByKey(t.value);
-      Object.assign(item, { category_id: c.id, category: c === UNCATEGORIZED ? null : c.name, category_source: null });
+      clearTimeout(item._catTimer);
+      Object.assign(item, { category_id: c.id, category: c === UNCATEGORIZED ? null : c.name, category_source: 'user' });
       row.querySelector('.cat-source')?.remove();
       return;
     }
-    item[k] = k === 'name' ? t.value : num(t.value);
+    if (k === 'name') {
+      item.name = t.value;
+      // Выбор из подсказки приходит без inputType или как insertReplacementText
+      const hint = hints.items.get(t.value.trim().toLowerCase());
+      if (hint && (!e.inputType || e.inputType === 'insertReplacementText')) applyHint(item, row, hint);
+      else scheduleCategorize(item);
+      return;
+    }
+    item[k] = num(t.value);
     // Количество или цена поменялись — пересчитываем сумму строки
     if (k === 'quantity' || k === 'price_per_unit') {
       item.total_price = round2(num(item.quantity) * num(item.price_per_unit));
       row.querySelector('[data-k="total_price"]').value = item.total_price;
     }
-    if (k !== 'name' && k !== 'category') updateSum();
+    // Сумму строки поправили руками — пересчитываем цену за единицу
+    if (k === 'total_price' && num(item.quantity) > 0) {
+      item.price_per_unit = round2(item.total_price / num(item.quantity));
+      row.querySelector('[data-k="price_per_unit"]').value = item.price_per_unit;
+    }
+    updateSum();
+  });
+  // Enter в сумме или категории строки: в последней строке — новая позиция, иначе — к следующей
+  editor.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    const row = e.target.closest('[data-i]');
+    if (!row || !['total_price', 'category'].includes(e.target.dataset.k)) return;
+    e.preventDefault();
+    const i = +row.dataset.i;
+    if (i === draft.items.length - 1) addItem();
+    else list.querySelector(`[data-i="${i + 1}"] [data-k="name"]`)?.focus();
   });
   editor.addEventListener('click', e => {
-    if (e.target.closest('[data-add]')) {
-      draft.items.push({ name: '', quantity: 1, price_per_unit: 0, total_price: 0, category_id: null, category: null, category_source: null });
+    if (e.target.closest('[data-add]')) addItem();
+    else if (e.target.closest('[data-remove]')) {
+      const i = +e.target.closest('[data-i]').dataset.i;
+      clearTimeout(draft.items[i]._catTimer);
+      draft.items.splice(i, 1);
       renderItems();
-      list.querySelector(`[data-i="${draft.items.length - 1}"] [data-k="name"]`).focus();
-    } else if (e.target.closest('[data-remove]')) {
-      draft.items.splice(+e.target.closest('[data-i]').dataset.i, 1);
-      renderItems();
+      // Фокус — на соседнюю строку или на «Добавить позицию»
+      (list.querySelector(`[data-i="${Math.min(i, draft.items.length - 1)}"] [data-k="name"]`) || editor.querySelector('[data-add]')).focus();
     } else if (e.target.closest('[data-fix-total]')) {
-      draft.total = itemsSum(draft.items);
-      totalInput.value = draft.total;
+      draft.totalAuto = true;
       updateSum();
       totalInput.focus();
     }
@@ -1050,10 +1198,109 @@ function mountEditor(root, draft) {
 }
 function focusDraftProblem(root, problem) {
   if (problem.index == null) return;
-  root.querySelector(`[data-i="${problem.index}"] [data-k="name"]`)?.focus();
+  root.querySelector(`[data-i="${problem.index}"] [data-k="${problem.field || 'name'}"]`)?.focus();
+}
+
+// --- Проверка на дубликат (NEXT_WEEK_TASKS.md, задача C) ---
+// Тот же чек, сохранённый второй раз: та же валюта и итог, та же дата, время в пределах 2 минут,
+// тот же магазин и почти те же позиции. Правила совпадают с crud.find_duplicate на сервере (C.2)
+const DUP_TIME_MIN = 2, DUP_ITEMS_MIN = 0.6, DUP_NODATE_ITEMS_MIN = 0.8;
+// Название магазина или товара для сравнения: регистр, ё, знаки и правовая форма (ТОО, ИП…) не важны
+const normText = s => (' ' + String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9әғқңөұүһі]+/gi, ' ') + ' ')
+  .replace(/ (тоо|ип|ао|too|llp|ltd|llc)(?= )/g, ' ').replace(/\s+/g, ' ').trim();
+const minutesOf = s => { const m = String(s || '').match(/(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
+const sameStore = (a, b) => !a || !b || a === b || a.includes(b) || b.includes(a);
+// Доля совпавших позиций (название + сумма строки); null — у одного из чеков позиций нет
+function itemsSimilarity(a, b) {
+  const key = i => normText(i.name) + '|' + Math.round(num(i.total_price));
+  const ka = a.filter(i => String(i.name || '').trim()).map(key), kb = b.filter(i => String(i.name || '').trim()).map(key);
+  if (!ka.length || !kb.length) return null;
+  const left = {};
+  kb.forEach(k => { left[k] = (left[k] || 0) + 1; });
+  const same = ka.filter(k => left[k] > 0 && left[k]--).length;
+  return same / Math.max(ka.length, kb.length);
+}
+// Самый похожий сохранённый чек или null. excludeId — сам редактируемый чек
+function findDuplicate(draft, excludeId = null) {
+  const total = num(draft.total), cur = draft.currency;
+  if (!(total > 0)) return null;
+  const store = normText(draft.store), date = draft.date || '', time = minutesOf(draft.time);
+  let best = null, bestScore = -1;
+  receipts.forEach(r => {
+    if (excludeId != null && String(r.id) === String(excludeId)) return;
+    if (curOf(r) !== cur || sumMismatch(num(r.total), total, cur)) return;
+    const rDate = toIsoDate(r.date), rTime = minutesOf(r.time), rStore = normText(r.store);
+    if (date && rDate && date !== rDate) return;
+    if (time != null && rTime != null && Math.abs(time - rTime) > DUP_TIME_MIN) return;
+    if (!sameStore(store, rStore)) return;
+    const sim = itemsSimilarity(draft.items, r.items || []);
+    // Дата неизвестна у одного из чеков — нужен почти тот же состав
+    if (!(date && rDate) && !(sim != null && sim >= DUP_NODATE_ITEMS_MIN)) return;
+    if (sim != null && sim < DUP_ITEMS_MIN) return;
+    const score = (sim ?? .5) + (time != null && rTime != null ? 1 : 0) + (store && rStore ? 1 : 0);
+    if (score > bestScore) { best = r; bestScore = score; }
+  });
+  return best;
+}
+const receiptBrief = r => [r.store || 'Магазин не определён', fmtPurchase(r) || fmtDateTime(r.created_at), money(r.total, curOf(r))].join(' · ');
+// Окно «Похоже, этот чек уже есть»: 'cancel' | 'open' | 'save'. existing может быть null (сервер не прислал чек)
+let duplicateResolve = null;
+function askDuplicate(existing, canOpen = true) {
+  const items = existing?.items?.length || 0;
+  $('duplicateText').textContent = existing
+    ? 'В истории уже есть чек с той же суммой, датой и магазином. Если это другая покупка, сохраните его ещё раз.'
+    : 'Сервер нашёл в истории такой же чек. Если это другая покупка, сохраните его ещё раз.';
+  $('duplicateCard').hidden = !existing;
+  $('duplicateCard').innerHTML = existing
+    ? `<b>${esc(existing.store || 'Магазин не определён')}${isManual(existing) ? ' ' + MANUAL_BADGE : ''}</b><span>${esc(fmtPurchase(existing) || '')}</span><strong>${esc(money(existing.total, curOf(existing)))}</strong><small>${items} ${plural(items, 'позиция', 'позиции', 'позиций')} · сохранён ${esc(fmtDateTime(existing.created_at))}</small>`
+    : '';
+  $('duplicateOpen').hidden = !existing || !canOpen;
+  duplicateResolve?.('cancel');
+  openModal('duplicateModal', $('duplicateCancel'));
+  return new Promise(resolve => { duplicateResolve = resolve; });
+}
+function resolveDuplicate(choice) {
+  const resolve = duplicateResolve;
+  duplicateResolve = null;
+  closeModal('duplicateModal');
+  resolve?.(choice);
+}
+$('duplicateCancel').onclick = $('duplicateClose').onclick = () => resolveDuplicate('cancel');
+$('duplicateOpen').onclick = () => resolveDuplicate('open');
+$('duplicateSave').onclick = () => resolveDuplicate('save');
+$('duplicateModal').onclick = e => { if (e.target.id === 'duplicateModal') resolveDuplicate('cancel'); };
+// Сохранение с проверкой: сначала по загруженной истории, затем сервер может ответить 409 (C.2).
+// «Всё равно сохранить» — повтор с allow_duplicate: true. Возвращает {saved} или {choice, existing}
+async function sendReceipt(url, method, draft, excludeId = null) {
+  const payload = toPayload(draft), canOpen = excludeId == null;
+  const local = findDuplicate(draft, excludeId);
+  if (local) {
+    const choice = await askDuplicate(local, canOpen);
+    if (choice !== 'save') return { choice, existing: local };
+    payload.allow_duplicate = true;
+  }
+  const send = () => apiRequest(url, { method, body: JSON.stringify(payload) });
+  try { return { saved: await send() }; }
+  catch (e) {
+    if (e.status !== 409 || payload.allow_duplicate) throw e;
+    const id = e.data?.duplicate_of, existing = e.data?.duplicate || receipts.find(r => String(r.id) === String(id)) || null;
+    const choice = await askDuplicate(existing, canOpen);
+    if (choice !== 'save') return { choice, existing };
+    payload.allow_duplicate = true;
+    return { saved: await send() };
+  }
+}
+// Открыть уже сохранённый чек; если его нет в загруженной истории (прислал сервер) — сначала обновить историю
+async function openExisting(existing) {
+  if (!existing) return;
+  if (!receipts.some(r => String(r.id) === String(existing.id))) await loadReceipts();
+  openReceipt(existing.id);
 }
 
 // --- Подробности покупки (чека) ---
+// Чек, введённый без фото (поле source с сервера, NEXT_WEEK_TASKS.md, A.2.1)
+const isManual = r => r?.source === 'manual';
+const MANUAL_BADGE = '<span class="pill pill-manual">вручную</span>';
 let openedReceipt = null, editDraft = null;
 function openReceipt(id) {
   const r = receipts.find(x => String(x.id) === String(id));
@@ -1075,7 +1322,7 @@ function openReceipt(id) {
       ? 'Курс на дату покупки не найден — чек не учитывается в итогах, аналитике и бюджетах.'
       : `≈ ${money(converted)} по курсу НБ РК на ${day}`;
   }
-  $('rmMeta').innerHTML = [r.category, foreign && cur, items.length + ' позиций', 'Сохранён ' + fmtDateTime(r.created_at)].filter(Boolean).map(t => `<span class="pill">${esc(t)}</span>`).join('');
+  $('rmMeta').innerHTML = (isManual(r) ? MANUAL_BADGE : '') + [r.category, foreign && cur, items.length + ' позиций', 'Сохранён ' + fmtDateTime(r.created_at)].filter(Boolean).map(t => `<span class="pill">${esc(t)}</span>`).join('');
   const photo = $('rmPhoto');
   if (r.image_path) { photo.onerror = () => { photo.hidden = true; }; photo.src = r.image_path; photo.hidden = false; }
   else { photo.hidden = true; photo.removeAttribute('src'); }
@@ -1103,10 +1350,13 @@ async function saveEditedReceipt() {
   $('rmEditError').hidden = true;
   const problem = draftProblem(editDraft);
   if (problem) { showFormError('rmEditError', problem.message); focusDraftProblem($('rmEditor'), problem); return; }
+  if (!confirmDraft(editDraft)) return;
   const id = openedReceipt.id, btn = $('rmEditSave');
   btn.disabled = true;
   try {
-    await apiRequest('/api/receipts/' + id, { method: 'PUT', body: JSON.stringify(toPayload(editDraft)) });
+    // Правка могла сделать чек копией другого (например, поменяли дату) — спрашиваем
+    const res = await sendReceipt('/api/receipts/' + id, 'PUT', editDraft, id);
+    if (!res.saved) return;
     await loadReceipts();
     toast('Чек обновлён');
     openReceipt(id);
@@ -1143,6 +1393,8 @@ async function loadReceipts() {
   try {
     receipts = (await fetchAllReceipts()).map(r => ({ ...r, iso: receiptIso(r) }));
     rerender();
+    // Чеки поменялись — обновляем пометку «устарело» у рекомендаций
+    if (insights.loaded && !insights.unsupported) loadInsights();
   } catch (e) { toast('Не удалось загрузить историю: ' + e.message); }
 }
 async function checkAuthOnStartup() {
@@ -1171,7 +1423,8 @@ function closeModal(id) {
   if (opener && document.contains(opener) && !opener.closest('[hidden]')) opener.focus();
 }
 function trapFocus(e) {
-  const modal = [...document.querySelectorAll('.modal-backdrop')].find(m => !m.hidden);
+  // Верхнее открытое окно — последнее в разметке (окно дубликата открывается поверх окна чека)
+  const modal = [...document.querySelectorAll('.modal-backdrop')].filter(m => !m.hidden).pop();
   if (!modal) return;
   const els = [...modal.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
   if (!els.length) return;
@@ -1242,7 +1495,11 @@ function showPage(name) {
   closeMenu();
   if (name === 'history') renderHistory();
   if (name === 'categories') renderCategories();
-  if (name === 'analysis') renderAnalysis();
+  if (name === 'analysis') {
+    renderAnalysis(); renderInsights();
+    // Могли появиться новые чеки или лимиты — сервер скажет, устарели ли советы
+    if (currentUser && insights.loaded && !insights.unsupported) loadInsights();
+  }
   if (name === 'budgets') renderBudgets();
   if (name === 'profile') { renderProfile(true); fillProfileForm(); }
   else $('heatTip').hidden = true;
@@ -1267,7 +1524,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Tab') { trapFocus(e); return; }
   if (e.key !== 'Escape') return;
   const catMenu = $('categoryGrid').querySelector('.cat-menu:not([hidden])');
-  if (!$('receiptModal').hidden) closeReceipt();
+  if (!$('duplicateModal').hidden) resolveDuplicate('cancel');
+  else if (!$('receiptModal').hidden) closeReceipt();
   else if (!$('avatarModal').hidden) closeAvatar();
   else if (!$('savedModal').hidden) closeModal('savedModal');
   else if (!$('authModal').hidden) closeAuth();
@@ -1366,7 +1624,7 @@ function startSteps(withUpload) {
 function stopSteps() { clearInterval(stepsTimer); stepsTimer = null; $('analyzeSteps').hidden = true; }
 function setAnalyzing(on, test) {
   analyzing = on;
-  ['analyzeBtn', 'removeBtn', 'testBtn', 'chooseBtn', 'cameraBtn'].forEach(id => { $(id).disabled = on; });
+  ['analyzeBtn', 'removeBtn', 'testBtn', 'chooseBtn', 'cameraBtn', 'manualBtn'].forEach(id => { $(id).disabled = on; });
   $('dropzone').classList.toggle('busy', on);
   $('dropzone').setAttribute('aria-busy', on);
   $('analyzeBtn').textContent = on && !test ? 'Распознаём…' : 'Распознать чек';
@@ -1401,36 +1659,72 @@ window.addEventListener('beforeunload', e => { if (analyzing) e.preventDefault()
 // --- Результат распознавания ---
 function renderResult(data) {
   lastResult = toDraft(data);
-  $('resultPlaceholder').hidden = true;
-  $('resultContent').hidden = false;
-  mountEditor($('resultEditor'), lastResult);
+  showResultEditor();
   // Валюту не нашли на самом чеке — просим проверить
   const name = currencyInfo(lastResult.currency).name;
   const hint = { default: `Валюта на чеке не найдена, поставили «${name}». Проверьте поле «Валюта» под позициями.`, country: `Валюта определена по стране чека: «${name}». Если платили в другой валюте, поменяйте её под позициями.` }[lastResult.currency_source];
   $('currencyHint').textContent = hint || '';
   $('currencyHint').hidden = !hint;
-  if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  scrollToResult();
 }
+const scrollToResult = () => { if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+function showResultEditor() {
+  $('resultPlaceholder').hidden = true;
+  $('resultContent').hidden = false;
+  $('resultError').hidden = true;
+  $('resultKicker').lastChild.textContent = lastResult.image_path || lastResult.currency_source ? 'Результат' : 'Новый чек';
+  mountEditor($('resultEditor'), lastResult);
+  showDuplicateHint();
+}
+// Сразу после распознавания: тот же чек уже есть в истории (по фото/фискальному номеру от сервера или по содержимому)
+function showDuplicateHint() {
+  const d = lastResult, byServer = d?.duplicate_of != null ? receipts.find(r => String(r.id) === String(d.duplicate_of)) : null;
+  const dup = d ? byServer || findDuplicate(d) : null;
+  $('duplicateHint').hidden = !dup;
+  $('duplicateHint').dataset.id = dup ? dup.id : '';
+  if (dup) $('duplicateHintText').textContent = (byServer ? 'Этот чек уже загружали: ' : 'Похоже, этот чек уже сохранён: ') + receiptBrief(dup) + '.';
+}
+$('duplicateHintOpen').onclick = () => { const id = $('duplicateHint').dataset.id; if (id) openReceipt(id); };
+// «Ввести вручную»: пустой черновик — сегодня, сейчас, основная валюта, одна пустая строка
+function startManualReceipt() {
+  if (analyzing) return;
+  if (lastResult && !confirm('Заменить текущий черновик чека пустым?')) return;
+  const now = new Date();
+  lastResult = toDraft({ date: isoDay(now), time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`, currency: baseCurrency(), total: 0, items: [{ name: '', quantity: 1, price_per_unit: 0, total_price: 0 }] });
+  showResultEditor();
+  $('currencyHint').hidden = true;
+  scrollToResult();
+  $('resultEditor').querySelector('[data-f="store"]').focus({ preventScroll: true });
+}
+$('manualBtn').onclick = startManualReceipt;
 // Обратное к renderResult: после сохранения чек нельзя сохранить второй раз
 function resetResult() {
   lastResult = null;
   $('resultContent').hidden = true;
   $('resultPlaceholder').hidden = false;
   $('resultEditor').innerHTML = '';
+  $('resultError').hidden = true;
+  $('duplicateHint').hidden = true;
+  $('resultKicker').lastChild.textContent = 'Результат';
   $('currencyHint').hidden = true;
   clearFile();
 }
 // Гость может распознавать чеки, а для сохранения просим войти
 async function saveReceipt() {
   if (!lastResult) return;
+  $('resultError').hidden = true;
   const problem = draftProblem(lastResult);
-  if (problem) { toast(problem.message); focusDraftProblem($('resultEditor'), problem); return; }
+  if (problem) { showFormError('resultError', problem.message); focusDraftProblem($('resultEditor'), problem); return; }
   if (!getToken()) { pendingSave = true; openAuth('login'); toast('Войдите, чтобы сохранить чек'); return; }
+  if (!confirmDraft(lastResult)) return;
   const btn = $('saveReceiptBtn');
   btn.disabled = true;
   try {
     // В ответе — сохранённый чек с курсом к основной валюте (rate_to_base), он нужен для бюджетов
-    const saved = await apiRequest('/api/receipts/save', { method: 'POST', body: JSON.stringify(toPayload(lastResult)) });
+    const res = await sendReceipt('/api/receipts/save', 'POST', lastResult);
+    // Не стали сохранять копию: черновик остаётся, его можно поправить или убрать
+    if (!res.saved) { if (res.choice === 'open') openExisting(res.existing); return; }
+    const saved = res.saved;
     await loadReceipts();
     resetResult();
     const alert = budgetAlert(saved);
@@ -1439,6 +1733,8 @@ async function saveReceipt() {
     openModal('savedModal', $('savedToHistory'));
   } catch (e) {
     if (!getToken()) { pendingSave = true; openAuth('login'); }
+    // Ошибки проверки на сервере (422) — рядом с редактором, как есть
+    showFormError('resultError', 'Не удалось сохранить: ' + e.message);
     toast('Ошибка при сохранении: ' + e.message);
   } finally { btn.disabled = false; }
 }
@@ -1465,16 +1761,38 @@ const inPeriod = (r, p) => {
 };
 const filtered = (p = 'all') => receipts.filter(r => inPeriod(r, p));
 const matchesSearch = (r, q) => !q || String(r.store || '').toLowerCase().includes(q) || (r.items || []).some(i => String(i.name || '').toLowerCase().includes(q));
+// Фильтр по категории: чеки, где есть позиция этой категории (ключ catKey, 'all' — все)
+const historyCategory = () => $('historyCategory').value;
+const hasCategory = (r, key) => key === 'all' || (r.items || []).some(i => catKey(itemCategory(i)) === key);
 const historyList = () => {
-  const q = $('historySearch').value.trim().toLowerCase();
-  return filtered($('historyPeriod').value).filter(r => matchesSearch(r, q));
+  const q = $('historySearch').value.trim().toLowerCase(), cat = historyCategory();
+  return filtered($('historyPeriod').value).filter(r => matchesSearch(r, q) && hasCategory(r, cat));
 };
+// Список категорий в фильтре — по текущим категориям; выбранная сохраняется, если она ещё есть
+function fillHistoryCategories() {
+  const sel = $('historyCategory'), cur = sel.value, keys = [...categories, UNCATEGORIZED].map(catKey);
+  sel.innerHTML = '<option value="all">Все категории</option>' + categoryOptions(null);
+  sel.value = keys.includes(cur) ? cur : 'all';
+}
+// Открыть историю с фильтром: из привычек профиля и карточек рекомендаций
+function openHistory({ search = '', period = 'all', category = 'all' } = {}) {
+  $('historySearch').value = search;
+  $('historyPeriod').value = period;
+  fillHistoryCategories();
+  $('historyCategory').value = category;
+  if ($('historyCategory').value !== category) $('historyCategory').value = 'all';
+  showPage('history');
+  resetHistoryPage();
+}
 function renderHistory() {
-  const list = historyList(), sum = baseSummary(list), searching = !!$('historySearch').value.trim();
+  fillHistoryCategories();
+  const list = historyList(), sum = baseSummary(list), searching = !!$('historySearch').value.trim() || historyCategory() !== 'all';
+  // С фильтром по категории «Всего потрачено» — только позиции этой категории
+  const cat = historyCategory(), total = cat === 'all' ? sum.total : sumsByCategory(list)[cat] || 0;
   // Сводка — в основной валюте; средний чек — по чекам, которые удалось пересчитать
-  $('historyTotal').textContent = approx(money(sum.total), sum.converted);
+  $('historyTotal').textContent = approx(money(total), sum.converted);
   $('historyCount').textContent = list.length;
-  $('historyAverage').textContent = approx(money(sum.counted ? sum.total / sum.counted : 0), sum.converted);
+  $('historyAverage').textContent = approx(money(sum.counted ? total / sum.counted : 0), sum.converted);
   showSkipped('historySkipped', sum.skipped);
   $('exportCsvBtn').disabled = !list.length;
   const shown = list.slice(0, historyShown);
@@ -1483,7 +1801,7 @@ function renderHistory() {
   else if (searching) empty = '<div class="card empty">Ничего не найдено</div>';
   else empty = '<div class="card empty">Чеков пока нет</div>';
   $('historyList').innerHTML = shown.length
-    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}"><div><h3>${esc(r.store || 'Магазин не определён')}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
+    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}${isManual(r) ? ', введён вручную' : ''}"><div><h3>${esc(r.store || 'Магазин не определён')}${isManual(r) ? ' ' + MANUAL_BADGE : ''}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
     : empty;
   const rest = list.length - shown.length;
   $('historyMore').hidden = rest <= 0;
@@ -1500,7 +1818,7 @@ function renderHistory() {
   });
 }
 const resetHistoryPage = () => { historyShown = HISTORY_PAGE; renderHistory(); };
-$('historyPeriod').onchange = resetHistoryPage;
+$('historyPeriod').onchange = $('historyCategory').onchange = resetHistoryPage;
 let searchTimer = null;
 $('historySearch').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(resetHistoryPage, 200); };
 $('historyMoreBtn').onclick = () => {
@@ -2156,6 +2474,264 @@ $('budgetCancel').onclick = () => { closeBudgetEditor(); $('budgetEditBtn').focu
 $('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) openBudgetEditor(); };
 $('budgetLoginBtn').onclick = () => openAuth('login');
 $('budgetMonth').onchange = renderBudgets;
+
+// --- Рекомендации ИИ (NEXT_WEEK_TASKS.md, B.3) ---
+// Цифры считает сервер, ИИ только пишет текст. Фронт показывает ответ InsightsOut и ничего не пересчитывает.
+// Текст модели выводится только через esc(): в названиях магазинов и товаров может оказаться что угодно
+const INSIGHTS_MIN_RECEIPTS = 5, INSIGHTS_POLL_MS = 2000, INSIGHTS_POLL_MAX = 90;
+const INSIGHT_ICONS = { over_budget: '⚠', budget_forecast: '◷', category_growth: '↗', frequent_small: '☕', recurring: '↻', budget_suggestion: '◎', uncategorized: '◌', unconverted: '¤' };
+// Советы про текущий месяц: «Смотреть траты» открывает историю за месяц
+const INSIGHT_MONTH_TYPES = ['over_budget', 'budget_forecast', 'category_growth', 'frequent_small'];
+// loaded — первый GET прошёл; unsupported — на сервере нет /api/insights (404/405), блок не показываем
+const emptyInsights = userId => ({ userId, loaded: false, unsupported: false, data: null, running: false, error: '', consented: false, retryAt: readInsightsRetry(userId), retryTimer: null, poll: null });
+const insightsRetryKey = id => 'checkai_insights_retry_' + id;
+const insightsHiddenKey = id => 'checkai_insights_hidden_' + id;
+const insightsSeenKey = id => 'checkai_insights_seen_' + id;
+function readInsightsRetry(id) { try { return Number(localStorage.getItem(insightsRetryKey(id))) || 0; } catch (e) { return 0; } }
+const readIdList = key => { try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v.map(String) : []; } catch (e) { return []; } };
+const writeIdList = (key, list) => { try { localStorage.setItem(key, JSON.stringify(list.slice(-200))); } catch (e) {} };
+let insights = emptyInsights(null);
+
+// Заглушка по контракту InsightsOut, пока бэкенд не готов: localStorage.setItem('checkai_insights_stub', '1')
+const INSIGHTS_STUB = (() => { try { return localStorage.getItem('checkai_insights_stub') === '1'; } catch (e) { return false; } })();
+const insightsStub = { data: null, doneAt: 0 };
+function stubInsightsData() {
+  const [a, b] = categories, month = monthKey(new Date()), items = [];
+  if (a) items.push({ id: `over_budget:${a.id}:${month}`, type: 'over_budget', priority: 1, title: `${a.name}: лимит превышен на 7 000 ₸`, text: 'Потрачено 32 000 ₸ при лимите 25 000 ₸. Больше всего — 14 покупок на 21 000 ₸.', category_id: a.id, action: { kind: 'open_history', category_id: a.id } });
+  if (b) items.push({ id: `budget_suggestion:${b.id}:${month}`, type: 'budget_suggestion', priority: 2, title: `Поставить лимит на «${b.name}»`, text: 'Последние 3 месяца вы стабильно тратите 22–24 тысячи. Лимит 25 000 ₸ поможет держать это под контролем.', category_id: b.id, action: { kind: 'set_budget', category_id: b.id, amount: 25000 } });
+  items.push({ id: `uncategorized::${month}`, type: 'uncategorized', priority: 3, title: '18% трат без категории', text: 'Разложите их по категориям — советы и лимиты станут точнее.', category_id: null, action: { kind: 'open_categories' } });
+  return { insights: { summary: 'Это пример по контракту: сервер рекомендаций ещё не подключён.', items }, created_at: new Date().toISOString(), model: 'rules', stale: false };
+}
+const insightsApi = {
+  get: () => INSIGHTS_STUB ? Promise.resolve(insightsStub.data || { insights: null }) : apiRequest('/api/insights'),
+  start: () => {
+    if (!INSIGHTS_STUB) return apiRequest('/api/insights', { method: 'POST' });
+    insightsStub.doneAt = Date.now() + 3000;
+    return Promise.resolve({ task_id: 'stub' });
+  },
+  task: id => {
+    if (!INSIGHTS_STUB) return apiRequest('/api/tasks/' + encodeURIComponent(id));
+    if (Date.now() < insightsStub.doneAt) return Promise.resolve({ status: 'processing' });
+    insightsStub.data = stubInsightsData();
+    return Promise.resolve({ status: 'completed' });
+  },
+};
+
+// Новый пользователь — новое состояние; тот же (после PATCH /api/auth/me) — состояние остаётся
+function resetInsights(userId) {
+  clearTimeout(insights.poll); clearTimeout(insights.retryTimer);
+  insights = emptyInsights(userId);
+}
+async function loadInsights() {
+  const user = currentUser;
+  if (!user) return;
+  try {
+    const data = await insightsApi.get();
+    if (insights.userId !== user.id) return;
+    insights.data = data?.insights ? data : null;
+    insights.unsupported = false;
+  } catch (e) {
+    if (insights.userId !== user.id) return;
+    if (notSupported(e)) insights.unsupported = true;
+  }
+  insights.loaded = true;
+  renderInsights();
+}
+// Согласие хранит сервер: preferences.ai_insights или временная колонка ai_insights_consent (B.2.5).
+// Есть готовый анализ — значит, согласие уже было
+const insightsConsent = () => !!(insights.consented || currentUser?.preferences?.ai_insights || currentUser?.ai_insights_consent || insights.data);
+async function grantInsightsConsent() {
+  const user = currentUser;
+  if (!user || insights.running) return;
+  insights.error = '';
+  if (!INSIGHTS_STUB) {
+    try { await updateMe({ preferences: { ...(user.preferences || {}), ai_insights: true }, ai_insights_consent: true }); }
+    catch (e) {
+      if (!notSupported(e)) { insights.error = updateMeError(e); renderInsights(); return; }
+    }
+  }
+  if (insights.userId !== user.id) return;
+  insights.consented = true;
+  startInsights();
+}
+function setInsightsRetry(seconds) {
+  insights.retryAt = Date.now() + Math.max(60, num(seconds) || 3600) * 1000;
+  try { localStorage.setItem(insightsRetryKey(insights.userId), String(insights.retryAt)); } catch (e) {}
+}
+async function startInsights() {
+  const user = currentUser;
+  if (!user || insights.running || insights.retryAt > Date.now()) return;
+  insights.error = '';
+  insights.running = true;
+  renderInsights();
+  try {
+    const res = await insightsApi.start();
+    if (insights.userId !== user.id) return;
+    if (res?.task_id) { pollInsights(res.task_id, user); return; }
+    // Данные не изменились — сервер сразу вернул прежний анализ
+    if (res?.insights) insights.data = res;
+    insights.running = false;
+  } catch (e) {
+    if (insights.userId !== user.id) return;
+    insights.running = false;
+    if (e.status === 429) setInsightsRetry(e.data?.retry_after ?? e.data?.detail?.retry_after);
+    else if (e.status === 403) { insights.consented = false; insights.error = e.message; }
+    else if (notSupported(e)) insights.error = 'Сервер пока не умеет готовить рекомендации';
+    else insights.error = e.message;
+  }
+  renderInsights();
+}
+// Генерация занимает 5–30 с: опрашиваем GET /api/tasks/{id} раз в 2 с
+function pollInsights(taskId, user) {
+  let tries = 0;
+  const finish = error => {
+    if (insights.userId !== user.id) return;
+    insights.running = false;
+    insights.error = error;
+    renderInsights();
+  };
+  const tick = async () => {
+    if (insights.userId !== user.id) return;
+    let task = null;
+    try { task = await insightsApi.task(taskId); }
+    catch (e) {
+      // Сеть или 5xx — пробуем ещё; задача пропала (404) — сообщаем
+      if (e.status && e.status < 500) return finish(e.status === 404 ? 'Анализ прервался. Попробуйте ещё раз' : e.message);
+    }
+    if (insights.userId !== user.id) return;
+    if (task?.status === 'completed') {
+      await loadInsights();
+      if (!insights.data && task.result?.insights) insights.data = task.result;
+      return finish('');
+    }
+    if (task?.status === 'failed') return finish(task.error || 'Не удалось подготовить советы. Попробуйте позже');
+    if (++tries >= INSIGHTS_POLL_MAX) return finish('Анализ идёт слишком долго. Загляните сюда чуть позже');
+    insights.poll = setTimeout(tick, INSIGHTS_POLL_MS);
+  };
+  insights.poll = setTimeout(tick, INSIGHTS_POLL_MS);
+}
+
+const clip = (s, n) => { const t = String(s ?? '').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const waitText = ms => ms >= 3600e3 ? `${Math.ceil(ms / 3600e3)} ч` : `${Math.max(1, Math.ceil(ms / 60e3))} мин`;
+const insightsModel = m => { const s = String(m || ''); return /^gemini/i.test(s) ? 'Gemini' : /^ollama/i.test(s) ? 'Ollama' : s === 'rules' ? 'базовые правила' : s; };
+// Карточки по приоритету, без скрытых пользователем
+function visibleInsights() {
+  const items = insights.data?.insights?.items;
+  if (!Array.isArray(items) || !insights.userId) return [];
+  const hidden = readIdList(insightsHiddenKey(insights.userId));
+  return items.filter(it => it && it.id != null && !hidden.includes(String(it.id))).sort((a, b) => num(a.priority) - num(b.priority));
+}
+function insightAction(it) {
+  const a = it.action || {}, cat = a.category_id != null ? categoryById(Number(a.category_id)) : null;
+  if (a.kind === 'set_budget') {
+    // Категорию удалили или сумма странная — кнопку не показываем
+    if (!cat || cat === UNCATEGORIZED || !(num(a.amount) > 0)) return '';
+    if (budgets.categories[catKey(cat)] === round2(a.amount)) return '<span class="ins-done">✓ Лимит поставлен</span>';
+    return `<button class="btn small" type="button" data-ins-act="set_budget" data-cat="${esc(catKey(cat))}" data-amount="${esc(round2(a.amount))}">Поставить лимит ${esc(money(a.amount))}</button>`;
+  }
+  if (a.kind === 'open_history') {
+    const key = cat && cat !== UNCATEGORIZED ? catKey(cat) : 'all';
+    return `<button class="btn soft small" type="button" data-ins-act="open_history" data-cat="${esc(key)}" data-period="${INSIGHT_MONTH_TYPES.includes(it.type) ? 'month' : 'all'}">Смотреть траты</button>`;
+  }
+  if (a.kind === 'open_categories') return '<button class="btn soft small" type="button" data-ins-act="open_categories">Разобрать</button>';
+  return '';
+}
+const insightCard = it => `<article class="ins-card" data-insight="${esc(it.id)}">
+    <span class="ins-ico" aria-hidden="true">${esc(INSIGHT_ICONS[it.type] || '✦')}</span>
+    <div class="ins-main">
+      <h3>${esc(clip(it.title, 90))}</h3>
+      <p>${esc(clip(it.text, 400))}</p>
+      <div class="ins-actions">${insightAction(it)}<button class="text-btn" type="button" data-ins-hide aria-label="Скрыть совет «${esc(clip(it.title, 90))}»">Скрыть</button></div>
+    </div>
+  </article>`;
+const INSIGHTS_SKELETON = '<div class="ins-cards" aria-hidden="true">' + '<div class="ins-card ins-skeleton"><span class="ins-ico"></span><div class="ins-main"><i></i><i></i><i></i></div></div>'.repeat(3) + '</div>';
+
+function renderInsights() {
+  renderInsightsTeaser();
+  const box = $('insights'), u = currentUser;
+  box.hidden = !u || !insights.loaded || insights.unsupported;
+  clearTimeout(insights.retryTimer);
+  if (box.hidden) return;
+  const data = insights.data, wait = insights.retryAt - Date.now(), blocked = wait > 0;
+  // Пока действует 429, раз в минуту обновляем «через N ч» и в конце снова включаем кнопку
+  if (blocked) insights.retryTimer = setTimeout(renderInsights, Math.min(wait, 60e3) + 100);
+  const refresh = $('insightsRefresh');
+  // При «устарело» кнопка обновления — в плашке, вторая в шапке не нужна
+  refresh.hidden = !data || insights.running || !!data.stale;
+  refresh.disabled = blocked;
+  refresh.textContent = blocked ? `Обновить через ${waitText(wait)}` : 'Обновить';
+  const startBtn = label => `<button class="btn" type="button" data-ins-start ${blocked ? 'disabled' : ''}>${blocked ? `Можно через ${waitText(wait)}` : label}</button>`;
+  let html;
+  if (insights.running) html = `${INSIGHTS_SKELETON}<p class="ins-status" role="status"><span class="ins-spin" aria-hidden="true"></span>Анализируем расходы…</p>`;
+  else if (!data && receipts.length < INSIGHTS_MIN_RECEIPTS) {
+    const n = INSIGHTS_MIN_RECEIPTS - receipts.length;
+    html = `<div class="ins-intro"><p class="ins-lead">Добавьте ещё ${n} ${plural(n, 'чек', 'чека', 'чеков')} — советам нужна история.</p><div class="button-row"><button class="btn soft" type="button" data-ins-upload>＋ Добавить чек</button></div></div>`;
+  } else if (!data && !insightsConsent()) {
+    html = `<div class="ins-intro">
+      <p class="ins-lead">ИИ проанализирует ваши расходы и даст советы: где перерасход, какой лимит поставить, что повторяется каждый месяц.</p>
+      <p class="ins-note">Для этого во внешний сервис (Google Gemini) уйдёт обезличенная сводка — только суммы по категориям и магазинам и ваши лимиты. Имя, email и фото чеков не передаются.</p>
+      <div class="button-row"><button class="btn" type="button" data-ins-consent ${blocked ? 'disabled' : ''}>Разрешить и проанализировать</button></div>
+    </div>`;
+  } else if (!data) {
+    html = `<div class="ins-intro"><p class="ins-lead">Посмотрим, что можно улучшить в расходах.</p><div class="button-row">${startBtn('Проанализировать')}</div></div>`;
+  } else {
+    const items = visibleInsights(), all = data.insights.items || [], when = data.created_at ? serverDate(data.created_at) : null;
+    const updated = when && !Number.isNaN(+when) ? `Обновлено ${when.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} в ${when.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : '';
+    html = (data.stale ? `<div class="ins-stale" role="status"><span>Есть новые чеки — обновить советы?</span>${blocked ? `<small>Можно через ${waitText(wait)}</small>` : '<button class="text-btn" type="button" data-ins-start>Обновить</button>'}</div>` : '')
+      + (data.insights.summary ? `<p class="ins-summary">${esc(clip(data.insights.summary, 400))}</p>` : '')
+      + (items.length ? `<div class="ins-cards">${items.map(insightCard).join('')}</div>`
+        : all.length ? '<p class="ins-empty">Все советы скрыты. <button class="text-btn" type="button" data-ins-unhide>Показать снова</button></p>'
+        : '<p class="ins-empty">Особых советов нет — расходы выглядят ровно.</p>')
+      + `<p class="ins-foot">${esc([updated, insightsModel(data.model)].filter(Boolean).join(' · '))}${data.model === 'rules' && !INSIGHTS_STUB ? '<br>ИИ сейчас недоступен — показаны базовые советы' : ''}</p>`;
+  }
+  if (insights.error) html += `<div class="auth-error" role="alert">${esc(insights.error)}</div>`;
+  $('insightsBody').innerHTML = html;
+  // Раздел открыт — советы просмотрены, тизер в профиле перестаёт называть их новыми
+  if (data && $('page-analysis').classList.contains('active')) {
+    const seen = readIdList(insightsSeenKey(insights.userId)), ids = visibleInsights().map(i => String(i.id)).filter(id => !seen.includes(id));
+    if (ids.length) { writeIdList(insightsSeenKey(insights.userId), [...seen, ...ids]); renderInsightsTeaser(); }
+  }
+}
+// Карточка в профиле: «2 новых совета →»
+function renderInsightsTeaser() {
+  const el = $('profileInsights');
+  el.hidden = !currentUser || !insights.loaded || insights.unsupported;
+  if (el.hidden) return;
+  const items = visibleInsights(), seen = readIdList(insightsSeenKey(insights.userId)), fresh = items.filter(i => !seen.includes(String(i.id))).length;
+  $('profileInsightsText').textContent = insights.running ? 'Анализируем расходы…'
+    : fresh ? `${fresh} ${plural(fresh, 'новый совет', 'новых совета', 'новых советов')}`
+    : items.length ? `${items.length} ${plural(items.length, 'совет', 'совета', 'советов')} по расходам`
+    : 'ИИ-советы по вашим расходам';
+}
+async function applyBudgetSuggestion(btn) {
+  const key = btn.dataset.cat, amount = Number(btn.dataset.amount);
+  if (!currentUser || !(amount > 0)) return;
+  btn.disabled = true;
+  try {
+    await saveBudgets({ total: budgets.total, categories: { ...budgets.categories, [key]: amount } });
+    renderBudgets(); renderStartSteps(); renderInsights();
+    toast(`Лимит на «${categoryByKey(key).name}» — ${money(amount)} в месяц`);
+    // Лимиты поменялись — сервер пометит анализ устаревшим
+    loadInsights();
+  } catch (e) { btn.disabled = false; toast('Не удалось поставить лимит: ' + e.message); }
+}
+$('insights').addEventListener('click', e => {
+  const t = e.target.closest('button');
+  if (!t || t.disabled) return;
+  if (t.id === 'insightsRefresh' || t.hasAttribute('data-ins-start')) startInsights();
+  else if (t.hasAttribute('data-ins-consent')) grantInsightsConsent();
+  else if (t.hasAttribute('data-ins-upload')) showPage('upload');
+  else if (t.hasAttribute('data-ins-unhide')) { try { localStorage.removeItem(insightsHiddenKey(insights.userId)); } catch (err) {} renderInsights(); }
+  else if (t.hasAttribute('data-ins-hide')) {
+    const id = t.closest('[data-insight]').dataset.insight, key = insightsHiddenKey(insights.userId);
+    writeIdList(key, [...readIdList(key), id]);
+    renderInsights();
+    $('insightsBody').querySelector('[data-ins-hide], [data-ins-unhide]')?.focus();
+  } else if (t.dataset.insAct === 'set_budget') applyBudgetSuggestion(t);
+  else if (t.dataset.insAct === 'open_history') openHistory({ period: t.dataset.period, category: t.dataset.cat });
+  else if (t.dataset.insAct === 'open_categories') showPage('categories');
+});
+$('profileInsights').onclick = () => showPage('analysis');
 
 renderAccess();
 loadCurrencies();
