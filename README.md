@@ -131,6 +131,7 @@ git pull
 |---|---|---|---|
 | Бэкенд, фронтенд | `uvicorn server:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `app/parser.py`, Ollama не нужна | ~0,5 ГБ |
 | ML | `docker compose --profile full up -d` или без Docker с установленной Ollama | Сайт + Ollama (Qwen 2.5:3b) | ~4–5 ГБ |
+| Ollama уже стоит на компьютере | `docker compose up -d --build` + `DOCKER_OLLAMA_HOST` в `.env` (см. [вариант А2](#вариант-а2-docker--ollama-на-компьютере)) | Сайт в Docker, Qwen — из вашей Ollama. Модель не скачивается второй раз | ~4–5 ГБ |
 | QA, демонстрация | `docker compose --profile full up -d --build` | Всё, как у пользователя | ~4–5 ГБ |
 
 Без Ollama сайт, аккаунты, история и валюты работают, а распознавание чека переключается на запасной парсер (точность ниже).
@@ -159,7 +160,24 @@ docker compose exec ollama ollama pull qwen2.5:3b
 Откройте `http://localhost:8000`. Остановить — `docker compose --profile full down`.
 
 - Без `--profile full` Ollama не запускается — поднимается только сайт.
-- Папка `ml/` попадает в образ только при сборке: после `git pull` запускайте с `--build`. Папки `app/` и `frontend/` подключены к контейнеру напрямую — правки видны после перезапуска или `F5`.
+- Папки `app/`, `ml/`, `frontend/`, `migrations/` и `server.py` подключены к контейнеру напрямую: правки фронтенда видны после `F5`, правки Python — после `docker compose restart web`. `--build` нужен, когда меняются `requirements.txt` или `Dockerfile`; после `git pull` проще всегда запускать с `--build` — без изменений сборка занимает секунды.
+- Миграции базы применяются сами при старте сервера.
+
+#### Вариант А2. Docker + Ollama на компьютере
+
+Если Ollama уже установлена (как в способе Б) и модель скачана, второй контейнер с Ollama не нужен. Добавьте в `.env`:
+
+```ini
+DOCKER_OLLAMA_HOST=http://host.docker.internal:11434
+```
+
+и запускайте без профиля:
+
+```powershell
+docker compose up -d --build
+```
+
+Остановить — `docker compose down`. Ollama на компьютере должна быть запущена (значок в трее).
 
 ### Способ Б. Без Docker
 
@@ -188,9 +206,26 @@ uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 
 ### Проверка, что всё работает
 
-1. `http://localhost:8000/api/health` — должно быть `"status": "healthy"`. Без Docker поле `ollama` пока показывает `unavailable`, даже когда Ollama работает: проверка обращается к адресу контейнера.
-2. Загрузите фото чека. Первый чек обрабатывается дольше (до минуты) — загружаются модели.
-3. В логе сервера не должно быть строки «Ollama/LLM недоступна… Используется встроенный парсер». Если она есть — Ollama не запущена или не скачана модель.
+1. `http://localhost:8000/api/health` — должно быть `"status": "healthy"` и `"ollama": "available"`. `"ocr": "standby"` — это нормально: OCR загружается при первом чеке.
+2. Загрузите фото чека. Первый чек обрабатывается дольше — загружаются модели. На CPU чек распознаётся примерно за 25–70 секунд, длинные — до 2–3 минут.
+3. В логе сервера (`docker compose logs -f web`, без Docker — окно терминала с uvicorn) не должно быть строки «Qwen не разобрал чек… Используется встроенный парсер». Если она есть — Ollama не запущена или не скачана модель.
+
+### Тесты
+
+Тесты бэкенда (из корня проекта, ~1,5 минуты):
+
+```powershell
+.venv\Scripts\activate
+$env:DATABASE_URL="sqlite:///data/test.db"
+python -m pytest tests -q
+```
+
+Тесты ML (из папки `ml`, в том же `.venv`; Ollama не нужна):
+
+```powershell
+cd ml
+python -m pytest tests -q
+```
 
 ### Частые проблемы
 
@@ -199,7 +234,9 @@ uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 | Команда `ollama` не найдена | Откройте новое окно терминала |
 | `Set SECRET_KEY in .env` при запуске Docker | Заполните `SECRET_KEY` в `.env` |
 | Распознавание слабое, позиции не находятся | Qwen не используется — см. пункт 3 проверки |
-| После `git pull` в Docker старое поведение | Запустите с `--build` |
+| После `git pull` в Docker старое поведение | `docker compose restart web`; если менялись зависимости — запустите с `--build` |
+| `"ollama": "unavailable"` в Docker с Ollama на компьютере | Проверьте `DOCKER_OLLAMA_HOST` в `.env` и что Ollama запущена: `curl http://localhost:11434/api/version` |
+| `No module named 'ollama'` при запуске тестов | Тесты запущены не из `.venv` — выполните `.venv\Scripts\activate` |
 | Порт 8000 занят | Укажите другой: `--port 8001` |
 | Тесты пишут в рабочую базу | Перед тестами: `$env:DATABASE_URL="sqlite:///data/test.db"` (подробнее — BACKEND_GUIDE, раздел «Тесты») |
 
