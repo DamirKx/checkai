@@ -9,6 +9,7 @@ from app.categories import (
 )
 from app import rates
 
+import math
 import re
 
 try:
@@ -26,10 +27,40 @@ MAX_PASSWORD_BYTES = 72
 
 # Кто выбрал категорию позиции (PROFILE_TASKS.md, п. 2.1). None — категории нет
 CategorySource = Literal["ai", "keywords", "rule", "user"]
+# photo — распознан с фото, manual — введён руками (NEXT_WEEK_TASKS.md, A.2.1)
+ReceiptSource = Literal["photo", "manual"]
+
+# Пределы чисел в чеке (A.2.2). Те же константы — MAX_AMOUNT / MAX_QUANTITY во frontend/static/js/app.js
+MAX_AMOUNT = 1e9
+MAX_QUANTITY = 100000
+
+
+def _check_finite(v: Optional[float]) -> Optional[float]:
+    # NaN и Infinity JSON-парсер Python пропускает, а аналитику они ломают
+    if v is not None and not math.isfinite(v):
+        raise ValueError("Укажите обычное число")
+    return v
+
+
+def _check_amount(v: Optional[float]) -> Optional[float]:
+    v = _check_finite(v)
+    if v is None:
+        return None
+    if v < 0:
+        raise ValueError("Сумма не может быть отрицательной")
+    if v > MAX_AMOUNT:
+        raise ValueError("Слишком большая сумма: не больше 1 000 000 000")
+    return v
+
+
+def items_total(items: List["ItemIn"]) -> float:
+    """Сумма позиций — итог чека, если его не прислали."""
+    return round(sum(i.total_price or 0.0 for i in items), 2)
 
 
 class ItemIn(BaseModel):
-    name: str = Field(min_length=1, max_length=500)
+    # Без extra="forbid": новые поля фронта не должны давать 422 (A.2, п. 1)
+    name: str = Field(max_length=500)
     quantity: Optional[float] = 1.0
     price_per_unit: Optional[float] = 0.0
     total_price: Optional[float] = 0.0
@@ -37,6 +68,53 @@ class ItemIn(BaseModel):
     # Название — если category_id нет (гость распознал чек, вошёл и сохраняет)
     category: Optional[str] = Field(default=None, max_length=100)
     category_source: Optional[CategorySource] = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Укажите название товара")
+        return v
+
+    @field_validator("quantity")
+    @classmethod
+    def _validate_quantity(cls, v: Optional[float]) -> float:
+        v = _check_finite(v)
+        # Поле не прислали или null — одна штука; 0 — ошибка, а не «молча 1»
+        if v is None:
+            return 1.0
+        if v <= 0:
+            raise ValueError("Количество должно быть больше нуля")
+        if v > MAX_QUANTITY:
+            raise ValueError("Слишком большое количество: не больше 100 000")
+        return v
+
+    @field_validator("price_per_unit", "total_price")
+    @classmethod
+    def _validate_amounts(cls, v: Optional[float]) -> Optional[float]:
+        return _check_amount(v)
+
+
+class _ReceiptIn(BaseModel):
+    """Общее у ReceiptCreate и ReceiptUpdate: дата и время, пределы итога, итог по позициям."""
+
+    @field_validator("total", check_fields=False)
+    @classmethod
+    def _validate_total(cls, v: Optional[float]) -> Optional[float]:
+        return _check_amount(v)
+
+    @model_validator(mode="after")
+    def _normalize_date_time(self):
+        self.date, self.time = normalize_date_time(self.date, self.time)
+        return self
+
+    @model_validator(mode="after")
+    def _total_from_items(self):
+        # Итог не пришёл или 0, а позиции есть — итог = сумма позиций (A.2.2)
+        if not self.total and self.items:
+            self.total = items_total(self.items)
+        return self
 
 
 class ItemOut(BaseModel):
@@ -52,7 +130,7 @@ class ItemOut(BaseModel):
     category_source: Optional[str] = None
 
 
-class ReceiptCreate(BaseModel):
+class ReceiptCreate(_ReceiptIn):
     store: Optional[str] = Field(default=None, max_length=255)
     # Каноническое имя сети от ML. Не пришло — сервер вычислит его из store
     merchant: Optional[str] = Field(default=None, max_length=255)
@@ -65,6 +143,10 @@ class ReceiptCreate(BaseModel):
     currency: str = DEFAULT_CURRENCY
     # Путь, который вернул /api/analyze, например /data/receipts/<uuid>.jpg
     image_path: Optional[str] = Field(default=None, max_length=500)
+    # Без image_path сервер всегда ставит manual (A.2.1)
+    source: ReceiptSource = "photo"
+    # «Всё равно сохранить» после окна дубликата (C.2.4). В базу не сохраняется
+    allow_duplicate: bool = False
     items: List[ItemIn] = []
 
     @field_validator("currency", mode="before")
@@ -73,12 +155,13 @@ class ReceiptCreate(BaseModel):
         return normalize_currency(v)
 
     @model_validator(mode="after")
-    def _normalize_date_time(self):
-        self.date, self.time = normalize_date_time(self.date, self.time)
+    def _manual_without_photo(self):
+        if not self.image_path:
+            self.source = "manual"
         return self
 
 
-class ReceiptUpdate(BaseModel):
+class ReceiptUpdate(_ReceiptIn):
     store: Optional[str] = Field(default=None, max_length=255)
     merchant: Optional[str] = Field(default=None, max_length=255)
     date: Optional[str] = None
@@ -87,6 +170,10 @@ class ReceiptUpdate(BaseModel):
     total: Optional[float] = 0.0
     # None — оставить текущую валюту чека (клиент, который не знает о валютах, её не сбросит)
     currency: Optional[str] = None
+    # Фронт шлёт тот же payload, что при создании. Источник задаётся при создании чека и не меняется
+    source: Optional[ReceiptSource] = None
+    # Правка сделала чек копией другого — «Всё равно сохранить» (C.2.5)
+    allow_duplicate: bool = False
     items: List[ItemIn] = []
 
     @field_validator("currency", mode="before")
@@ -95,11 +182,6 @@ class ReceiptUpdate(BaseModel):
         if v is None:
             return None
         return normalize_currency(v)
-
-    @model_validator(mode="after")
-    def _normalize_date_time(self):
-        self.date, self.time = normalize_date_time(self.date, self.time)
-        return self
 
 
 class ReceiptOut(BaseModel):
@@ -119,10 +201,9 @@ class ReceiptOut(BaseModel):
     base_currency: str = DEFAULT_CURRENCY
     rate_to_base: Optional[float] = None
     image_path: Optional[str] = None
+    source: ReceiptSource = "photo"
     created_at: datetime
     items: List[ItemOut] = []
-    # Только в ответе POST /api/receipts/save: id похожего чека, сохранённого раньше (та же дата и сумма)
-    duplicate_of: Optional[int] = None
 
 
 class UserCreate(BaseModel):
@@ -157,6 +238,8 @@ class Preferences(BaseModel):
     """Настройки оформления (PROFILE_TASKS.md, п. 1.2). Неизвестное значение — 422."""
     theme: ThemeName = "system"
     accent: AccentName = "violet"
+    # Согласие на ИИ-анализ расходов (NEXT_WEEK_TASKS.md, B.2.5)
+    ai_insights: bool = False
 
     @classmethod
     def from_stored(cls, value: Any) -> "Preferences":
@@ -179,6 +262,7 @@ class PreferencesUpdate(BaseModel):
     """PATCH /api/auth/me: меняются только пришедшие ключи, null у ключа — значение по умолчанию."""
     theme: Optional[str] = None
     accent: Optional[str] = None
+    ai_insights: Optional[bool] = None
 
     @field_validator("theme")
     @classmethod
@@ -205,6 +289,8 @@ class UserUpdate(BaseModel):
     base_currency: Optional[str] = None
     # {"accent": "red"} не сбрасывает тему; "preferences": null — вернуть всё по умолчанию
     preferences: Optional[PreferencesUpdate] = None
+    # То же, что preferences.ai_insights (B.2.5): фронт шлёт оба поля. Текущий пароль не нужен
+    ai_insights_consent: Optional[bool] = None
 
     @field_validator("base_currency", mode="before")
     @classmethod
@@ -259,6 +345,8 @@ class UserOut(BaseModel):
     # false — кода восстановления нет, сбросить забытый пароль не получится: стоит предложить создать
     has_recovery_code: bool = False
     preferences: Preferences = Preferences()
+    # Копия preferences.ai_insights (B.2.5)
+    ai_insights_consent: bool = False
 
     @field_validator("preferences", mode="before")
     @classmethod
@@ -553,3 +641,27 @@ class CategoryRuleOut(BaseModel):
     created_at: datetime
 
 
+
+
+# --- Автокатегория для названий без фото (NEXT_WEEK_TASKS.md, A.2.3) ---
+
+CATEGORIZE_MAX_ITEMS = 50
+
+
+class CategorizeName(BaseModel):
+    name: str = Field(max_length=500)
+
+
+class CategorizeIn(BaseModel):
+    items: List[CategorizeName] = Field(min_length=1, max_length=CATEGORIZE_MAX_ITEMS)
+
+
+class CategorizedItem(BaseModel):
+    name: str
+    category_id: Optional[int] = None
+    category: Optional[str] = None
+    category_source: Optional[str] = None
+
+
+class CategorizeOut(BaseModel):
+    items: List[CategorizedItem]

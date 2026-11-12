@@ -28,7 +28,7 @@
 | 1.7 | Регистрация отдаёт `recovery_code` (один раз), в `UserOut` — `has_recovery_code`. `POST /api/auth/reset-password` `{email, recovery_code, new_password}` → `TokenOut` с новым `recovery_code`. `POST /api/auth/recovery-code` `{password}` → `{recovery_code}`. |
 | 2.2 | Канонизация — `ml/app/merchant.py` (`canonical_merchant`). Если клиент не прислал `merchant` в `save`/`PUT`, сервер вычисляет его из `store`. Поиск `q` ищет и по `merchant`. |
 
-**Сверх файла:** `duplicate_of` в ответах `/api/analyze`, `/api/tasks/{id}` и `/api/receipts/save` — id уже сохранённого похожего чека (та же дата и сумма; время и сеть — если есть у обоих), иначе `null`. Чек сохраняется в любом случае. `/api/analytics` больше не загружает все позиции, ответ прежний.
+**Сверх файла:** `duplicate_of` в ответах `/api/analyze` и `/api/tasks/{id}` — id уже сохранённого чека с тем же фото или фискальным номером, иначе `null`. Сохранение дубликата теперь отвечает `409` (NEXT_WEEK_TASKS.md, C.2), поля `duplicate_of` в ответе `/api/receipts/save` больше нет. `/api/analytics` больше не загружает все позиции, ответ прежний.
 
 ---
 

@@ -179,25 +179,25 @@ class TestPreferences(ProfileTestCase):
         return self.client.patch("/api/auth/me", json=body, headers=headers or self.headers_a)
 
     def test_defaults(self):
-        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet"})
+        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet", "ai_insights": False})
 
     def test_partial_update_without_password(self):
         r = self.patch_me({"preferences": {"theme": "light", "accent": "red"}})
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["user"]["preferences"], {"theme": "light", "accent": "red"})
+        self.assertEqual(r.json()["user"]["preferences"], {"theme": "light", "accent": "red", "ai_insights": False})
         # Пришёл один ключ — второй не сбрасывается
         self.patch_me({"preferences": {"accent": "green"}})
-        self.assertEqual(self.me()["preferences"], {"theme": "light", "accent": "green"})
+        self.assertEqual(self.me()["preferences"], {"theme": "light", "accent": "green", "ai_insights": False})
         # null у ключа — значение по умолчанию, null целиком — всё по умолчанию
         self.patch_me({"preferences": {"theme": None}})
-        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "green"})
+        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "green", "ai_insights": False})
         self.patch_me({"preferences": None})
-        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet"})
+        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet", "ai_insights": False})
 
     def test_unknown_values_rejected(self):
         self.assertEqual(self.patch_me({"preferences": {"accent": "teal"}}).status_code, 422)
         self.assertEqual(self.patch_me({"preferences": {"theme": "sepia"}}).status_code, 422)
-        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet"})
+        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "violet", "ai_insights": False})
 
     def test_other_fields_untouched_and_broken_stored_value(self):
         self.patch_me({"full_name": "Дамир"})
@@ -206,7 +206,7 @@ class TestPreferences(ProfileTestCase):
         # В базе мусор (старая версия, ручная правка) — отдаём значения по умолчанию, а не 500
         self.user_a.preferences = {"theme": "neon", "accent": "blue", "junk": 1}
         self.db.commit()
-        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "blue"})
+        self.assertEqual(self.me()["preferences"], {"theme": "system", "accent": "blue", "ai_insights": False})
 
 
 class TestLastLogin(ProfileTestCase):
@@ -300,52 +300,6 @@ class TestRecoveryCode(ProfileTestCase):
     def test_forgot_password_removed(self):
         r = self.client.post("/api/auth/forgot-password", json={"email": EMAILS[0]})
         self.assertIn(r.status_code, (404, 405))
-
-
-class TestDuplicates(ProfileTestCase):
-    def test_save_marks_duplicate(self):
-        first = self.save(store="MAGNUM", date="2026-10-20", time="18:30", total=4520)
-        self.assertIsNone(first["duplicate_of"])
-        # Тот же чек, магазин написан иначе — дубль; сохраняется всё равно
-        again = self.save(store="Magnum Cash&Carry", date="20.10.2026", time="18:30", total=4520.0)
-        self.assertEqual(again["duplicate_of"], first["id"])
-        self.assertNotEqual(again["id"], first["id"])
-        # Нет времени у одного из чеков — не мешает
-        self.assertEqual(self.save(store="Magnum", date="2026-10-20", total=4520)["duplicate_of"], again["id"])
-        # В обычной выдаче поля нет (null)
-        listed = self.client.get(f"/api/receipts/{again['id']}", headers=self.headers_a).json()
-        self.assertIsNone(listed["duplicate_of"])
-
-    def test_not_duplicates(self):
-        self.save(store="Magnum", date="2026-10-20", time="18:30", total=4520)
-        cases = [
-            dict(store="Magnum", date="2026-10-20", time="18:30", total=4521),   # другая сумма
-            dict(store="Magnum", date="2026-10-21", time="18:30", total=4520),   # другой день
-            dict(store="Magnum", date="2026-10-20", time="09:00", total=4520),   # другое время
-            dict(store="Small", date="2026-10-20", time="18:30", total=4520),    # другая сеть
-            dict(store="Magnum", total=4520),                                    # без даты не ищем
-        ]
-        for fields in cases:
-            self.assertIsNone(self.save(**fields)["duplicate_of"], fields)
-        # Чужой чек не дубль
-        self.assertIsNone(self.save(headers=self.headers_b, store="Magnum", date="2026-10-20", total=4520)["duplicate_of"])
-
-    def test_analyze_warns_before_save(self):
-        saved = self.save(store="MAGNUM", date="2026-10-20", time="18:30", total=4520)
-
-        def fake_analyze(image_path, ocr=None, categories=None):
-            return {"raw_lines": ["MAGNUM"], "store": "ТОО MAGNUM", "date": "20.10.2026 18:30", "total": 4520.0, "items": []}
-
-        def analyze(headers=None):
-            with patch.object(server, "analyze_receipt", fake_analyze), patch.object(server, "get_ocr", lambda: None):
-                r = self.client.post("/api/analyze", files={"file": ("r.jpg", image_bytes(), "image/jpeg")}, headers=headers)
-            self.assertEqual(r.status_code, 200, r.text)
-            server._delete_image_file(r.json()["data"]["image_path"])
-            return r.json()["data"]
-
-        self.assertEqual(analyze(self.headers_a)["duplicate_of"], saved["id"])
-        self.assertIsNone(analyze(self.headers_b)["duplicate_of"])
-        self.assertIsNone(analyze()["duplicate_of"])  # гость
 
 
 class TestRatesPending(ProfileTestCase):

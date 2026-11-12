@@ -80,6 +80,10 @@ python -m uvicorn server:app --reload
 | `OCR_MAX_SIDE` | `2000` | Большие фото уменьшаются до этого размера по длинной стороне: снимок с телефона распознаётся на ~37% быстрее без потери точности |
 | `OCR_MIN_WIDTH` | `0` | Увеличивать фото уже этой ширины. Выключено: на эталонах точность не выросла, а OCR замедлился |
 | `OCR_CLAHE` | `0` | `1` — выравнивать контраст. Выключено: на эталонах не помогло |
+| `AI_PROVIDER` | `gemini` | ИИ-рекомендации: `gemini`, `ollama` или `off` (только шаблонные советы, данные никуда не уходят). Другое значение — сервер не стартует |
+| `GEMINI_API_KEY` | — | Ключ Google AI Studio. Только в `.env` на сервере: во фронт, git и логи не попадает. Читает ML (`ml/app/llm.py`) |
+| `GEMINI_MODEL` | — | Название модели Gemini — не зашивается в код, бесплатные модели меняются |
+| `INSIGHTS_REFRESH_HOURS` | `6` | Не чаще одного нового анализа расходов на пользователя за столько часов (иначе `429`). `0` — без ограничения |
 
 Подбирать настройки распознавания — бенчмарком: `cd ml && python -m evaluation.benchmark --tag <имя>`, сравнение — `--compare <тег1> <тег2>`.
 
@@ -142,16 +146,18 @@ server.py — FastAPI
 | [server.py](server.py) | Приложение FastAPI: middleware, все маршруты, сохранение загрузок, проверка пути к фото, очистка фото, блокировка OCR |
 | [app/config.py](app/config.py) | Настройки из окружения (раздел 2) |
 | [app/database.py](app/database.py) | Engine и сессии SQLAlchemy, `get_db()`, `init_db()` с Alembic. Для SQLite включает внешние ключи и подменяет `lower()` на версию, понимающую кириллицу (иначе `ilike` не найдёт «магнум» в «Магнум») |
-| [app/models.py](app/models.py) | Таблицы: `User`, `Category`, `CategoryRule`, `Receipt`, `ReceiptItem`, `Budget`, `ExchangeRate` |
+| [app/models.py](app/models.py) | Таблицы: `User`, `Category`, `CategoryRule`, `Receipt`, `ReceiptItem`, `Budget`, `ExchangeRate`, `Insight` |
 | [app/categories.py](app/categories.py) | Стандартные категории (`DEFAULT_CATEGORIES` — единственный источник), `normalize_item_name` для правил, категория чека (`main_category_id`), поиск категории позиции (`resolve_category_id`), применение правил к распознанному чеку (`apply_rules`), `CategoryError` |
 | [app/schemas.py](app/schemas.py) | Pydantic-схемы запросов и ответов, проверка email, пароля, лимитов, нормализация дат |
-| [app/crud.py](app/crud.py) | Пользователи, чеки (фильтры, поиск, пагинация), аналитика, бюджеты |
+| [app/crud.py](app/crud.py) | Пользователи, чеки (фильтры, поиск, пагинация, поиск дубликатов), аналитика, бюджеты, сводка для ИИ (`build_finance_snapshot`) и сохранённые анализы |
 | [app/auth.py](app/auth.py) | bcrypt, выпуск и проверка JWT, зависимость `get_current_user` |
 | [app/rate_limit.py](app/rate_limit.py) | Ограничитель частоты запросов в памяти процесса, определение IP |
 | [app/dates.py](app/dates.py) | Разбор дат вида `29.07.2025 16:36`, `13.05.19`, `2025-07-29` → `YYYY-MM-DD` и `HH:MM` |
 | [app/ocr.py](app/ocr.py) | PaddleOCR + выбор парсера (Qwen или regex) |
 | [app/parser.py](app/parser.py) | Запасной парсер чека на регулярных выражениях |
-| [app/tasks.py](app/tasks.py) | Очередь фонового распознавания для `/api/analyze/async` (в памяти процесса) |
+| [app/tasks.py](app/tasks.py) | Очереди фоновых задач в памяти процесса: распознавание для `/api/analyze/async` (один поток) и ИИ-анализ для `/api/insights` (своя очередь, чтобы не ждать OCR) |
+| [app/duplicates.py](app/duplicates.py) | Правило «тот же чек по содержимому» (NEXT_WEEK_TASKS.md, C.0) — копия `findDuplicate` из `app.js`, `fiscal_id` из реквизитов ML. Общие с фронтом примеры — [tests/fixtures/duplicates.json](tests/fixtures/duplicates.json) |
+| [app/insights.py](app/insights.py) | ИИ-рекомендации: вызов `ml.app.advisor.generate_insights`, проверка ответа по контракту `InsightsOut`, шаблонные советы (`model: "rules"`), пока ML нет или ИИ недоступен |
 | [ml/app/agent_parser.py](ml/app/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы. Зона ML-разработчика |
 | [app/currencies.py](app/currencies.py) | Справочник валют: KZT, RUB, USD, EUR, KGS, UZS, CNY, TRY, нормализация и проверка |
 | [app/rates.py](app/rates.py) | Получение и кеширование официальных курсов Нацбанка РК к тенге, кросс-курсы |
@@ -172,7 +178,8 @@ users ──< receipts ──< receipt_items
   │                 ├── budgets.category_id (CASCADE)
   │                 └── category_rules.category_id (CASCADE)
   ├──< budgets
-  └──< category_rules
+  ├──< category_rules
+  └──< insights (CASCADE)
 
 exchange_rates (курсы валют к тенге на даты покупок)
 ```
@@ -182,10 +189,11 @@ exchange_rates (курсы валют к тенге на даты покупок
 | `users` | `id`, `email`, `hashed_password`, `full_name`, `base_currency`, `created_at` | `base_currency` — основная валюта для аналитики и бюджетов (по умолчанию `KZT`). Удаление пользователя каскадно удаляет его чеки, бюджеты, категории и правила |
 | `categories` | `id`, `user_id`, `name`, `description`, `icon`, `position`, `created_at` | Свой набор у каждого пользователя; при регистрации — 8 стандартных. `name` уникально у пользователя без учёта регистра (проверяет `crud`, индекса нет). По `description` ML раскладывает товары |
 | `category_rules` | `id`, `user_id`, `pattern`, `category_id`, `created_at` | «Товар → категория»: `pattern` — `normalize_item_name(название)`, уникальный индекс `(user_id, pattern)`. При распознавании правило важнее ML |
-| `receipts` | `id`, `user_id`, `store`, `date`, `time`, `category_id`, `total`, `currency`, `rate_to_kzt`, `image_path`, `created_at` | `currency` — валюта чека (ISO 4217, `KZT`), `rate_to_kzt` — курс к тенге на дату чека. `category_id` вычисляет сервер (ниже) |
+| `receipts` | `id`, `user_id`, `store`, `merchant`, `date`, `time`, `category_id`, `total`, `currency`, `rate_to_kzt`, `image_path`, `source`, `image_hash`, `fiscal_id`, `created_at` | `currency` — валюта чека (ISO 4217, `KZT`), `rate_to_kzt` — курс к тенге на дату чека. `category_id` вычисляет сервер (ниже). `source` — `photo` или `manual` (без `image_path` всегда `manual`, задаётся при создании). `image_hash` — SHA-256 файла фото, считает сервер; `fiscal_id` — `РНМ:номер:ФП` из реквизитов ML. Индексы `(user_id, image_hash)` и `(user_id, fiscal_id)` не уникальные: «Всё равно сохранить» работает |
 | `receipt_items` | `id`, `receipt_id`, `name`, `quantity`, `price_per_unit`, `total_price`, `category_id` | Суммы в валюте чека. При редактировании чека позиции заменяются целиком и получают новые `id` |
 | `budgets` | `id`, `user_id`, `category_id`, `limit`, `created_at`, `updated_at` | Лимиты задаются в основной валюте пользователя. `category_id = NULL` — общий лимит на месяц. Лимит удаляется вместе с категорией |
 | `exchange_rates` | `id`, `date`, `currency`, `rate_to_kzt`, `fetched_at` | Официальные курсы Нацбанка РК. Уникальный индекс `(date, currency)` |
+| `insights` | `id`, `user_id`, `created_at`, `model`, `data`, `snapshot_hash` | ИИ-анализ расходов: `data` — `{summary, items}` из `InsightsOut`. Хранятся последние 3. `snapshot_hash` — хеш сводки без точного дня: совпал — повторно не генерируем, не совпал — анализ `stale` |
 
 Форматы, которые нельзя нарушать:
 
@@ -250,7 +258,7 @@ POST /api/analyze (фото)
 | `POST /api/auth/login` | | Вход → пара токенов и пользователь |
 | `POST /api/auth/refresh` | | Новая пара токенов по refresh-токену |
 | `GET /api/auth/me` | 🔒 | Текущий пользователь |
-| `PATCH /api/auth/me` | 🔒 | Смена имени, email, пароля (для email и пароля нужен текущий пароль) → новая пара токенов |
+| `PATCH /api/auth/me` | 🔒 | Смена имени, email, пароля (для email и пароля нужен текущий пароль), оформления и согласия на ИИ-анализ (`preferences.ai_insights` или `ai_insights_consent`, без пароля) → новая пара токенов |
 | `DELETE /api/auth/me` | 🔒 | Удаление аккаунта с паролем, вместе с чеками, фото и бюджетами |
 | `POST /api/auth/reset-password` | | Новый пароль по email и коду восстановления → пара токенов и новый код |
 | `POST /api/auth/recovery-code` | 🔒 | Новый код восстановления (нужен текущий пароль), старый перестаёт действовать |
@@ -259,12 +267,12 @@ POST /api/analyze (фото)
 | `GET /api/profile/stats?tz=` | 🔒 | Сводка профиля: цифры, активность, привычки |
 | `POST /api/analyze` | | Распознать фото (multipart, поле `file`) |
 | `POST /api/analyze/async` | | То же через очередь → `task_id` |
-| `GET /api/tasks/{task_id}` | | Статус задачи распознавания |
+| `GET /api/tasks/{task_id}` | | Статус задачи распознавания или ИИ-анализа. Без авторизации — в `result` анализа ничего личного (`{"ok": true}`) |
 | `POST /api/analyze-test` | | Распознать демо-чек |
-| `POST /api/receipts/save` | 🔒 | Сохранить чек |
+| `POST /api/receipts/save` | 🔒 | Сохранить чек. Такой уже есть (фото, фискальный номер, содержимое) — `409` с `duplicate_of` и `duplicate`; `allow_duplicate: true` — сохранить всё равно |
 | `GET /api/receipts` | 🔒 | Свои чеки: `skip`, `limit` (≤ 500), `from`, `to` (`YYYY-MM-DD`), `category_id` (`0` — без категории), `q` |
 | `GET /api/receipts/{id}` | 🔒 | Один свой чек |
-| `PUT /api/receipts/{id}` | 🔒 | Заменить данные чека, позиции целиком |
+| `PUT /api/receipts/{id}` | 🔒 | Заменить данные чека, позиции целиком. Правка сделала чек копией другого — `409`, как при сохранении |
 | `DELETE /api/receipts/{id}` | 🔒 | Удалить чек и его фото (если на фото больше никто не ссылается) |
 | `GET /api/analytics` | 🔒 | Сводка расходов: по категориям, магазинам, месяцам |
 | `GET /api/budgets` | 🔒 | Лимиты: `[{category_id, category, limit}]`, без лимитов `[]` |
@@ -279,6 +287,9 @@ POST /api/analyze (фото)
 | `POST /api/items/move` | 🔒 | Перенести позиции в категорию, `remember` — запомнить правило |
 | `GET /api/category-rules` | 🔒 | Запомненные правила |
 | `DELETE /api/category-rules/{id}` | 🔒 | Удалить правило |
+| `POST /api/categorize` | 🔒 | Категории для названий без фото (до 50, 30 запросов в минуту на пользователя): правила, затем ML. Элемент на каждое название в том же порядке |
+| `GET /api/insights` | 🔒 | Последний ИИ-анализ `{insights, created_at, model, stale}` или `{"insights": null}` |
+| `POST /api/insights` | 🔒 | Новый анализ: `202 {task_id}`; данные не изменились — `200` с прежним; чаще `INSIGHTS_REFRESH_HOURS` — `429` с `retry_after`; без согласия — `403` |
 
 Лимиты частоты запросов (на IP, в памяти процесса, `RATE_LIMIT_RULES` в [server.py](server.py)): вход и регистрация — 10 в минуту, сброс пароля и новый код восстановления — 5 в минуту, фото профиля — 20 в минуту, распознавание — 15 в минуту, создание категорий — 30 в минуту (`RATE_LIMIT_METHOD_RULES`: лимит только на `POST`, `GET` того же пути не ограничен). При превышении — `429` с заголовком `Retry-After`. При запуске нескольких воркеров uvicorn у каждого свой счётчик.
 
