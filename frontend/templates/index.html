@@ -7,8 +7,8 @@
     // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=dup-1">
-  <script src="/static/js/app.js?v=dup-1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=close-1">
+  <script src="/static/js/app.js?v=close-1" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -157,7 +157,10 @@
           <div id="uploadMessage" class="notice" role="alert" hidden></div>
         </div>
         <div class="card result-card" id="resultCard" aria-labelledby="resultTitle">
-          <div class="card-kicker" id="resultKicker"><span>02</span>Результат</div>
+          <div class="result-head">
+            <div class="card-kicker" id="resultKicker"><span>02</span>Результат</div>
+            <button class="icon-btn result-close" id="resultClose" type="button" aria-label="Убрать черновик чека" title="Убрать черновик" hidden>✕</button>
+          </div>
           <div class="placeholder" id="resultPlaceholder"><div class="ghost-receipt" aria-hidden="true"><i></i><i></i><i></i><i></i></div><b id="resultTitle">Здесь появится чек</b></div>
           <div id="resultContent" hidden>
             <div class="notice currency-hint" id="currencyHint" role="status" hidden></div>

@@ -1110,6 +1110,12 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
 .pill-manual { display: inline-block; margin-left: 6px; padding: 2px 9px; border-color: color-mix(in srgb, var(--aqua) 40%, transparent); background: color-mix(in srgb, var(--aqua) 12%, transparent); color: var(--aqua); font: 600 11.5px/1.4 var(--mono); letter-spacing: .04em; vertical-align: middle; }
 .receipt-row h3 .pill-manual { font-size: 11px; }
 
+/* Шапка карточки результата: заголовок и крестик «Убрать черновик» */
+.result-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
+.result-head .card-kicker { margin-bottom: 0; }
+.result-close { width: 36px; height: 36px; border-radius: 50%; }
+.result-close:hover { transform: rotate(90deg); }
+
 /* --- Проверка на дубликат (NEXT_WEEK_TASKS.md, задача C) --- */
 .dup-hint { margin: 0 0 14px; }
 .dup-card { display: grid; gap: 3px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--soft-bg); }

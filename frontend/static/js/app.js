@@ -1671,6 +1671,7 @@ const scrollToResult = () => { if (window.matchMedia('(max-width: 850px)').match
 function showResultEditor() {
   $('resultPlaceholder').hidden = true;
   $('resultContent').hidden = false;
+  $('resultClose').hidden = false;
   $('resultError').hidden = true;
   $('resultKicker').lastChild.textContent = lastResult.image_path || lastResult.currency_source ? 'Результат' : 'Новый чек';
   mountEditor($('resultEditor'), lastResult);
@@ -1701,6 +1702,7 @@ $('manualBtn').onclick = startManualReceipt;
 function resetResult() {
   lastResult = null;
   $('resultContent').hidden = true;
+  $('resultClose').hidden = true;
   $('resultPlaceholder').hidden = false;
   $('resultEditor').innerHTML = '';
   $('resultError').hidden = true;
@@ -1709,6 +1711,15 @@ function resetResult() {
   $('currencyHint').hidden = true;
   clearFile();
 }
+// Крестик в шапке карточки: убрать ручной ввод или распознанный, но не сохранённый чек
+const draftTouched = d => !!(d.store.trim() || num(d.total) > 0 || d.image_path || d.items.some(i => i.name.trim() || num(i.total_price)));
+$('resultClose').onclick = () => {
+  if (!lastResult || $('saveReceiptBtn').disabled) return;
+  if (draftTouched(lastResult) && !confirm('Убрать черновик чека? Он ещё не сохранён.')) return;
+  resetResult();
+  // Фокус — туда, откуда обычно начинают: «Ввести вручную» или «Выбрать»
+  ($('manualBtn').offsetParent ? $('manualBtn') : $('chooseBtn')).focus();
+};
 // Гость может распознавать чеки, а для сохранения просим войти
 async function saveReceipt() {
   if (!lastResult) return;
