@@ -17,6 +17,7 @@ from app.currency import detect_currency, SUPPORTED
 from app.categorize import categorize_items
 from app.preprocess import prepare_for_ocr
 from app.confidence import compute_confidence
+from app.fiscal import extract_fiscal_info
 
 
 
@@ -186,7 +187,10 @@ def analyze_receipt(
     # 6. Уверенность распознавания чека (PROFILE_TASKS.md, п. 2.3)
     parsed["confidence"] = compute_confidence(scores, parsed.get("items") or [], parsed.get("total"))
 
-    # 7. Гарантируем category_source, category_id, category у каждой позиции (PROFILE_TASKS.md, п. 2.1)
+    # 7. Фискальные реквизиты (NEXT_WEEK_TASKS.md, C.3)
+    parsed.setdefault("fiscal", extract_fiscal_info(lines))
+
+    # 8. Гарантируем category_source, category_id, category у каждой позиции (PROFILE_TASKS.md, п. 2.1)
     for it in parsed.get("items") or []:
         it.setdefault("category_id", None)
         it.setdefault("category", None)

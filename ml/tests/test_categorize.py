@@ -168,6 +168,67 @@ def test_category_source_present_for_every_item():
     assert all(i["category_source"] is None for i in items)
 
 
+def test_manual_item_names_categorization():
+    """Тест категоризации коротких ручных названий (NEXT_WEEK_TASKS.md, A.3)."""
+    categories = [
+        {"id": 1, "name": "Продукты", "position": 0},
+        {"id": 2, "name": "Одежда", "position": 1},
+        {"id": 3, "name": "Дом и быт", "position": 2},
+        {"id": 4, "name": "Транспорт", "position": 3},
+        {"id": 5, "name": "Кафе", "position": 4},
+        {"id": 6, "name": "Здоровье", "position": 5},
+        {"id": 7, "name": "Развлечения", "position": 6},
+    ]
+
+    manual_test_cases = [
+        ("кофе", "Кафе"),
+        ("кофе американо", "Кафе"),
+        ("капучино", "Кафе"),
+        ("латте с сиропом", "Кафе"),
+        ("раф ванильный", "Кафе"),
+        ("додо пицца", "Кафе"),
+        ("kfc баскет", "Кафе"),
+        ("бургер кинг", "Кафе"),
+        ("шаурма куриная", "Кафе"),
+        ("такси", "Транспорт"),
+        ("яндекс go", "Транспорт"),
+        ("yandex taxi", "Транспорт"),
+        ("uber", "Транспорт"),
+        ("indrive", "Транспорт"),
+        ("поездка onay", "Транспорт"),
+        ("бензин аи-95", "Транспорт"),
+        ("хлеб бородинский", "Продукты"),
+        ("молоко 3.2%", "Продукты"),
+        ("нан", "Продукты"),
+        ("сүт 2.5%", "Продукты"),
+        ("шоколад alpen gold", "Продукты"),
+        ("сыр гауда", "Продукты"),
+        ("бананы", "Продукты"),
+        ("футболка оверсайз", "Одежда"),
+        ("джинсы zara", "Одежда"),
+        ("кроссовки nike", "Одежда"),
+        ("көйлек", "Одежда"),
+        ("стиральный порошок tide", "Дом и быт"),
+        ("fairy для посуды", "Дом и быт"),
+        ("зубная паста colgate", "Дом и быт"),
+        ("парацетамол", "Здоровье"),
+        ("витамины c", "Здоровье"),
+        ("дәріхана", "Здоровье"),
+        ("билет в кино", "Развлечения"),
+        ("подписка netflix", "Развлечения"),
+        ("игры в steam", "Развлечения"),
+    ]
+
+    items = [{"name": name, "total_price": 100} for name, _ in manual_test_cases]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "0"}):
+        categorize_items(items, categories)
+
+    for i, (name, expected_cat) in enumerate(manual_test_cases):
+        actual_cat = items[i].get("category")
+        assert actual_cat == expected_cat, f"Для '{name}' ожидалась '{expected_cat}', получено '{actual_cat}'"
+        assert items[i].get("category_source") == "keywords"
+
+
 if __name__ == "__main__":
     test_normalize_item_name()
     test_custom_category_beats_builtin_keywords()
@@ -175,4 +236,5 @@ if __name__ == "__main__":
     test_guest_categories_have_none_id()
     test_categorize_empty_inputs()
     test_category_source_present_for_every_item()
+    test_manual_item_names_categorization()
     print("Все тесты категоризации пройдены!")

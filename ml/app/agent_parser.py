@@ -9,6 +9,7 @@ import ollama
 
 from .merchant import canonical_merchant
 from .textfix import fix_item_names
+from .fiscal import extract_fiscal_info
 
 
 MODEL = "qwen2.5:3b"
@@ -136,6 +137,9 @@ def parse_receipt(
         list
     ):
         result["items"] = []
+
+    result["merchant"] = canonical_merchant(result.get("store"))
+    result["fiscal"] = extract_fiscal_info(ocr_text)
 
     return result
 
@@ -1312,5 +1316,7 @@ def parse_receipt_with_correction(
 
     # store — как напечатано на чеке, merchant — каноническое имя сети (PROFILE_TASKS.md, п. 2.2)
     data["merchant"] = canonical_merchant(data.get("store"))
+    # Фискальные реквизиты (NEXT_WEEK_TASKS.md, C.3)
+    data["fiscal"] = extract_fiscal_info(ocr_text)
 
     return data

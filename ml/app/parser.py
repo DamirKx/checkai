@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from .merchant import canonical_merchant
 from .textfix import fix_item_names
+from .fiscal import extract_fiscal_info
 
 
 def clean_number(text: str, currency: str = "KZT") -> Optional[float]:
@@ -268,7 +269,9 @@ def parse_receipt(raw_lines: List[str]) -> Dict[str, Any]:
         'items': items,
         'total': total,
         'currency': '₸',
-        'items_count': len(items)
+        'items_count': len(items),
+        # Фискальные реквизиты для защиты от дубликатов (NEXT_WEEK_TASKS.md, C.3)
+        'fiscal': extract_fiscal_info(lines),
     }
 
 

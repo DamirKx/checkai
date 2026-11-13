@@ -1,0 +1,218 @@
+[
+  {
+    "id": "case_01_beginner",
+    "description": "Новичок: всего 3 чека за месяц, без лимитов и истории",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-12",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 12500, "receipts": 3}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 9500, "prev_months": [], "limit": null, "receipts": 2},
+        {"id": 5, "name": "Кафе", "this_month": 3000, "prev_months": [], "limit": null, "receipts": 1}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": []
+  },
+  {
+    "id": "case_02_over_budget_single",
+    "description": "Перерасход по категории Кафе: 35 000 из 25 000 ₸",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-15",
+      "total_limit": 200000,
+      "months": [{"month": "2026-11", "total": 140000, "receipts": 25}],
+      "categories": [
+        {"id": 5, "name": "Кафе", "this_month": 35000, "prev_months": [20000, 22000, 21000], "limit": 25000, "receipts": 12},
+        {"id": 1, "name": "Продукты", "this_month": 65000, "prev_months": [60000, 62000, 61000], "limit": 80000, "receipts": 10}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.02,
+      "unconverted": []
+    },
+    "expected_facts": ["over_budget"]
+  },
+  {
+    "id": "case_03_over_budget_total",
+    "description": "Превышен общий лимит на месяц: 310 000 при лимите 300 000 ₸",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-20",
+      "total_limit": 300000,
+      "months": [{"month": "2026-11", "total": 310000, "receipts": 40}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 150000, "prev_months": [140000, 145000, 142000], "limit": 160000, "receipts": 22},
+        {"id": 2, "name": "Одежда", "this_month": 120000, "prev_months": [40000, 50000, 45000], "limit": null, "receipts": 4}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.01,
+      "unconverted": []
+    },
+    "expected_facts": ["over_budget", "category_growth"]
+  },
+  {
+    "id": "case_04_budget_forecast",
+    "description": "Высокий темп трат: лимит 100 000 ₸ на Продукты закончится к 20 числу",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-10",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 85000, "receipts": 15}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 70000, "prev_months": [75000, 72000, 74000], "limit": 100000, "receipts": 12}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": ["budget_forecast"]
+  },
+  {
+    "id": "case_05_category_growth",
+    "description": "Резкий рост трат на Развлечения: 45 000 ₸ vs обычно 15 000 ₸",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-18",
+      "total_limit": 250000,
+      "months": [{"month": "2026-11", "total": 160000, "receipts": 28}],
+      "categories": [
+        {"id": 7, "name": "Развлечения", "this_month": 45000, "prev_months": [14000, 16000, 15000], "limit": null, "receipts": 5}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.03,
+      "unconverted": []
+    },
+    "expected_facts": ["category_growth"]
+  },
+  {
+    "id": "case_06_frequent_small",
+    "description": "Частые мелкие покупки: 14 раз кофе в Coffee Boom на 21 000 ₸",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-19",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 110000, "receipts": 35}],
+      "categories": [
+        {"id": 5, "name": "Кафе", "this_month": 28000, "prev_months": [20000, 22000, 21000], "limit": null, "receipts": 18}
+      ],
+      "small_purchases": [
+        {"category_id": 5, "store": "Coffee Boom", "count": 14, "total": 21000}
+      ],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": ["frequent_small"]
+  },
+  {
+    "id": "case_07_recurring_subscription",
+    "description": "Регулярная ежемесячная подписка на сервис",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-12",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 85000, "receipts": 15}],
+      "categories": [
+        {"id": 7, "name": "Развлечения", "this_month": 12000, "prev_months": [12000, 11500, 12000], "limit": null, "receipts": 4}
+      ],
+      "recurring": [
+        {"category_id": 7, "store": "Netflix", "amount": 4500}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": ["recurring"]
+  },
+  {
+    "id": "case_08_budget_suggestion",
+    "description": "Стабильные траты на Транспорт без лимита: предложить 25 000 ₸",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-12",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 95000, "receipts": 22}],
+      "categories": [
+        {"id": 4, "name": "Транспорт", "this_month": 18000, "prev_months": [22000, 23000, 22500], "limit": null, "receipts": 12}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": ["budget_suggestion"]
+  },
+  {
+    "id": "case_09_uncategorized_high",
+    "description": "Высокая доля неразобранных трат: 25% без категории",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-14",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 120000, "receipts": 30}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 60000, "prev_months": [65000, 63000, 64000], "limit": 70000, "receipts": 15}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.25,
+      "unconverted": []
+    },
+    "expected_facts": ["uncategorized"]
+  },
+  {
+    "id": "case_10_unconverted_currency",
+    "description": "Чеки в иностранных валютах без курса: 3 чека в USD и EUR",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-16",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 130000, "receipts": 24}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 90000, "prev_months": [85000, 88000, 87000], "limit": 100000, "receipts": 18}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.02,
+      "unconverted": [
+        {"currency": "USD", "count": 2},
+        {"currency": "EUR", "count": 1}
+      ]
+    },
+    "expected_facts": ["unconverted"]
+  },
+  {
+    "id": "case_11_balanced_saver",
+    "description": "Сбалансированный бюджет: все траты строго в рамках лимитов",
+    "snapshot": {
+      "base_currency": "KZT",
+      "today": "2026-11-25",
+      "total_limit": 250000,
+      "months": [{"month": "2026-11", "total": 180000, "receipts": 32}],
+      "categories": [
+        {"id": 1, "name": "Продукты", "this_month": 90000, "prev_months": [95000, 92000, 94000], "limit": 120000, "receipts": 18},
+        {"id": 5, "name": "Кафе", "this_month": 20000, "prev_months": [25000, 24000, 23000], "limit": 30000, "receipts": 8}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.01,
+      "unconverted": []
+    },
+    "expected_facts": []
+  },
+  {
+    "id": "case_12_multi_currency_stable",
+    "description": "Пользователь с валютой RUB и стабильным транспортом",
+    "snapshot": {
+      "base_currency": "RUB",
+      "today": "2026-11-12",
+      "total_limit": null,
+      "months": [{"month": "2026-11", "total": 45000, "receipts": 20}],
+      "categories": [
+        {"id": 4, "name": "Транспорт", "this_month": 4500, "prev_months": [4400, 4600, 4500], "limit": null, "receipts": 12}
+      ],
+      "small_purchases": [],
+      "uncategorized_share": 0.0,
+      "unconverted": []
+    },
+    "expected_facts": ["budget_suggestion"]
+  }
+]
