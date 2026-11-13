@@ -196,6 +196,14 @@ def analyze_receipt(
         logger.warning("Ошибка в compute_confidence: %s", e)
         parsed.setdefault("confidence", None)
 
+    # Фискальные реквизиты (NEXT_WEEK_TASKS.md, C.3)
+    try:
+        from ml.app.fiscal import extract_fiscal_info
+        parsed.setdefault("fiscal", extract_fiscal_info(lines))
+    except Exception as e:
+        logger.warning("Ошибка в extract_fiscal_info: %s", e)
+        parsed.setdefault("fiscal", None)
+
     # Гарантия наличия category_id, category, category_source (PROFILE_TASKS.md, п. 2.1)
     for it in parsed.get("items") or []:
         it.setdefault("category_id", None)
