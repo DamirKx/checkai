@@ -931,7 +931,8 @@ body.dragging-items .category-row:not(.open) { border-style: dashed; border-colo
 .modal.wide { width: min(680px, 100%); }
 .modal h2 { padding-right: 40px; overflow-wrap: anywhere; }
 .modal h2 + form, .modal h2 + .auth-form { margin-top: 16px; }
-.modal-close { position: absolute; top: 16px; right: 16px; width: 36px; height: 36px; border-radius: 50%; }
+/* z-index: .card > * делает содержимое модалки position: relative, и оно (идёт в DOM после кнопки) перекрывало нижнюю половину крестика */
+.modal-close { position: absolute; z-index: 2; top: 16px; right: 16px; width: 36px; height: 36px; border-radius: 50%; }
 .modal-close:hover { transform: rotate(90deg); }
 /* Окно «Чек сохранён»: галочка-конфетти над заголовком */
 #savedModal .modal { text-align: left; }
