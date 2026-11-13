@@ -7,13 +7,20 @@ env
 **/*.pyc
 **/*.pyo
 data/
+# Секреты: в контейнер переменные передаёт docker-compose
 .env
+.env.*
 *.db
 *.sqlite3
 .vscode
 .idea
+.paddlex
+# Тесты и бенчмарк ML в рантайме не нужны
 tests/
-.pytest_cache/
+ml/tests/
+ml/test_ocr.py
+ml/evaluation/
+**/.pytest_cache
 *.md
 docker-compose.yml
 Dockerfile
