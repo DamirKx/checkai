@@ -126,3 +126,27 @@ def test_fiscal_operator_is_not_store():
     seller = "ТОО \"Бухта.kz\"\n" + KAZAKHTELECOM_RECEIPT
     assert drop_fiscal_operator_store(seller, {"store": "ТОО \"Бухта.kz\""})["store"] == "ТОО \"Бухта.kz\""
     assert drop_fiscal_operator_store("ООО \"Super Market\"\nОФД: ТОО \"Kassa24\"", {"store": "Super Market"})["store"] == "Super Market"
+
+
+@pytest.mark.parametrize("text", [
+    "Сүт",
+    "Қант",
+    "Тіс пастасы",
+    "Ұн 2кг",
+    "Әке шәйі",
+    "Өрік 500г",
+    "Ғалымжан дүкені",
+    "Ірімшік һақ",
+])
+def test_kazakh_words_untouched(text):
+    assert fix_mixed_script(text) == text
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("Lепог", "Lenor"),
+    ("Cүт", "Сүт"),
+    ("Қaнт", "Қант"),
+    ("Тіc пастасы", "Тіс пастасы"),
+])
+def test_kazakh_and_mixed_words_fixed(raw, fixed):
+    assert fix_mixed_script(raw) == fixed

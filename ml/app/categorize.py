@@ -28,6 +28,17 @@ except ImportError:
 
 
 # Встроенный словарь для стандартных названий категорий (перенесён из frontend/static/js/app.js и дополнен)
+DEFAULT_KEY_TO_RU: Dict[str, str] = {
+    "groceries": "продукты",
+    "clothing": "одежда",
+    "home": "дом и быт",
+    "transport": "транспорт",
+    "cafe": "кафе",
+    "health": "здоровье",
+    "entertainment": "развлечения",
+    "other": "другое",
+}
+
 KEYWORDS: Dict[str, List[str]] = {
     "продукты": [
         "картоф", "молок", "хлеб", "яйц", "сыр", "мяс", "рыб", "куриц", "овощ",
@@ -37,7 +48,15 @@ KEYWORDS: Dict[str, List[str]] = {
         "конфет", "круп", "батон", "булк", "липтон", "напиток", "груш", "спагетти",
         # Казахский язык
         "нан", "сүт", "ет", "су", "шай", "қант", "балық", "май", "жұмыртқа", "күріш", "алма",
-        "шұжық", "айран", "қаймақ",
+        "шұжық", "айран", "қаймақ", "көкөніс", "жеміс", "картоп", "қызанақ", "қияр", "пияз",
+        "ұн", "ірімшік", "сары май", "тауық", "тұз", "шырын", "сусын", "кәмпит", "тоқаш",
+        "кеспе", "сүзбе", "қарақұмық", "жүзім", "лимон",
+        # Английский язык
+        "milk", "bread", "egg ", "eggs", "cheese", "meat", "chicken", "beef", "pork", "fish",
+        "rice", "pasta", "spaghetti", "sugar", "flour", "butter", "yogurt", "sour cream",
+        "cottage cheese", "apple", "banana", "tomato", "cucumber", "potato", "onion",
+        "carrot", "fruit", "vegetable", "juice", "water", "tea ", "chocolate", "cookie",
+        "cereal", "oatmeal", "sausage", "bacon", "grocery",
     ],
     "одежда": [
         "кофт", "футбол", "брюк", "джинс", "куртк", "пальто", "плать", "юбк",
@@ -45,7 +64,14 @@ KEYWORDS: Dict[str, List[str]] = {
         "сумк", "cymka", "ремеш", "аксессуар", "перчат", "шарф", "handkerchief", "bag", "crocs",
         "zara", "nike", "adidas", "h&m", "jacket", "shirt", "shoes", "pants", "dress",
         # Казахский язык
-        "көйлек", "шалбар", "етік", "аяқ киім", "жейде", "қолғап",
+        "көйлек", "шалбар", "етік", "аяқ киім", "жейде", "қолғап", "күрте", "белдемше",
+        "шұлық", "бас киім", "қалпақ", "мойынорағыш", "белдік", "сөмке", "кроссовка",
+        "бәтеңке", "туфли", "киім", "іш киім", "футболка", "свитер", "джинсы",
+        # Английский язык
+        "t-shirt", "tshirt", "jeans", "coat", "skirt", "socks", "hat ", "hats", "cap ", "caps",
+        "baseball cap", "boots", "sneakers", "belt", "scarf", "gloves", "underwear",
+        "sweater", "hoodie", "shorts", "suit ", "suits", "blouse", "sandals", "clothing",
+        "apparel", "accessories", "backpack",
     ],
     "дом и быт": [
         "моющ", "порош", "шампун", "мыло", "бумаг", "пакет", "посуда", "лампоч",
@@ -57,13 +83,31 @@ KEYWORDS: Dict[str, List[str]] = {
         "кондиционер", "стирал", "отбел", "освежит", "капсул", "универсальн", "средство для",
         "fairy", "lenor", "ariel", "tide", "persil", "domestos", "pantene", "always", "oral",
         "colgate", "nivea", "dove", "olay", "proper", "head shoulders", "gillette",
+        # Казахский язык
+        "сабын", "сусабын", "кір жуғыш", "ұнтақ", "тазалағыш", "ыдыс", "қағаз", "майлық",
+        "дәретхана", "тіс паста", "тіс щетка", "жөндеу", "құрылыс", "шам", "батарейка",
+        "шелек", "шүберек", "жөргег", "жаялық", "дезодорант", "үй шаруаш",
+        # Английский язык
+        "soap", "shampoo", "detergent", "laundry", "bleach", "dishwash", "sponge", "napkin",
+        "toilet paper", "paper towel", "trash bag", "toothpaste", "toothbrush", "cleaning",
+        "cleaner", "bulb", "lightbulb", "hardware", "paint", "cement", "brick", "kitchenware",
+        "towel", "diaper", "deodorant", "conditioner", "shower gel", "lotion", "moisturizer",
+        "household",
     ],
     "транспорт": [
         "бензин", "дизел", "такси", "проезд", "метро", "автобус", "парков",
         "топлив", "азс", "шиномонтаж", "мойк", "auto", "wash", "windshiled",
         "windshield", "engine", "wd40", "hd40", "grease", "plug", "starter",
         "яндекс", "yandex", "uber", "indrive", "onay", "онай", "самокат",
-        "каршеринг", "поезд", "авиабилет", "проездн", "жанармай", "ұшақ",
+        "каршеринг", "поезд", "авиабилет", "проездн",
+        # Казахский язык
+        "жанармай", "ұшақ", "дизель", "жол ақы", "жолақы", "пойыз", "тұрақ",
+        "автотұрақ", "көлік жуу", "дөңгелек", "май ауыстыр", "әуе билет", "отын",
+        "қозғалтқыш", "көлік", "жүру ақысы",
+        # Английский язык
+        "gasoline", "petrol", "diesel", "fuel", "taxi", "cab ", "bus ", "buses", "subway", "metro",
+        "train", "flight", "airfare", "airline", "parking", "car wash", "tire", "oil change",
+        "motor oil", "car part", "scooter", "rideshare", "transit", "toll ",
     ],
     "кафе": [
         "ресторан", "кафе", "обед", "ужин", "ланч", "доставка еды", "американо",
@@ -71,22 +115,51 @@ KEYWORDS: Dict[str, List[str]] = {
         "кофейн", "латте", "чай термос", "чай чер", "кофе", "раф", "додо",
         "dodo", "kfc", "mcdonald", "макдон", "burger king", "wolt", "glovo",
         "starbucks", "старбакс", "донер", "фастфуд",
+        # Казахский язык
+        "мейрамхана", "дәмхана", "асхана", "түскі ас", "кешкі ас", "таңғы ас",
+        "дөнер", "тағам жеткізу", "балмұздақ", "бәліш", "самса", "шашлық", "кәуап",
+        "палау", "мәнті", "бешбармақ",
+        # Английский язык
+        "restaurant", "cafe", "coffee", "cappuccino", "latte", "americano", "espresso",
+        "lunch", "dinner", "breakfast", "brunch", "burger", "pizza", "sushi", "sushi roll",
+        "shawarma", "doner", "sandwich", "bakery", "pastry", "ice cream", "food delivery",
+        "takeout", "fast food",
     ],
     "здоровье": [
         "аптек", "лекар", "витамин", "таблет", "медицин", "клиник", "бинт",
         "мазь", "сироп", "капл", "пластыр", "анализ", "врач", "стоматол",
-        "парацетамол", "нурофен", "аспирин", "бад", "линз", "дәріхана", "дәрі",
+        "парацетамол", "нурофен", "аспирин", "бад", "линз",
+        # Казахский язык
+        "дәріхана", "дәрі", "дәрігер", "емхана", "аурухана", "дәрумен", "дәрі-дәрмек",
+        "дәрмек", "тіс дәрігер", "стоматолог", "талдау", "көзілдірік", "жақпамай",
+        "тамшы", "сықпа", "медицина", "емдеу",
+        # Английский язык
+        "pharmacy", "drugstore", "medicine", "medication", "vitamin", "pill ", "pills", "tablet",
+        "capsule", "clinic", "hospital", "doctor", "dentist", "dental", "medical", "health",
+        "bandage", "ointment", "syrup", "eye drops", "aspirin", "ibuprofen", "paracetamol",
+        "supplement", "lab test", "contact lens",
     ],
     "развлечения": [
         "кино", "театр", "музей", "игра", "подписк", "концерт", "билет",
         "книг", "игруш", "развлеч", "боулинг", "парк", "modelling clay", "kiddy",
         "netflix", "spotify", "спотифай", "steam", "playstation", "квест", "кинопарк", "kinopark",
+        # Казахский язык
+        "мұражай", "ойын", "жазылым", "кітап", "ойыншық", "саябақ", "ойын-сауық",
+        "демалыс", "аттракцион", "караоке", "бильярд", "цирк", "көрме", "кинотеатр",
+        # Английский язык
+        "cinema", "movie", "theater", "theatre", "museum", "game", "gaming", "subscription",
+        "concert", "ticket", "book ", "books", "toy ", "toys", "bowling", "park ", "amusement",
+        "entertainment", "arcade", "karaoke", "billiards", "circus", "exhibition", "streaming",
     ],
 }
 
 
 # Служебные слова описаний: «Еда и напитки для дома», «мелочи для дома» не должны давать ключи «для» и «дома»
-DESCRIPTION_STOP_WORDS = {"для", "дома", "вне", "все", "всё", "что", "или", "как", "при", "без", "под", "над", "это"}
+DESCRIPTION_STOP_WORDS = {
+    "для", "дома", "вне", "все", "всё", "что", "или", "как", "при", "без", "под", "над", "это",
+    "үшін", "және", "үйге", "басқа",
+    "for", "and", "the", "with", "home", "etc",
+}
 
 # «Кондиционер д/белья», «крем для лица»: слово после «д/» и «для» — назначение, а не сам товар.
 # Без этого «д/белья» попадает в «Одежду», а «д/лица» — никуда
@@ -94,12 +167,14 @@ _PURPOSE_RE = re.compile(r"(?:(?<![\w])д\s*/\s*|(?<![\w])для\s+)[\w.]+", re.
 
 
 def _keyword_text(item_name: str) -> str:
-    """Текст для поиска ключевых слов: без «для X», нормализованный, с пробелом в начале для границы слова."""
-    return " " + normalize_item_name(_PURPOSE_RE.sub(" ", str(item_name or "")))
+    """Текст для поиска ключевых слов: без «для X», нормализованный, с пробелами по краям для границ слова."""
+    return " " + normalize_item_name(_PURPOSE_RE.sub(" ", str(item_name or ""))) + " "
 
 
 def _has_key(key: str, text: str) -> bool:
-    """Ключ — начало слова: «бель» находит «бельё», но не «д/белья» (убрано выше) и не «кобель»."""
+    """Ключ — начало слова (а для коротких 1–2 буквенных слов вроде «су», «ет» — слово целиком)."""
+    if len(key) <= 2:
+        return (" " + key + " ") in text
     return (" " + key) in text
 
 
@@ -141,9 +216,15 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
     index_by_name = {}       # название в нижнем регистре -> индекс в списке categories
     for idx, cat in enumerate(categories, start=1):
         valid_cat_numbers[idx] = idx - 1
-        index_by_name[str(cat["name"]).strip().lower().replace("ё", "е")] = idx - 1
+        cat_name = str(cat.get("name") or "").strip()
+        index_by_name[cat_name.lower().replace("ё", "е")] = idx - 1
+        if cat.get("display_name"):
+            disp_name = str(cat["display_name"]).strip()
+            index_by_name[disp_name.lower().replace("ё", "е")] = idx - 1
+        else:
+            disp_name = cat_name
         desc = cat.get("description") or "нет описания"
-        cats_text += f"- {cat['name']} — {desc}\n"
+        cats_text += f"- {disp_name} — {desc}\n"
 
     # Формируем список товаров с 0
     items_text = ""
@@ -152,6 +233,7 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
 
     prompt = (
         "Ты — интеллектуальный классификатор товаров из кассовых чеков по категориям.\n"
+        "Названия товаров и категорий могут быть на русском, казахском или английском языке.\n"
         "Ниже приведен список доступных категорий с их описаниями:\n"
         f"{cats_text}\n"
         "А также список товаров из чека:\n"
@@ -223,9 +305,11 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
                     elif isinstance(c_num, int) and not isinstance(c_num, bool) and c_num in valid_cat_numbers:
                         cat_idx = valid_cat_numbers[c_num]
                     if cat_idx is not None:
-                        cat_name_lower = str(categories[cat_idx].get("name") or "").strip().lower()
+                        cat_obj = categories[cat_idx]
+                        cat_name_lower = str(cat_obj.get("name") or "").strip().lower()
+                        cat_default_key = str(cat_obj.get("default_key") or "").strip().lower()
                         # ML не кладёт в «Другое» сам, неподходящее остаётся «Без категории» (None)
-                        if cat_name_lower != "другое":
+                        if cat_default_key != "other" and cat_name_lower != "другое":
                             results[i] = cat_idx
     except Exception as e:
         logger.warning(f"Ошибка при запросе категоризации к Qwen: {e}")
@@ -253,19 +337,24 @@ def _match_by_keywords(item_name: str, categories: List[dict], desc_keys_list: L
     for idx, cat in enumerate(categories):
         cat_name = str(cat.get("name") or "").strip()
         cat_name_lower = cat_name.lower().replace("ё", "е")
+        default_key = str(cat.get("default_key") or "").strip().lower()
         position = cat.get("position", idx)
         if not isinstance(position, (int, float)):
             position = idx
 
-        # 1. Ключи из описания пользователя (для "Другое" стандартное описание "Всё, что не подошло..." не должно матчить всё подряд)
+        # 1. Ключи из описания пользователя (для "Другое" стандартное описание не должно матчить всё подряд)
         user_keys = desc_keys_list[idx]
-        if cat_name_lower == "другое" and "не подошло" in str(cat.get("description") or "").lower():
+        desc_lower = str(cat.get("description") or "").lower()
+        if (default_key == "other" or cat_name_lower == "другое") and any(
+            marker in desc_lower for marker in ("не подошло", "didn't fit", "сәйкес келм")
+        ):
             user_keys = set()
 
         matched_user_keys = sum(1 for k in user_keys if _has_key(k, norm_name))
 
-        # 2. Ключи из встроенного словаря KEYWORDS
-        builtin_keys = KEYWORDS.get(cat_name_lower, [])
+        # 2. Ключи из встроенного словаря KEYWORDS: по default_key с fallback на русское name
+        kw_key = DEFAULT_KEY_TO_RU.get(default_key, cat_name_lower)
+        builtin_keys = KEYWORDS.get(kw_key, [])
         matched_builtin_keys = sum(1 for k in builtin_keys if _has_key(k, norm_name))
 
         if matched_user_keys > 0:
