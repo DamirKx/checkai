@@ -1182,3 +1182,21 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
   .count { --total: 4820; }
   .scan-beam, .grain { display: none; }
 }
+/* --- Язык интерфейса (I18N_TASKS.md, п. 2.6) --- */
+/* Пока i18n.js не перевёл страницу, её не видно (класс ставит скрипт в <head>, снимает i18n.js или таймер) */
+.i18n-pending body { visibility: hidden; }
+.lang-select { flex: none; height: 42px; padding: 0 28px 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft-bg); color: var(--cream); font: 600 13px/1 var(--mono); letter-spacing: .04em; cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 14px top 19px, right 9px top 19px; background-size: 5px 5px; background-repeat: no-repeat; transition: border-color .2s; }
+.lang-select:hover { border-color: var(--aqua); }
+.lang-select:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
+.lang-picks { display: flex; flex-wrap: wrap; gap: 10px; max-width: 640px; }
+.lang-pick { display: inline-flex; align-items: center; gap: 10px; padding: 8px 15px 8px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--field); color: var(--text-soft); font-size: 14px; font-weight: 600; transition: border-color .2s, transform .25s var(--ease), box-shadow .2s; }
+.lang-pick b { display: grid; min-width: 36px; height: 24px; padding: 0 6px; place-items: center; border-radius: 999px; background: var(--chip); color: var(--cream); font: 700 11px/1 var(--mono); letter-spacing: .04em; }
+.lang-pick:hover { border-color: var(--line-hover); transform: translateY(-2px); }
+.lang-pick[aria-checked="true"] { border-color: var(--aqua); color: var(--cream); box-shadow: 0 0 0 4px color-mix(in srgb, var(--aqua) 18%, transparent); }
+.lang-pick[aria-checked="true"] b { background: var(--aqua); color: var(--on-grad); }
+.lang-picks + .hint { margin-top: 10px; }
+@media (max-width: 560px) {
+  .lang-select { height: 38px; padding: 0 24px 0 9px; font-size: 12px; background-position: right 12px top 17px, right 7px top 17px; }
+}

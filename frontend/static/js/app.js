@@ -11,6 +11,7 @@ const HISTORY_PAGE = 20;
 // Сервер не сообщает этапы распознавания: после загрузки через столько мс показываем «Анализ»
 const OCR_STEP_MS = 5000;
 // Валюты, пока сервер не отдаёт /api/currencies. digits — знаков после запятой при показе
+/* i18n-keys */
 const DEFAULT_CURRENCIES = [
   { code: 'KZT', symbol: '₸', name: 'Казахстанский тенге', digits: 0 },
   { code: 'RUB', symbol: '₽', name: 'Российский рубль', digits: 0 },
@@ -21,6 +22,7 @@ const DEFAULT_CURRENCIES = [
   { code: 'CNY', symbol: '¥', name: 'Китайский юань', digits: 2 },
   { code: 'TRY', symbol: '₺', name: 'Турецкая лира', digits: 2 },
 ];
+/* /i18n-keys */
 // Валюта чеков, сохранённых до появления валют, и чеков, где её не нашли
 const DEFAULT_CURRENCY = 'KZT';
 
@@ -29,14 +31,32 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const round2 = n => Math.round(num(n) * 100) / 100;
-const plural = (n, one, few, many) => {
-  const m10 = n % 10, m100 = n % 100;
-  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
-};
+// Переводы (i18n.js, I18N_TASKS.md, раздел 2): ключ — русский текст, для ru строка не меняется
+const t = (text, params) => I18N.t(text, params);
+// Формы — русские; для kk и en форма берётся из словаря по ключу «one|few|many»
+const plural = (n, one, few, many) => I18N.plural(n, one, few, many);
+// Локаль для дат и чисел: ru-RU / kk-KZ / en-US
+const LOC = () => I18N.locale();
+// Дата с названием месяца или дня недели на языке интерфейса
+const fmtDateName = (d, opts) => I18N.formatDate(d, opts);
 
 // --- Валюты ---
 let currencyList = DEFAULT_CURRENCIES, currencies = Object.fromEntries(DEFAULT_CURRENCIES.map(c => [c.code, c]));
 const currencyInfo = code => currencies[code] || { code, symbol: code, name: code, digits: 2 };
+// Название валюты на языке интерфейса: свой перевод, иначе Intl.DisplayNames, иначе название с сервера
+function currencyName(c) {
+  if (I18N.getLang() === 'ru') return c.name;
+  const own = t(c.name);
+  if (own !== c.name) return own;
+  try {
+    const loc = LOC();
+    if (loc.startsWith(I18N.getLang())) {
+      const n = new Intl.DisplayNames([loc], { type: 'currency' }).of(c.code);
+      if (n && n !== c.code) return n.charAt(0).toUpperCase() + n.slice(1);
+    }
+  } catch (e) {}
+  return c.name;
+}
 // Итоги, аналитика и бюджеты — в основной валюте пользователя
 const baseCurrency = () => currentUser?.base_currency || DEFAULT_CURRENCY;
 // Код валюты из ответа сервера. Старый парсер присылает символ («₸») — переводим его в код
@@ -48,7 +68,7 @@ function currencyCode(value) {
 const curOf = r => r?.currency ? currencyCode(r.currency) : DEFAULT_CURRENCY;
 const money = (n, cur = baseCurrency()) => {
   const c = currencyInfo(cur);
-  return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: c.digits, maximumFractionDigits: c.digits }).format(Number(n) || 0) + ' ' + c.symbol;
+  return new Intl.NumberFormat(LOC(), { minimumFractionDigits: c.digits, maximumFractionDigits: c.digits }).format(Number(n) || 0) + ' ' + c.symbol;
 };
 // Расхождение суммы позиций с итогом, которое считаем ошибкой: 1 ₸, но 1 цент
 const sumMismatch = (sum, total, cur) => Math.abs(round2(sum - total)) >= (currencyInfo(cur).digits ? 0.01 : 1);
@@ -71,8 +91,8 @@ function baseSummary(list) {
 // «≈» перед суммой, в которую вошли пересчитанные по курсу чеки
 const approx = (text, converted) => (converted ? '≈ ' : '') + text;
 function skippedText(skipped) {
-  const parts = Object.entries(skipped).map(([cur, n]) => `${n} ${plural(n, 'чек', 'чека', 'чеков')} в ${cur}`);
-  return parts.length ? `Не учтено: ${parts.join(', ')} — нет курса к ${baseCurrency()}.` : '';
+  const parts = Object.entries(skipped).map(([cur, n]) => t('{n} {w} в {cur}', { n, w: plural(n, 'чек', 'чека', 'чеков'), cur }));
+  return parts.length ? t('Не учтено: {list} — нет курса к {base}.', { list: parts.join(', '), base: baseCurrency() }) : '';
 }
 function showSkipped(id, skipped) {
   const text = skippedText(skipped);
@@ -81,7 +101,7 @@ function showSkipped(id, skipped) {
 }
 const currencyOptions = selected => {
   const list = currencies[selected] ? currencyList : [...currencyList, currencyInfo(selected)];
-  return list.map(c => `<option value="${esc(c.code)}" ${c.code === selected ? 'selected' : ''}>${esc(c.symbol)} ${esc(c.code)} — ${esc(c.name)}</option>`).join('');
+  return list.map(c => `<option value="${esc(c.code)}" ${c.code === selected ? 'selected' : ''}>${esc(c.symbol)} ${esc(c.code)} — ${esc(currencyName(c))}</option>`).join('');
 };
 async function loadCurrencies() {
   try {
@@ -110,7 +130,7 @@ const toTime = s => { const m = String(s || '').match(/(\d{1,2}):(\d{2})/); retu
 // Дата покупки для показа: «29.07.2025 · 16:36»
 const fmtPurchase = r => {
   const d = parseDate(r.date);
-  const day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : (r.date || '');
+  const day = d && !Number.isNaN(+d) ? d.toLocaleDateString(LOC()) : (r.date || '');
   return [day, r.time].filter(Boolean).join(' · ');
 };
 // Для фильтров по периодам берём дату покупки, а если её нет — дату сохранения
@@ -118,12 +138,12 @@ const receiptIso = r => { const d = parseDate(r.date); return d && !Number.isNaN
 // --- Категории ---
 // Категории пользователя приходят с сервера (у гостя — стандартные, без id).
 // «Без категории» — позиция с category_id = null: это не категория, её нельзя изменить или удалить
-const UNCATEGORIZED = { id: null, name: 'Без категории', icon: '○', description: null };
+const UNCATEGORIZED = { id: null, name: 'Без категории', icon: '○', description: null }; // i18n-key
 const CATEGORY_ICONS = ['💄', '🐶', '🎁', '📚', '💊', '🏋', '✈', '🎮', '🧸', '🍷', '🚗', '💡', '📱', '🧾', '🏠', '◌'];
 // Ограничения — те же, что на сервере (CATEGORIES_TASKS.md, п. 0.4)
 const CATEGORY_NAME_MAX = 50, CATEGORY_DESC_MAX = 300, CATEGORY_ICON_MAX = 8;
 // Откуда у позиции категория после распознавания
-const CATEGORY_SOURCE_TEXT = { rule: 'по вашему правилу', ai: 'определил ИИ', keywords: 'по ключевым словам' };
+const CATEGORY_SOURCE_TEXT = { rule: 'по вашему правилу', ai: 'определил ИИ', keywords: 'по ключевым словам' }; // i18n-key
 const categoryById = id => categories.find(c => c.id === id) || UNCATEGORIZED;
 // Категория позиции: по id, а у гостя — по названию
 const itemCategory = it => it.category_id != null ? categoryById(it.category_id)
@@ -133,7 +153,36 @@ const catKey = c => c.id != null ? String(c.id) : c === UNCATEGORIZED ? '' : 'na
 const categoryByKey = key => key === '' ? UNCATEGORIZED
   : String(key).startsWith('name:') ? categories.find(c => c.name === key.slice(5)) || UNCATEGORIZED
   : categoryById(Number(key));
-const categoryLabel = c => `${c.icon} ${c.name}`;
+// Стандартные категории (I18N_TASKS.md, п. 1.3): в базе — на русском, на экране — на языке интерфейса.
+// default_key присылает сервер (null — категорию переименовали). Пока поля нет, узнаём её по русскому названию.
+// Название и описание по-прежнему хранятся и отправляются на русском: логика работает с c.name
+/* i18n-keys */
+const DEFAULT_CATEGORY_TEXT = {
+  groceries: ['Продукты', 'Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости'],
+  clothing: ['Одежда', 'Одежда, обувь, аксессуары'],
+  home: ['Дом и быт', 'Бытовая химия, хозтовары, посуда, мелочи для дома'],
+  transport: ['Транспорт', 'Топливо, такси, проезд, парковка'],
+  cafe: ['Кафе', 'Готовая еда и напитки вне дома: кафе, рестораны, кофейни, доставка еды'],
+  health: ['Здоровье', 'Аптека, лекарства, витамины, медицинские услуги'],
+  entertainment: ['Развлечения', 'Кино, театр, концерты, игры, подписки'],
+  other: ['Другое', 'Всё, что не подошло в другие категории'],
+};
+/* /i18n-keys */
+const DEFAULT_KEY_BY_NAME = Object.fromEntries(Object.entries(DEFAULT_CATEGORY_TEXT).map(([k, [name]]) => [name, k]));
+function defaultKey(c) {
+  if (!c || c === UNCATEGORIZED) return null;
+  if (c.default_key !== undefined) return DEFAULT_CATEGORY_TEXT[c.default_key] ? c.default_key : null;
+  return DEFAULT_KEY_BY_NAME[c.name] || null;
+}
+const categoryName = c => c === UNCATEGORIZED ? t(UNCATEGORIZED.name) : defaultKey(c) ? t(DEFAULT_CATEGORY_TEXT[defaultKey(c)][0]) : c.name;
+// Описание переводим, только если пользователь его не менял
+const categoryDescription = c => {
+  const k = defaultKey(c);
+  return k && c.description === DEFAULT_CATEGORY_TEXT[k][1] ? t(c.description) : c.description;
+};
+// Категория чека приходит названием (r.category)
+const categoryNameByName = name => name ? categoryName(categories.find(c => c.name === name) || { name }) : name;
+const categoryLabel = c => `${c.icon} ${categoryName(c)}`;
 // Варианты для списка категорий; current — ключ выбранной
 const categoryOptions = (current, exclude) => [...categories, UNCATEGORIZED]
   .filter(c => catKey(c) !== exclude)
@@ -154,8 +203,8 @@ function applyTheme(theme, save) {
   // Кнопка-переключатель есть в шапке и на лендинге
   document.querySelectorAll('[data-theme-toggle]').forEach(b => {
     b.firstElementChild.textContent = light ? '☾' : '☀';
-    b.setAttribute('aria-label', light ? 'Включить тёмную тему' : 'Включить светлую тему');
-    b.title = light ? 'Тёмная тема' : 'Светлая тема';
+    b.setAttribute('aria-label', light ? t('Включить тёмную тему') : t('Включить светлую тему'));
+    b.title = light ? t('Тёмная тема') : t('Светлая тема');
   });
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
   renderThemePicks();
@@ -239,8 +288,9 @@ const forgetToken = token => saveAccounts(getAccounts().filter(a => a.token !== 
 // У ошибки есть поле status, чтобы отличать «нет такого эндпоинта» (404/405) от остальных
 const notSupported = e => e.status === 404 || e.status === 405;
 
+/* i18n-keys */
 const STATUS_TEXT = {
-  413: `Файл слишком большой. Максимум — ${MAX_UPLOAD_MB} МБ`,
+  413: 'Файл слишком большой. Максимум — {mb} МБ',
   415: 'Неподдерживаемый формат файла. Подойдут JPG, PNG, WEBP, BMP или TIFF',
   422: 'Проверьте введённые данные',
   429: 'Слишком много запросов. Подождите немного и попробуйте снова',
@@ -250,22 +300,24 @@ const STATUS_TEXT = {
   504: 'Сервер не ответил вовремя. Попробуйте ещё раз',
 };
 const FIELD_NAMES = { email: 'Email', password: 'Пароль', full_name: 'Имя', name: 'Название товара', store: 'Магазин', category: 'Категория', total: 'Итог', quantity: 'Количество', price_per_unit: 'Цена', total_price: 'Сумма', date: 'Дата покупки', time: 'Время', currency: 'Валюта' };
+/* /i18n-keys */
 const hasCyrillic = s => /[а-яё]/i.test(s);
 // Ошибки валидации FastAPI приходят списком на английском или с приставкой «Value error,»
 function validationMessage(d) {
   const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : '';
   const msg = String(d.msg || '').replace(/^Value error,\s*/i, '');
-  if (hasCyrillic(msg)) return msg;
-  if (field === 'email') return 'Введите корректный email (например, user@example.com)';
-  const label = FIELD_NAMES[field] || 'Поле';
-  if (d.type === 'missing') return `${label}: обязательное поле`;
-  if (d.type === 'string_too_long') return `${label}: слишком длинное значение`;
-  if (d.type === 'string_too_short') return `${label}: не может быть пустым`;
-  return `${label}: некорректное значение`;
+  // Сообщение сервера на русском — переводим, если знаем его; уже переведённое сервером t() не меняет
+  if (hasCyrillic(msg)) return t(msg);
+  if (field === 'email') return t('Введите корректный email (например, user@example.com)');
+  const label = t(FIELD_NAMES[field] || 'Поле');
+  if (d.type === 'missing') return t('{label}: обязательное поле', { label });
+  if (d.type === 'string_too_long') return t('{label}: слишком длинное значение', { label });
+  if (d.type === 'string_too_short') return t('{label}: не может быть пустым', { label });
+  return t('{label}: некорректное значение', { label });
 }
 function makeError(status, data) {
-  const detail = Array.isArray(data.detail) ? data.detail.map(validationMessage).join('; ') : data.detail;
-  const err = new Error((typeof detail === 'string' && detail) || STATUS_TEXT[status] || `Ошибка сервера (${status})`);
+  const detail = Array.isArray(data.detail) ? data.detail.map(validationMessage).join('; ') : typeof data.detail === 'string' ? t(data.detail) : data.detail;
+  const err = new Error((typeof detail === 'string' && detail) || (STATUS_TEXT[status] && t(STATUS_TEXT[status], { mb: MAX_UPLOAD_MB })) || t('Ошибка сервера ({status})', { status }));
   err.status = status;
   // Тело ответа целиком: например, retry_after у 429 от /api/insights
   err.data = data;
@@ -277,7 +329,7 @@ function handleResponse(status, data, token) {
   if (status < 200 || status >= 300) throw makeError(status, data);
   return data;
 }
-const networkError = () => Object.assign(new Error('Нет связи с сервером. Проверьте подключение и попробуйте снова'), { status: 0 });
+const networkError = () => Object.assign(new Error(t('Нет связи с сервером. Проверьте подключение и попробуйте снова')), { status: 0 });
 
 // Один запрос обновления на все одновременные 401
 let refreshing = null;
@@ -287,7 +339,7 @@ function refreshSession() {
       const refreshToken = getRefresh();
       if (!refreshToken) return false;
       try {
-        const response = await fetch('/api/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refreshToken }) });
+        const response = await fetch('/api/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept-Language': I18N.getLang() }, body: JSON.stringify({ refresh_token: refreshToken }) });
         if (!response.ok) return false;
         const data = await response.json();
         // Пока шёл запрос, пользователь сменил аккаунт — новые токены уже не нужны
@@ -304,6 +356,8 @@ async function apiRequest(url, options = {}, retried = false) {
   const token = getToken();
   options.headers = options.headers || {};
   if (token) options.headers['Authorization'] = `Bearer ${token}`;
+  // Сервер отвечает ошибками и рекомендациями на языке интерфейса (I18N_TASKS.md, п. 1.1)
+  options.headers['Accept-Language'] = I18N.getLang();
   if (options.body && !(options.body instanceof FormData) && !options.headers['Content-Type']) options.headers['Content-Type'] = 'application/json';
   let response;
   try { response = await fetch(url, options); } catch (e) { throw networkError(); }
@@ -318,6 +372,7 @@ function apiUpload(url, formData, onProgress) {
     const xhr = new XMLHttpRequest(), token = getToken();
     xhr.open('POST', url);
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('Accept-Language', I18N.getLang());
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total, false); };
     xhr.upload.onload = () => onProgress(1, true);
     xhr.onload = () => {
@@ -354,7 +409,7 @@ const serverDate = s => new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z'
 const fmtDateTime = s => {
   if (!s) return '—';
   const d = serverDate(s);
-  return Number.isNaN(+d) ? String(s) : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(+d) ? String(s) : d.toLocaleString(LOC(), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 const showFormError = (id, msg) => { $(id).textContent = msg; $(id).hidden = false; };
 function downloadFile(content, type, filename) {
@@ -378,14 +433,16 @@ function setUser(user) {
   $('userName').textContent = name;
   $('userEmail').textContent = user.email;
   $('userEmail').hidden = !user.full_name;
-  $('userMenuBtn').setAttribute('aria-label', 'Меню аккаунта: ' + name);
+  $('userMenuBtn').setAttribute('aria-label', t('Меню аккаунта: {name}', { name }));
   $('loginBtn').hidden = true;
   $('userChip').hidden = false;
   $('navProfile').hidden = false;
-  $('drawerFoot').textContent = 'Чеки сохраняются в вашем аккаунте';
+  renderDrawerFoot();
   renderAccess(); renderAccountMenu(); renderProfile(); fillProfileForm();
   closeBudgetEditor(); loadBudgets(); loadCategories(); loadRules();
+  applyUserLang(user);
 }
+const renderDrawerFoot = () => { $('drawerFoot').textContent = currentUser ? t('Чеки сохраняются в вашем аккаунте') : t('Войдите, чтобы сохранять чеки'); };
 function setGuest() {
   currentUser = null; receipts = []; budgets = emptyBudgets(); budgetsLocal = false; categoryRules = [];
   resetInsights(null);
@@ -394,7 +451,7 @@ function setGuest() {
   $('loginBtn').hidden = false;
   $('userChip').hidden = true;
   $('navProfile').hidden = true;
-  $('drawerFoot').textContent = 'Войдите, чтобы сохранять чеки';
+  renderDrawerFoot();
   if ($('page-profile').classList.contains('active')) showPage('home');
   rerender();
 }
@@ -411,7 +468,7 @@ function renderAccess() {
   else if (!guest && onHome) showPage('upload');
 }
 function rerender() { renderAccess(); renderHistory(); renderCategories(); renderAnalysis(); renderBudgets(); renderProfile(); renderInsights(); }
-function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast('Вы вышли из аккаунта'); }
+function logout() { if (currentUser) forgetAccount(currentUser.id); removeToken(); setGuest(); toast(t('Вы вышли из аккаунта')); }
 
 // --- Смена аккаунта ---
 async function switchAccount(id) {
@@ -423,22 +480,22 @@ async function switchAccount(id) {
     const user = await apiRequest('/api/auth/me');
     setUser(user);
     await loadReceipts();
-    toast('Вы вошли как ' + (user.full_name || user.email));
+    toast(t('Вы вошли как {name}', { name: user.full_name || user.email }));
   } catch (e) {
-    if (getToken()) { restore(); toast('Не удалось переключиться: ' + e.message); return; }
+    if (getToken()) { restore(); toast(t('Не удалось переключиться: {error}', { error: e.message })); return; }
     // Токен сохранённого аккаунта истёк: возвращаем прежний аккаунт и просим войти заново
     if (prev) { restore(); await checkAuthOnStartup(); }
     openAuth('login');
     $('authEmail').value = acc.user.email;
     $('authPassword').focus();
-    toast('Сессия истекла, войдите снова');
+    toast(t('Сессия истекла, войдите снова'));
   }
 }
 function renderAccountMenu() {
   const others = getAccounts().filter(a => !currentUser || a.user.id !== currentUser.id);
   $('menuAccounts').innerHTML = others.length
     ? others.map(a => `<button class="menu-item" data-switch="${esc(a.user.id)}" type="button" role="menuitem">${avatarHtml(a.user)}<span>${esc(a.user.full_name || a.user.email)}</span></button>`).join('')
-    : '<div class="menu-label">Других аккаунтов на устройстве нет</div>';
+    : `<div class="menu-label">${esc(t('Других аккаунтов на устройстве нет'))}</div>`;
   $('menuAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
 }
 function openAccountMenu() { renderAccountMenu(); $('accountMenu').hidden = false; $('userMenuBtn').setAttribute('aria-expanded', 'true'); }
@@ -457,9 +514,11 @@ $('accountMenu').querySelectorAll('[data-menu]').forEach(b => b.onclick = () => 
 // Всё, кроме форм, считается на клиенте по уже загруженным чекам (receipts)
 const ACTIVITY_WEEKS = 26;
 const DAY_MS = 864e5;
+/* i18n-keys */
 const WEEKDAYS_ON = ['по воскресеньям', 'по понедельникам', 'по вторникам', 'по средам', 'по четвергам', 'по пятницам', 'по субботам'];
+/* /i18n-keys */
 const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-const intText = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+const intText = n => new Intl.NumberFormat(LOC()).format(Math.round(n));
 const daysSince = s => { const d = s ? serverDate(s) : null; return d && !Number.isNaN(+d) ? Math.max(0, Math.floor((Date.now() - d) / DAY_MS)) : 0; };
 // Траты по дням для тепловой карты и подсказки над ячейкой: {YYYY-MM-DD: {count, total}}
 let activityDays = {};
@@ -483,18 +542,18 @@ function renderProfile(animate = false) {
   $('profileName').textContent = u.full_name || u.email.split('@')[0];
   $('profileEmail').textContent = u.email;
   const since = u.created_at ? serverDate(u.created_at) : null;
-  $('profileSince').textContent = since && !Number.isNaN(+since) ? 'с нами с ' + since.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  $('profileSince').textContent = since && !Number.isNaN(+since) ? t('с нами с {date}', { date: fmtDateName(since, { day: 'numeric', month: 'long', year: 'numeric' }) }) : '';
   $('profileChips').innerHTML = [
-    `<span class="pill">${esc(cur.symbol)} ${esc(cur.code)} · основная валюта</span>`,
-    u.full_name ? '' : '<button class="pill pill-action" data-pf-goto="personal" type="button">＋ Добавить имя</button>',
-    accounts.length > 1 ? `<button class="pill pill-action" data-pf-goto="accounts" type="button">${accounts.length} ${plural(accounts.length, 'аккаунт', 'аккаунта', 'аккаунтов')} на устройстве</button>` : '',
+    `<span class="pill">${esc(cur.symbol)} ${esc(cur.code)} · ${esc(t('основная валюта'))}</span>`,
+    u.full_name ? '' : `<button class="pill pill-action" data-pf-goto="personal" type="button">${esc(t('＋ Добавить имя'))}</button>`,
+    accounts.length > 1 ? `<button class="pill pill-action" data-pf-goto="accounts" type="button">${esc(t('{n} {w} на устройстве', { n: accounts.length, w: plural(accounts.length, 'аккаунт', 'аккаунта', 'аккаунтов') }))}</button>` : '',
   ].join('');
   const avg = spent.counted ? spent.total / spent.counted : 0;
   countTo($('profileReceipts'), receipts.length, intText, animate);
   countTo($('profileSpent'), spent.total, n => approx(money(n), spent.converted), animate);
   countTo($('profileAverage'), avg, n => approx(money(n), spent.converted), animate);
   countTo($('profileDays'), days, intText, animate);
-  $('profileDaysLabel').textContent = plural(days, 'день', 'дня', 'дней') + ' с нами';
+  $('profileDaysLabel').textContent = t('{w} с нами', { w: plural(days, 'день', 'дня', 'дней') });
   $('accountsCount').textContent = accounts.length;
   $('dataCount').textContent = receipts.length;
   renderActivity(); renderHabits(); renderStartSteps(); renderProfileAccounts(accounts); renderDataStats();
@@ -518,7 +577,7 @@ function renderActivity() {
     const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = isoDay(d), w = Math.floor(i / 7);
     // Подпись месяца — над первой его неделей; у первой колонки — только если месяц успеет показаться
     if (i % 7 === 0) {
-      if (d.getMonth() !== lastMonth && (w > 0 || d.getDate() <= 10)) months.push(`<span style="grid-column:${w + 1}">${esc(d.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', ''))}</span>`);
+      if (d.getMonth() !== lastMonth && (w > 0 || d.getDate() <= 10)) months.push(`<span style="grid-column:${w + 1}">${esc(fmtDateName(d, { month: 'short' }).replace('.', ''))}</span>`);
       lastMonth = d.getMonth();
     }
     const future = key > todayKey, count = activityDays[key]?.count || 0;
@@ -533,20 +592,20 @@ function renderActivity() {
   $('heatmap').parentElement.style.setProperty('--weeks', ACTIVITY_WEEKS);
   $('heatmapMonths').innerHTML = months.join('');
   $('heatmap').innerHTML = cells.join('');
-  $('heatmap').setAttribute('aria-label', `Активность за полгода: ${total} ${plural(total, 'чек', 'чека', 'чеков')}`);
+  $('heatmap').setAttribute('aria-label', t('Активность за полгода: {n} {w}', { n: total, w: plural(total, 'чек', 'чека', 'чеков') }));
   const topDay = weekdays.indexOf(Math.max(...weekdays));
   $('activityStats').innerHTML = [
-    ['За полгода', `${total} ${plural(total, 'чек', 'чека', 'чеков')}`],
-    ['Рекорд подряд', best ? `${best} ${plural(best, 'день', 'дня', 'дней')}` : '—'],
-    ['Чаще всего', total ? WEEKDAYS_ON[topDay] : '—'],
-  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+    [t('За полгода'), `${total} ${plural(total, 'чек', 'чека', 'чеков')}`],
+    [t('Рекорд подряд'), best ? `${best} ${plural(best, 'день', 'дня', 'дней')}` : '—'],
+    [t('Чаще всего'), total ? t(WEEKDAYS_ON[topDay]) : '—'],
+  ].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
 }
 $('heatmap').addEventListener('pointerover', e => {
   const cell = e.target.closest('.hm-cell:not(.future)'), tip = $('heatTip');
   if (!cell) { tip.hidden = true; return; }
   const s = activityDays[cell.dataset.day], d = new Date(cell.dataset.day + 'T00:00');
-  tip.innerHTML = (s ? `${s.count} ${plural(s.count, 'чек', 'чека', 'чеков')} · ${esc(money(s.total))}` : 'Нет чеков')
-    + `<small>${esc(d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }))}</small>`;
+  tip.innerHTML = (s ? `${s.count} ${plural(s.count, 'чек', 'чека', 'чеков')} · ${esc(money(s.total))}` : esc(t('Нет чеков')))
+    + `<small>${esc(fmtDateName(d, { weekday: 'short', day: 'numeric', month: 'long' }))}</small>`;
   const r = cell.getBoundingClientRect();
   tip.style.left = Math.min(Math.max(r.left + r.width / 2, 90), window.innerWidth - 90) + 'px';
   tip.style.top = r.top + 'px';
@@ -557,7 +616,7 @@ $('heatmap').addEventListener('pointerleave', () => { $('heatTip').hidden = true
 // «Привычки»: любимый магазин, топ-категория, самый крупный чек, сравнение с прошлым месяцем
 function renderHabits() {
   if (!receipts.length) {
-    $('profileHabits').innerHTML = '<li class="pf-empty">Здесь появятся любимый магазин, топ-категория и самый крупный чек.<button class="btn small" data-pf-goto="upload" type="button">Добавить первый чек</button></li>';
+    $('profileHabits').innerHTML = `<li class="pf-empty">${esc(t('Здесь появятся любимый магазин, топ-категория и самый крупный чек.'))}<button class="btn small" data-pf-goto="upload" type="button">${esc(t('Добавить первый чек'))}</button></li>`;
     return;
   }
   const stores = {};
@@ -569,11 +628,11 @@ function renderHabits() {
   const month = monthKey(new Date()), now = monthSpending(month).total, prev = monthSpending(shiftMonth(month, -1)).total;
   const delta = prev ? Math.round((now - prev) / prev * 100) : null;
   const rows = [
-    store && { habit: 'store', value: store.name, label: 'Любимый магазин', meta: `${store.count} ${plural(store.count, 'визит', 'визита', 'визитов')}`, data: store.name },
-    topKey != null && { habit: 'category', value: categoryLabel(categoryByKey(topKey)), label: 'Больше всего тратите на', meta: money(sums[topKey]) },
-    biggest && { habit: 'receipt', value: approx(money(biggestSum), curOf(biggest) !== baseCurrency()), label: 'Самый крупный чек', meta: biggest.store || fmtPurchase(biggest), data: biggest.id },
-    { habit: 'analysis', value: money(now), label: 'Этот месяц', cls: delta > 0 ? 'up' : delta < 0 ? 'down' : '',
-      meta: delta == null ? 'в прошлом месяце трат не было' : delta === 0 ? 'как в прошлом месяце' : `${delta > 0 ? '↑' : '↓'} ${Math.abs(delta)}% к прошлому` },
+    store && { habit: 'store', value: store.name, label: t('Любимый магазин'), meta: `${store.count} ${plural(store.count, 'визит', 'визита', 'визитов')}`, data: store.name },
+    topKey != null && { habit: 'category', value: categoryLabel(categoryByKey(topKey)), label: t('Больше всего тратите на'), meta: money(sums[topKey]) },
+    biggest && { habit: 'receipt', value: approx(money(biggestSum), curOf(biggest) !== baseCurrency()), label: t('Самый крупный чек'), meta: biggest.store || fmtPurchase(biggest), data: biggest.id },
+    { habit: 'analysis', value: money(now), label: t('Этот месяц'), cls: delta > 0 ? 'up' : delta < 0 ? 'down' : '',
+      meta: delta == null ? t('в прошлом месяце трат не было') : delta === 0 ? t('как в прошлом месяце') : t('{arrow} {pct}% к прошлому', { arrow: delta > 0 ? '↑' : '↓', pct: Math.abs(delta) }) },
   ].filter(Boolean);
   $('profileHabits').innerHTML = rows.map((r, i) => `<li><button class="pf-row" data-habit="${r.habit}" data-value="${esc(r.data ?? '')}" type="button"><span class="pf-row-num">${pad2(i + 1)}</span><span class="pf-row-main"><small>${esc(r.label)}</small><b>${esc(r.value)}</b></span><span class="pf-row-meta ${r.cls || ''}">${esc(r.meta)}</span><span class="pf-row-arrow" aria-hidden="true">→</span></button></li>`).join('');
 }
@@ -590,25 +649,25 @@ $('profileHabits').onclick = e => {
 // «Первые шаги»: карточка пропадает, когда всё сделано
 function renderStartSteps() {
   const steps = [
-    { done: !!currentUser.full_name, text: 'Указать имя', go: 'personal' },
-    { done: receipts.length > 0, text: 'Сохранить первый чек', go: 'upload' },
-    { done: overallLimit(budgets) > 0, text: 'Задать лимит на месяц', go: 'budgets' },
-    { done: categoryRules.length > 0, text: 'Перенести товар в нужную категорию', go: 'categories' },
+    { done: !!currentUser.full_name, text: t('Указать имя'), go: 'personal' },
+    { done: receipts.length > 0, text: t('Сохранить первый чек'), go: 'upload' },
+    { done: overallLimit(budgets) > 0, text: t('Задать лимит на месяц'), go: 'budgets' },
+    { done: categoryRules.length > 0, text: t('Перенести товар в нужную категорию'), go: 'categories' },
   ];
   const done = steps.filter(s => s.done).length, all = done === steps.length;
   $('profileStart').hidden = all;
   $('profileGrid').classList.toggle('no-start', all);
-  $('startCount').textContent = `${done} из ${steps.length}`;
+  $('startCount').textContent = t('{done} из {all}', { done, all: steps.length });
   $('startBar').style.width = done / steps.length * 100 + '%';
-  $('startList').innerHTML = steps.map(s => `<li><button class="pf-step${s.done ? ' done' : ''}" data-pf-goto="${s.go}" type="button"><i aria-hidden="true">${s.done ? '✓' : ''}</i><span>${esc(s.text)}${s.done ? '<span class="sr-only"> — готово</span>' : ''}</span></button></li>`).join('');
+  $('startList').innerHTML = steps.map(s => `<li><button class="pf-step${s.done ? ' done' : ''}" data-pf-goto="${s.go}" type="button"><i aria-hidden="true">${s.done ? '✓' : ''}</i><span>${esc(s.text)}${s.done ? `<span class="sr-only"> — ${esc(t('готово'))}</span>` : ''}</span></button></li>`).join('');
 }
 
 function renderProfileAccounts(accounts) {
   const id = currentUser.id;
   $('profileAccounts').innerHTML = accounts.map(a => {
     const me = a.user.id === id;
-    return `<div class="account-row${me ? ' current' : ''}">${avatarHtml(a.user)}<div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? '<span class="pill">Текущий</span>'
-      : `<button class="btn soft small" data-switch="${esc(a.user.id)}" type="button">Перейти</button><button class="icon-btn" data-forget="${esc(a.user.id)}" type="button" title="Убрать с этого устройства" aria-label="Убрать аккаунт ${esc(a.user.email)} с этого устройства">✕</button>`}</div>`;
+    return `<div class="account-row${me ? ' current' : ''}">${avatarHtml(a.user)}<div><b>${esc(a.user.full_name || a.user.email)}</b><small>${esc(a.user.email)}</small></div>${me ? `<span class="pill">${esc(t('Текущий'))}</span>`
+      : `<button class="btn soft small" data-switch="${esc(a.user.id)}" type="button">${esc(t('Перейти'))}</button><button class="icon-btn" data-forget="${esc(a.user.id)}" type="button" title="${esc(t('Убрать с этого устройства'))}" aria-label="${esc(t('Убрать аккаунт {email} с этого устройства', { email: a.user.email }))}">✕</button>`}</div>`;
   }).join('');
   $('profileAccounts').querySelectorAll('[data-switch]').forEach(b => b.onclick = () => switchAccount(+b.dataset.switch));
   $('profileAccounts').querySelectorAll('[data-forget]').forEach(b => b.onclick = () => { forgetAccount(+b.dataset.forget); renderProfile(); renderAccountMenu(); });
@@ -616,11 +675,13 @@ function renderProfileAccounts(accounts) {
 
 function renderDataStats() {
   const items = receipts.reduce((s, r) => s + (r.items || []).length, 0), n = receipts.length, c = categories.length;
-  $('dataStats').innerHTML = [['Чеков', n], ['Позиций', items], ['Категорий', c], ['Правил', categoryRules.length]]
-    .map(([k, v]) => `<div><dt>${k}</dt><dd>${intText(v)}</dd></div>`).join('');
+  $('dataStats').innerHTML = [[t('Чеков'), n], [t('Позиций'), items], [t('Категорий'), c], [t('Правил'), categoryRules.length]]
+    .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${intText(v)}</dd></div>`).join('');
   $('exportAllJson').disabled = $('exportAllCsv').disabled = !n;
-  $('deleteSummary').textContent = (n ? `Удалятся ${n} ${plural(n, 'чек', 'чека', 'чеков')} с фото, ` : 'Удалятся ')
-    + `${c} ${plural(c, 'категория', 'категории', 'категорий')}, правила и лимиты. Восстановить их будет нельзя.`;
+  const cw = plural(c, 'категория', 'категории', 'категорий');
+  $('deleteSummary').textContent = n
+    ? t('Удалятся {n} {w} с фото, {c} {cw}, правила и лимиты. Восстановить их будет нельзя.', { n, w: plural(n, 'чек', 'чека', 'чеков'), c, cw })
+    : t('Удалятся {c} {cw}, правила и лимиты. Восстановить их будет нельзя.', { c, cw });
 }
 $('exportAllJson').onclick = () => {
   const u = currentUser;
@@ -631,7 +692,7 @@ $('exportAllJson').onclick = () => {
     receipts: receipts.map(({ iso, ...r }) => r), categories, category_rules: categoryRules, budgets,
   };
   downloadFile(JSON.stringify(data, null, 2), 'application/json', `checkai_export_${isoDay(new Date())}.json`);
-  toast('Выгрузка готова');
+  toast(t('Выгрузка готова'));
 };
 $('exportAllCsv').onclick = () => exportCsv(receipts);
 
@@ -711,7 +772,7 @@ async function updateMe(body) {
   setUser(user);
   return user;
 }
-const updateMeError = err => notSupported(err) ? 'Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).' : err.message;
+const updateMeError = err => notSupported(err) ? t('Сервер пока не поддерживает редактирование аккаунта (нужен PATCH /api/auth/me).') : err.message;
 $('profileForm').onsubmit = async e => {
   e.preventDefault();
   if (!currentUser) return;
@@ -723,11 +784,11 @@ $('profileForm').onsubmit = async e => {
     const user = await updateMe(body);
     if (body.base_currency) {
       // Старый сервер молча пропустит неизвестное поле — проверяем, что валюта действительно сменилась
-      if (user.base_currency !== body.base_currency) { showFormError('profileError', 'Сервер пока не поддерживает основную валюту — остальные изменения сохранены.'); return; }
+      if (user.base_currency !== body.base_currency) { showFormError('profileError', t('Сервер пока не поддерживает основную валюту — остальные изменения сохранены.')); return; }
       // rate_to_base у чеков пересчитан сервером под новую валюту
       await loadReceipts();
     }
-    toast('Данные сохранены');
+    toast(t('Данные сохранены'));
   } catch (err) {
     showFormError('profileError', updateMeError(err));
   } finally { updatePersonalDirty(); }
@@ -746,13 +807,13 @@ function passwordScore(p) {
 function updatePasswordMeter() {
   const p = $('editPassword').value, s = passwordScore(p);
   $('pwMeter').dataset.score = s;
-  $('editPasswordHint').textContent = !p ? 'Минимум 8 символов' : p.length < 8 ? 'Слишком короткий — минимум 8 символов' : ['', 'Слабый', 'Средний', 'Хороший', 'Надёжный'][s];
+  $('editPasswordHint').textContent = !p ? t('Минимум 8 символов') : p.length < 8 ? t('Слишком короткий — минимум 8 символов') : ['', t('Слабый'), t('Средний'), t('Хороший'), t('Надёжный')][s];
 }
 $('editPassword').oninput = updatePasswordMeter;
 function setPasswordShown(button, shown) {
   $(button.dataset.pwToggle).type = shown ? 'text' : 'password';
-  button.textContent = shown ? 'Скрыть' : 'Показать';
-  button.setAttribute('aria-label', shown ? 'Скрыть пароль' : 'Показать пароль');
+  button.textContent = shown ? t('Скрыть') : t('Показать');
+  button.setAttribute('aria-label', shown ? t('Скрыть пароль') : t('Показать пароль'));
 }
 const hidePasswords = () => document.querySelectorAll('[data-pw-toggle]').forEach(b => setPasswordShown(b, false));
 document.querySelectorAll('[data-pw-toggle]').forEach(b => b.onclick = () => setPasswordShown(b, $(b.dataset.pwToggle).type === 'password'));
@@ -764,13 +825,13 @@ $('securityForm').onsubmit = async e => {
   const email = $('editEmail').value.trim().toLowerCase(), password = $('editPassword').value, body = {};
   if (email !== u.email) body.email = email;
   if (password) body.new_password = password;
-  if (!Object.keys(body).length) { showFormError('securityError', 'Укажите новый email или новый пароль'); return; }
+  if (!Object.keys(body).length) { showFormError('securityError', t('Укажите новый email или новый пароль')); return; }
   body.current_password = $('editCurrentPassword').value;
   const btn = $('securitySave');
   btn.disabled = true;
   try {
     await updateMe(body);
-    toast(body.new_password ? 'Пароль обновлён' : 'Email обновлён');
+    toast(body.new_password ? t('Пароль обновлён') : t('Email обновлён'));
   } catch (err) {
     showFormError('securityError', updateMeError(err));
   } finally { btn.disabled = false; }
@@ -780,7 +841,7 @@ $('deleteForm').onsubmit = async e => {
   const u = currentUser;
   if (!u) return;
   $('deleteError').hidden = true;
-  if (!confirm(`Удалить аккаунт ${u.email} и все его чеки? Это действие нельзя отменить.`)) return;
+  if (!confirm(t('Удалить аккаунт {email} и все его чеки? Это действие нельзя отменить.', { email: u.email }))) return;
   const btn = $('deleteSubmit');
   btn.disabled = true;
   try {
@@ -790,9 +851,9 @@ $('deleteForm').onsubmit = async e => {
       [insightsRetryKey, insightsHiddenKey, insightsSeenKey].forEach(k => localStorage.removeItem(k(u.id)));
     } catch (e) {}
     forgetAccount(u.id); removeToken(); setGuest(); showPage('home');
-    toast('Аккаунт удалён');
+    toast(t('Аккаунт удалён'));
   } catch (err) {
-    showFormError('deleteError', notSupported(err) ? 'Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).' : err.message);
+    showFormError('deleteError', notSupported(err) ? t('Сервер пока не поддерживает удаление аккаунта (нужен DELETE /api/auth/me).') : err.message);
   } finally { btn.disabled = false; }
 };
 
@@ -824,8 +885,8 @@ $('avatarFile').onchange = $('avatarCapture').onchange = e => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  if (!file.type.startsWith('image/')) return showFormError('avatarError', 'Это не изображение');
-  if (file.size > AVATAR_MAX_FILE) return showFormError('avatarError', 'Файл больше 15 МБ');
+  if (!file.type.startsWith('image/')) return showFormError('avatarError', t('Это не изображение'));
+  if (file.size > AVATAR_MAX_FILE) return showFormError('avatarError', t('Файл больше 15 МБ'));
   const url = URL.createObjectURL(file);
   startCrop(url, () => URL.revokeObjectURL(url));
 };
@@ -836,7 +897,7 @@ $('avatarCameraBtn').onclick = async () => {
   try {
     avatarStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
   } catch (err) {
-    showFormError('avatarError', err.name === 'NotAllowedError' ? 'Нет доступа к камере — разрешите его в настройках браузера' : 'Камера не найдена или занята другим приложением');
+    showFormError('avatarError', err.name === 'NotAllowedError' ? t('Нет доступа к камере — разрешите его в настройках браузера') : t('Камера не найдена или занята другим приложением'));
     return;
   }
   if ($('avatarModal').hidden) { stopCamera(); return; }
@@ -874,7 +935,7 @@ function startCrop(src, done) {
     layoutCrop();
     $('avatarStage').focus();
   };
-  img.onerror = () => { done?.(); avatarStep('choose'); showFormError('avatarError', 'Не удалось открыть изображение. Попробуйте JPG или PNG'); };
+  img.onerror = () => { done?.(); avatarStep('choose'); showFormError('avatarError', t('Не удалось открыть изображение. Попробуйте JPG или PNG')); };
   img.src = src;
 }
 // x, y — сдвиг центра фото от центра круга; фото не должно открывать края круга
@@ -915,12 +976,12 @@ $('avatarSave').onclick = () => {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage($('avatarCropImg'), c.left * k, c.top * k, c.W * k, c.H * k);
   try { localStorage.setItem(avatarKey(currentUser), cv.toDataURL('image/jpeg', .88)); }
-  catch (e) { showFormError('avatarError', 'В браузере не хватило места для фото'); return; }
-  refreshAvatars(); closeAvatar(); toast('Фото обновлено');
+  catch (e) { showFormError('avatarError', t('В браузере не хватило места для фото')); return; }
+  refreshAvatars(); closeAvatar(); toast(t('Фото обновлено'));
 };
 $('avatarRemove').onclick = () => {
   try { localStorage.removeItem(avatarKey(currentUser)); } catch (e) {}
-  refreshAvatars(); closeAvatar(); toast('Фото удалено');
+  refreshAvatars(); closeAvatar(); toast(t('Фото удалено'));
 };
 
 // --- Редактор чека: черновик и форма ---
@@ -981,23 +1042,23 @@ const MAX_AMOUNT = 1e9, MAX_QUANTITY = 100000;
 // Текст ошибки или null, если черновик можно сохранять; field — поле позиции index, куда поставить фокус
 function draftProblem(draft) {
   const named = draft.items.filter(i => i.name.trim());
-  if (!named.length && !(num(draft.total) > 0)) return { message: 'Добавьте хотя бы одну позицию с названием или укажите итог чека', index: draft.items.length ? 0 : null };
+  if (!named.length && !(num(draft.total) > 0)) return { message: t('Добавьте хотя бы одну позицию с названием или укажите итог чека'), index: draft.items.length ? 0 : null };
   const unnamed = draft.items.findIndex(i => !i.name.trim() && num(i.total_price));
-  if (unnamed >= 0) return { message: `У позиции №${unnamed + 1} нет названия`, index: unnamed };
+  if (unnamed >= 0) return { message: t('У позиции №{n} нет названия', { n: unnamed + 1 }), index: unnamed };
   const amounts = [num(draft.total), ...draft.items.flatMap(i => [num(i.quantity), num(i.price_per_unit), num(i.total_price)])];
-  if (amounts.some(n => n < 0)) return { message: 'Суммы и количество не могут быть отрицательными' };
-  if (amounts.some(n => n > MAX_AMOUNT)) return { message: 'Слишком большое число: суммы — не больше 1 000 000 000' };
+  if (amounts.some(n => n < 0)) return { message: t('Суммы и количество не могут быть отрицательными') };
+  if (amounts.some(n => n > MAX_AMOUNT)) return { message: t('Слишком большое число: суммы — не больше 1 000 000 000') };
   const noQty = draft.items.findIndex(i => i.name.trim() && !(num(i.quantity) > 0));
-  if (noQty >= 0) return { message: `У позиции №${noQty + 1} количество должно быть больше нуля`, index: noQty, field: 'quantity' };
+  if (noQty >= 0) return { message: t('У позиции №{n} количество должно быть больше нуля', { n: noQty + 1 }), index: noQty, field: 'quantity' };
   const bigQty = draft.items.findIndex(i => num(i.quantity) > MAX_QUANTITY);
-  if (bigQty >= 0) return { message: `У позиции №${bigQty + 1} слишком большое количество (не больше ${intText(MAX_QUANTITY)})`, index: bigQty, field: 'quantity' };
+  if (bigQty >= 0) return { message: t('У позиции №{n} слишком большое количество (не больше {max})', { n: bigQty + 1, max: intText(MAX_QUANTITY) }), index: bigQty, field: 'quantity' };
   return null;
 }
 // Дата покупки в будущем — не ошибка, но переспрашиваем. false — пользователь передумал сохранять
 function confirmDraft(draft) {
   if (!draft.date || draft.date <= isoDay(new Date())) return true;
   const d = parseDate(draft.date);
-  return confirm(`Дата покупки ${d ? d.toLocaleDateString('ru-RU') : draft.date} — в будущем. Точно сохранить?`);
+  return confirm(t('Дата покупки {date} — в будущем. Точно сохранить?', { date: d ? d.toLocaleDateString(LOC()) : draft.date }));
 }
 const numInput = (key, value, label) => `<label>${label}<input class="field" type="number" min="0" step="any" inputmode="decimal" data-k="${key}" value="${esc(value)}"></label>`;
 // Подсказки в редакторе из уже загруженной истории: магазины и товары, у товара — последняя цена и категория
@@ -1037,22 +1098,22 @@ const AUTO_SOURCES = ['ai', 'keywords', 'rule'];
 const canAutoCategorize = it => it.category_source !== 'user' && (itemCategory(it) === UNCATEGORIZED || AUTO_SOURCES.includes(it.category_source));
 function catSourceHtml(source) {
   const text = source && CATEGORY_SOURCE_TEXT[source];
-  return text ? `<small class="cat-source">${esc(text)}</small>` : '';
+  return text ? `<small class="cat-source">${esc(t(text))}</small>` : '';
 }
 
 function mountEditor(root, draft) {
   const hints = historyHints(), listId = root.id + 'Items', storesId = root.id + 'Stores';
   root.innerHTML = `<div class="editor">
     <div class="edit-head">
-      <label>Магазин<input class="field" data-f="store" maxlength="255" value="${esc(draft.store)}" placeholder="Название магазина" list="${esc(storesId)}" autocomplete="off"></label>
-      <label>Дата покупки<input class="field" type="date" data-f="date" value="${esc(draft.date)}"></label>
-      <label>Время<input class="field" type="time" data-f="time" value="${esc(draft.time)}"></label>
+      <label>${esc(t('Магазин'))}<input class="field" data-f="store" maxlength="255" value="${esc(draft.store)}" placeholder="${esc(t('Название магазина'))}" list="${esc(storesId)}" autocomplete="off"></label>
+      <label>${esc(t('Дата покупки'))}<input class="field" type="date" data-f="date" value="${esc(draft.date)}"></label>
+      <label>${esc(t('Время'))}<input class="field" type="time" data-f="time" value="${esc(draft.time)}"></label>
     </div>
     <div class="edit-items" data-items></div>
-    <div><button class="btn soft small" type="button" data-add>＋ Добавить позицию</button></div>
+    <div><button class="btn soft small" type="button" data-add>${esc(t('＋ Добавить позицию'))}</button></div>
     <div class="edit-foot">
       <label><span data-total-label></span><input class="field edit-total" type="number" min="0" step="any" inputmode="decimal" data-f="total" value="${esc(draft.total)}"></label>
-      <label>Валюта<select class="field" data-f="currency">${currencyOptions(draft.currency)}</select></label>
+      <label>${esc(t('Валюта'))}<select class="field" data-f="currency">${currencyOptions(draft.currency)}</select></label>
       <div class="edit-sum" data-sum aria-live="polite"></div>
     </div>
     ${datalist(storesId, [...hints.stores.values()])}${datalist(listId, [...hints.items.values()].map(h => h.name))}
@@ -1063,17 +1124,17 @@ function mountEditor(root, draft) {
   const rowOf = item => list.querySelector(`[data-i="${draft.items.indexOf(item)}"]`);
   const renderItems = () => {
     const sym = currencyInfo(draft.currency).symbol;
-    editor.querySelector('[data-total-label]').textContent = `Итог чека, ${sym}`;
+    editor.querySelector('[data-total-label]').textContent = t('Итог чека, {sym}', { sym });
     list.innerHTML = draft.items.length ? draft.items.map((it, i) => `<div class="edit-item" data-i="${i}">
       <div class="edit-name">
-        <label>Название<input class="field" data-k="name" maxlength="500" value="${esc(it.name)}" placeholder="Товар или услуга" list="${esc(listId)}" autocomplete="off"></label>
-        <button class="icon-btn remove-item" type="button" data-remove aria-label="Удалить позицию ${esc(it.name || '№' + (i + 1))}">✕</button>
+        <label>${esc(t('Название'))}<input class="field" data-k="name" maxlength="500" value="${esc(it.name)}" placeholder="${esc(t('Товар или услуга'))}" list="${esc(listId)}" autocomplete="off"></label>
+        <button class="icon-btn remove-item" type="button" data-remove aria-label="${esc(t('Удалить позицию {name}', { name: it.name || '№' + (i + 1) }))}">✕</button>
       </div>
       <div class="edit-nums">
-        ${numInput('quantity', it.quantity, 'Кол-во')}${numInput('price_per_unit', it.price_per_unit, `Цена, ${esc(sym)}`)}${numInput('total_price', it.total_price, `Сумма, ${esc(sym)}`)}
-        <label>Категория<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${catSourceHtml(it.category_source)}</label>
+        ${numInput('quantity', it.quantity, esc(t('Кол-во')))}${numInput('price_per_unit', it.price_per_unit, esc(t('Цена, {sym}', { sym })))}${numInput('total_price', it.total_price, esc(t('Сумма, {sym}', { sym })))}
+        <label>${esc(t('Категория'))}<select class="field" data-k="category">${categoryOptions(catKey(itemCategory(it)))}</select>${catSourceHtml(it.category_source)}</label>
       </div>
-    </div>`).join('') : '<div class="empty">Позиций нет</div>';
+    </div>`).join('') : `<div class="empty">${esc(t('Позиций нет'))}</div>`;
     updateSum();
   };
   const updateSum = () => {
@@ -1081,8 +1142,8 @@ function mountEditor(root, draft) {
     // Итог не трогали руками — он равен сумме позиций
     if (draft.totalAuto) { draft.total = sum; totalInput.value = sum; }
     const diff = round2(num(draft.total) - sum), mismatch = draft.items.length && sumMismatch(sum, num(draft.total), draft.currency);
-    sumBox.innerHTML = `Сумма позиций: <b>${money(sum, draft.currency)}</b>` + (mismatch
-      ? ` — итог не совпадает с позициями на ${money(Math.abs(diff), draft.currency)}. <button class="text-btn" type="button" data-fix-total>Сделать итогом</button>`
+    sumBox.innerHTML = esc(t('Сумма позиций:')) + ` <b>${money(sum, draft.currency)}</b>` + (mismatch
+      ? ' — ' + esc(t('итог не совпадает с позициями на {diff}.', { diff: money(Math.abs(diff), draft.currency) })) + ` <button class="text-btn" type="button" data-fix-total>${esc(t('Сделать итогом'))}</button>`
       : '');
   };
   // Категория в строке без перерисовки списка, чтобы не терять фокус в поле ввода
@@ -1206,7 +1267,7 @@ function focusDraftProblem(root, problem) {
 // тот же магазин и почти те же позиции. Правила совпадают с crud.find_duplicate на сервере (C.2)
 const DUP_TIME_MIN = 2, DUP_ITEMS_MIN = 0.6, DUP_NODATE_ITEMS_MIN = 0.8;
 // Название магазина или товара для сравнения: регистр, ё, знаки и правовая форма (ТОО, ИП…) не важны
-const normText = s => (' ' + String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9әғқңөұүһі]+/gi, ' ') + ' ')
+const normText = s => (' ' + String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9әғқңөұүһі]+/gi, ' ') + ' ') // i18n-ignore
   .replace(/ (тоо|ип|ао|too|llp|ltd|llc)(?= )/g, ' ').replace(/\s+/g, ' ').trim();
 const minutesOf = s => { const m = String(s || '').match(/(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
 const sameStore = (a, b) => !a || !b || a === b || a.includes(b) || b.includes(a);
@@ -1242,17 +1303,17 @@ function findDuplicate(draft, excludeId = null) {
   });
   return best;
 }
-const receiptBrief = r => [r.store || 'Магазин не определён', fmtPurchase(r) || fmtDateTime(r.created_at), money(r.total, curOf(r))].join(' · ');
+const receiptBrief = r => [r.store || t('Магазин не определён'), fmtPurchase(r) || fmtDateTime(r.created_at), money(r.total, curOf(r))].join(' · ');
 // Окно «Похоже, этот чек уже есть»: 'cancel' | 'open' | 'save'. existing может быть null (сервер не прислал чек)
 let duplicateResolve = null;
 function askDuplicate(existing, canOpen = true) {
   const items = existing?.items?.length || 0;
   $('duplicateText').textContent = existing
-    ? 'В истории уже есть чек с той же суммой, датой и магазином. Если это другая покупка, сохраните его ещё раз.'
-    : 'Сервер нашёл в истории такой же чек. Если это другая покупка, сохраните его ещё раз.';
+    ? t('В истории уже есть чек с той же суммой, датой и магазином. Если это другая покупка, сохраните его ещё раз.')
+    : t('Сервер нашёл в истории такой же чек. Если это другая покупка, сохраните его ещё раз.');
   $('duplicateCard').hidden = !existing;
   $('duplicateCard').innerHTML = existing
-    ? `<b>${esc(existing.store || 'Магазин не определён')}${isManual(existing) ? ' ' + MANUAL_BADGE : ''}</b><span>${esc(fmtPurchase(existing) || '')}</span><strong>${esc(money(existing.total, curOf(existing)))}</strong><small>${items} ${plural(items, 'позиция', 'позиции', 'позиций')} · сохранён ${esc(fmtDateTime(existing.created_at))}</small>`
+    ? `<b>${esc(existing.store || t('Магазин не определён'))}${isManual(existing) ? ' ' + manualBadge() : ''}</b><span>${esc(fmtPurchase(existing) || '')}</span><strong>${esc(money(existing.total, curOf(existing)))}</strong><small>${items} ${plural(items, 'позиция', 'позиции', 'позиций')} · ${esc(t('сохранён {date}', { date: fmtDateTime(existing.created_at) }))}</small>`
     : '';
   $('duplicateOpen').hidden = !existing || !canOpen;
   duplicateResolve?.('cancel');
@@ -1300,7 +1361,7 @@ async function openExisting(existing) {
 // --- Подробности покупки (чека) ---
 // Чек, введённый без фото (поле source с сервера, NEXT_WEEK_TASKS.md, A.2.1)
 const isManual = r => r?.source === 'manual';
-const MANUAL_BADGE = '<span class="pill pill-manual">вручную</span>';
+const manualBadge = () => `<span class="pill pill-manual">${esc(t('вручную'))}</span>`;
 let openedReceipt = null, editDraft = null;
 function openReceipt(id) {
   const r = receipts.find(x => String(x.id) === String(id));
@@ -1309,30 +1370,30 @@ function openReceipt(id) {
   const items = r.items || [];
   $('rmView').hidden = false;
   $('rmEditView').hidden = true;
-  $('rmStore').textContent = r.store || 'Магазин не определён';
-  $('rmDate').textContent = fmtPurchase(r) || 'Дата покупки не распознана';
+  $('rmStore').textContent = r.store || t('Магазин не определён');
+  $('rmDate').textContent = fmtPurchase(r) || t('Дата покупки не распознана');
   const cur = curOf(r), foreign = cur !== baseCurrency();
   $('rmTotal').textContent = money(r.total, cur);
   // Чек не в основной валюте: показываем, сколько это по курсу на дату покупки
   $('rmConverted').hidden = !foreign;
   if (foreign) {
     const converted = toBase(r, r.total), d = parseDate(r.date);
-    const day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : fmtDateTime(r.created_at).split(',')[0];
+    const day = d && !Number.isNaN(+d) ? d.toLocaleDateString(LOC()) : fmtDateTime(r.created_at).split(',')[0];
     $('rmConverted').textContent = converted == null
-      ? 'Курс на дату покупки не найден — чек не учитывается в итогах, аналитике и бюджетах.'
-      : `≈ ${money(converted)} по курсу НБ РК на ${day}`;
+      ? t('Курс на дату покупки не найден — чек не учитывается в итогах, аналитике и бюджетах.')
+      : t('≈ {sum} по курсу НБ РК на {day}', { sum: money(converted), day });
   }
-  $('rmMeta').innerHTML = (isManual(r) ? MANUAL_BADGE : '') + [r.category, foreign && cur, items.length + ' позиций', 'Сохранён ' + fmtDateTime(r.created_at)].filter(Boolean).map(t => `<span class="pill">${esc(t)}</span>`).join('');
+  $('rmMeta').innerHTML = (isManual(r) ? manualBadge() : '') + [categoryNameByName(r.category), foreign && cur, t('{n} позиций', { n: items.length }), t('Сохранён {date}', { date: fmtDateTime(r.created_at) })].filter(Boolean).map(p => `<span class="pill">${esc(p)}</span>`).join('');
   const photo = $('rmPhoto');
   if (r.image_path) { photo.onerror = () => { photo.hidden = true; }; photo.src = r.image_path; photo.hidden = false; }
   else { photo.hidden = true; photo.removeAttribute('src'); }
   $('rmItems').innerHTML = items.length
     ? items.map(it => `<div class="item"><div><strong>${esc(it.name)}</strong><small>${esc(it.quantity ?? 1)} × ${money(it.price_per_unit ?? it.total_price, cur)}</small><span class="item-cat">${esc(categoryLabel(itemCategory(it)))}</span></div><div style="text-align:right"><strong>${money(it.total_price, cur)}</strong></div></div>`).join('')
-    : '<div class="empty">В чеке нет товарных позиций</div>';
+    : `<div class="empty">${esc(t('В чеке нет товарных позиций'))}</div>`;
   // Подсказка, если распознавание потеряло или исказило строку
   const sum = itemsSum(items);
   $('rmWarn').hidden = !(items.length && sumMismatch(sum, num(r.total), cur));
-  $('rmWarn').textContent = `Сумма позиций (${money(sum, cur)}) не совпадает с итогом чека (${money(r.total, cur)}). Возможно, распознавание пропустило или исказило строку — исправьте через «Редактировать».`;
+  $('rmWarn').textContent = t('Сумма позиций ({sum}) не совпадает с итогом чека ({total}). Возможно, распознавание пропустило или исказило строку — исправьте через «Редактировать».', { sum: money(sum, cur), total: money(r.total, cur) });
   openModal('receiptModal', $('receiptClose'));
 }
 function closeReceipt() { closeModal('receiptModal'); openedReceipt = null; editDraft = null; }
@@ -1358,12 +1419,12 @@ async function saveEditedReceipt() {
     const res = await sendReceipt('/api/receipts/' + id, 'PUT', editDraft, id);
     if (!res.saved) return;
     await loadReceipts();
-    toast('Чек обновлён');
+    toast(t('Чек обновлён'));
     openReceipt(id);
   } catch (err) {
     // У /api/receipts/{id} уже есть DELETE, поэтому без PUT сервер ответит 405
-    if (err.status === 405) showFormError('rmEditError', 'Сервер пока не поддерживает редактирование чеков (нужен PUT /api/receipts/{id}).');
-    else if (err.status === 404) { showFormError('rmEditError', 'Чек не найден — возможно, его уже удалили.'); loadReceipts(); }
+    if (err.status === 405) showFormError('rmEditError', t('Сервер пока не поддерживает редактирование чеков (нужен PUT /api/receipts/{id}).'));
+    else if (err.status === 404) { showFormError('rmEditError', t('Чек не найден — возможно, его уже удалили.')); loadReceipts(); }
     else showFormError('rmEditError', err.message);
   } finally { btn.disabled = false; }
 }
@@ -1375,9 +1436,9 @@ $('rmEditCancel').onclick = () => { if (openedReceipt) openReceipt(openedReceipt
 $('rmDownload').onclick = () => { if (openedReceipt) downloadJson(openedReceipt, `receipt_${openedReceipt.id}.json`); };
 $('rmDelete').onclick = async () => { if (openedReceipt && await deleteReceipt(openedReceipt.id)) closeReceipt(); };
 async function deleteReceipt(id) {
-  if (!confirm('Удалить этот чек из истории?')) return false;
-  try { await apiRequest('/api/receipts/' + id, { method: 'DELETE' }); await loadReceipts(); toast('Чек удалён'); return true; }
-  catch (e) { toast('Не удалось удалить: ' + e.message); return false; }
+  if (!confirm(t('Удалить этот чек из истории?'))) return false;
+  try { await apiRequest('/api/receipts/' + id, { method: 'DELETE' }); await loadReceipts(); toast(t('Чек удалён')); return true; }
+  catch (e) { toast(t('Не удалось удалить: {error}', { error: e.message })); return false; }
 }
 // История загружается порциями, чтобы не упереться в лимит сервера на один запрос
 async function fetchAllReceipts() {
@@ -1395,7 +1456,7 @@ async function loadReceipts() {
     rerender();
     // Чеки поменялись — обновляем пометку «устарело» у рекомендаций
     if (insights.loaded && !insights.unsupported) loadInsights();
-  } catch (e) { toast('Не удалось загрузить историю: ' + e.message); }
+  } catch (e) { toast(t('Не удалось загрузить историю: {error}', { error: e.message })); }
 }
 async function checkAuthOnStartup() {
   if (!getToken()) { authPending = false; setGuest(); return; }
@@ -1404,7 +1465,7 @@ async function checkAuthOnStartup() {
     authPending = false;
     setUser(user);
     await loadReceipts();
-  } catch (e) { authPending = false; setGuest(); if (getToken()) toast('Не удалось связаться с сервером'); }
+  } catch (e) { authPending = false; setGuest(); if (getToken()) toast(t('Не удалось связаться с сервером')); }
 }
 
 // --- Окна: фокус внутри окна и возврат фокуса после закрытия ---
@@ -1439,15 +1500,19 @@ function setAuthMode(mode) {
   authMode = mode;
   const register = mode === 'register';
   document.querySelectorAll('.tab').forEach(t => { const on = t.dataset.tab === mode; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
-  $('authTitle').textContent = register ? 'Регистрация' : 'Вход';
+  renderAuthTexts();
   $('nameField').hidden = !register;
-  $('authSubmit').textContent = register ? 'Зарегистрироваться' : 'Войти';
   $('authPassword').autocomplete = register ? 'new-password' : 'current-password';
   // Требования к паролю — только при регистрации: старые аккаунты могут иметь короткий пароль
   if (register) { $('authPassword').minLength = 8; $('authPassword').maxLength = 72; }
   else { $('authPassword').removeAttribute('minlength'); $('authPassword').removeAttribute('maxlength'); }
   $('authPasswordHint').hidden = !register;
   $('authError').hidden = true;
+}
+function renderAuthTexts() {
+  const register = authMode === 'register';
+  $('authTitle').textContent = register ? t('Регистрация') : t('Вход');
+  $('authSubmit').textContent = register ? t('Зарегистрироваться') : t('Войти');
 }
 function openAuth(mode = 'login') {
   setAuthMode(mode);
@@ -1470,11 +1535,13 @@ $('authForm').onsubmit = async e => {
   try {
     const data = await apiRequest(isLogin ? '/api/auth/login' : '/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
     setSession(data);
+    // Новый аккаунт получает язык, выбранный на этом устройстве; при входе — язык из аккаунта
+    langFromDevice = !isLogin;
     setUser(data.user);
     const wasPending = pendingSave;
     closeAuth();
     $('authForm').reset();
-    toast(isLogin ? 'Добро пожаловать!' : 'Регистрация успешна!');
+    toast(isLogin ? t('Добро пожаловать!') : t('Регистрация успешна!'));
     if ($('page-home').classList.contains('active')) showPage('upload');
     await loadReceipts();
     if (wasPending) await saveReceipt();
@@ -1510,7 +1577,7 @@ function setMenu(open) {
   // Закрытое меню уезжает за экран — убираем его из порядка Tab
   $('drawer').inert = !open;
   $('menuBtn').setAttribute('aria-expanded', open);
-  $('menuBtn').setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
+  $('menuBtn').setAttribute('aria-label', open ? t('Закрыть меню') : t('Открыть меню'));
   if (open) $('drawer').querySelector('.nav-link.active, .nav-link')?.focus();
 }
 function closeMenu() { if ($('drawer').classList.contains('open')) setMenu(false); }
@@ -1547,10 +1614,10 @@ function toast(msg, ms = 2800) {
 function showUploadMessage(msg) { $('uploadMessage').textContent = msg; $('uploadMessage').hidden = !msg; }
 // Проверяем файл до отправки, чтобы не ждать ответа сервера 413/415
 function fileProblem(file) {
-  if (/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return 'Формат HEIC (фото с iPhone) не поддерживается. Сохраните фото как JPG или включите в настройках камеры формат «Наиболее совместимый».';
-  if (!(ALLOWED_TYPES.includes(file.type) || (!file.type && ALLOWED_EXT.test(file.name)))) return 'Это не изображение чека. Подойдут JPG, PNG, WEBP, BMP или TIFF.';
-  if (!file.size) return 'Файл пустой. Выберите другое фото.';
-  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return `Файл весит ${(file.size / 1024 / 1024).toFixed(1).replace('.', ',')} МБ, а можно не больше ${MAX_UPLOAD_MB} МБ. Уменьшите фото или снимите с меньшим разрешением.`;
+  if (/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return t('Формат HEIC (фото с iPhone) не поддерживается. Сохраните фото как JPG или включите в настройках камеры формат «Наиболее совместимый».');
+  if (!(ALLOWED_TYPES.includes(file.type) || (!file.type && ALLOWED_EXT.test(file.name)))) return t('Это не изображение чека. Подойдут JPG, PNG, WEBP, BMP или TIFF.');
+  if (!file.size) return t('Файл пустой. Выберите другое фото.');
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return t('Файл весит {size} МБ, а можно не больше {max} МБ. Уменьшите фото или снимите с меньшим разрешением.', { size: new Intl.NumberFormat(LOC(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(file.size / 1024 / 1024), max: MAX_UPLOAD_MB });
   return null;
 }
 function selectFile(file) {
@@ -1607,13 +1674,13 @@ function startSteps(withUpload) {
     const seconds = Math.round((Date.now() - started) / 1000);
     if (uploadedAt == null) {
       setStep('upload', uploadFraction);
-      $('stepsNote').textContent = `Отправляем фото… ${Math.round(uploadFraction * 100)}%`;
+      $('stepsNote').textContent = t('Отправляем фото… {pct}%', { pct: Math.round(uploadFraction * 100) });
       return;
     }
     const sinceUpload = Date.now() - uploadedAt;
     if (sinceUpload < OCR_STEP_MS) setStep('ocr', sinceUpload / OCR_STEP_MS);
     else setStep('ai', 1 - Math.exp(-(sinceUpload - OCR_STEP_MS) / 30000));
-    $('stepsNote').textContent = `${seconds} с`;
+    $('stepsNote').textContent = t('{n} с', { n: seconds });
   };
   tick();
   stepsTimer = setInterval(tick, 400);
@@ -1622,13 +1689,15 @@ function startSteps(withUpload) {
   };
 }
 function stopSteps() { clearInterval(stepsTimer); stepsTimer = null; $('analyzeSteps').hidden = true; }
+let analyzingTest = false;
 function setAnalyzing(on, test) {
   analyzing = on;
+  analyzingTest = !!test;
   ['analyzeBtn', 'removeBtn', 'testBtn', 'chooseBtn', 'cameraBtn', 'manualBtn'].forEach(id => { $(id).disabled = on; });
   $('dropzone').classList.toggle('busy', on);
   $('dropzone').setAttribute('aria-busy', on);
-  $('analyzeBtn').textContent = on && !test ? 'Распознаём…' : 'Распознать чек';
-  $('testBtn').textContent = on && test ? 'Распознаём демо-чек…' : 'Попробовать на демо-чеке →';
+  $('analyzeBtn').textContent = on && !test ? t('Распознаём…') : t('Распознать чек');
+  $('testBtn').textContent = on && test ? t('Распознаём демо-чек…') : t('Попробовать на демо-чеке →');
 }
 async function analyze(test = false) {
   if (analyzing || (!test && !selectedFile)) return;
@@ -1643,10 +1712,10 @@ async function analyze(test = false) {
       fd.append('file', selectedFile);
       payload = await apiUpload('/api/analyze', fd, steps.progress);
     }
-    if (payload.success === false) throw new Error(payload.error || 'Не удалось распознать чек');
+    if (payload.success === false) throw new Error(payload.error ? t(payload.error) : t('Не удалось распознать чек'));
     renderResult(payload.data ?? payload);
   } catch (e) {
-    showUploadMessage('Не получилось распознать чек: ' + e.message);
+    showUploadMessage(t('Не получилось распознать чек: {error}', { error: e.message }));
   } finally {
     stopSteps();
     setAnalyzing(false, test);
@@ -1660,20 +1729,27 @@ window.addEventListener('beforeunload', e => { if (analyzing) e.preventDefault()
 function renderResult(data) {
   lastResult = toDraft(data);
   showResultEditor();
-  // Валюту не нашли на самом чеке — просим проверить
-  const name = currencyInfo(lastResult.currency).name;
-  const hint = { default: `Валюта на чеке не найдена, поставили «${name}». Проверьте поле «Валюта» под позициями.`, country: `Валюта определена по стране чека: «${name}». Если платили в другой валюте, поменяйте её под позициями.` }[lastResult.currency_source];
+  const hint = currencyHintText();
   $('currencyHint').textContent = hint || '';
   $('currencyHint').hidden = !hint;
   scrollToResult();
 }
+// Валюту не нашли на самом чеке — просим проверить
+function currencyHintText() {
+  const name = currencyName(currencyInfo(lastResult.currency));
+  const source = lastResult.currency_source;
+  if (source === 'default') return t('Валюта на чеке не найдена, поставили «{name}». Проверьте поле «Валюта» под позициями.', { name });
+  if (source === 'country') return t('Валюта определена по стране чека: «{name}». Если платили в другой валюте, поменяйте её под позициями.', { name });
+  return '';
+}
+const resultKickerText = () => lastResult && !(lastResult.image_path || lastResult.currency_source) ? t('Новый чек') : t('Результат');
 const scrollToResult = () => { if (window.matchMedia('(max-width: 850px)').matches) $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 function showResultEditor() {
   $('resultPlaceholder').hidden = true;
   $('resultContent').hidden = false;
   $('resultClose').hidden = false;
   $('resultError').hidden = true;
-  $('resultKicker').lastChild.textContent = lastResult.image_path || lastResult.currency_source ? 'Результат' : 'Новый чек';
+  $('resultKicker').lastChild.textContent = resultKickerText();
   mountEditor($('resultEditor'), lastResult);
   showDuplicateHint();
 }
@@ -1683,13 +1759,13 @@ function showDuplicateHint() {
   const dup = d ? byServer || findDuplicate(d) : null;
   $('duplicateHint').hidden = !dup;
   $('duplicateHint').dataset.id = dup ? dup.id : '';
-  if (dup) $('duplicateHintText').textContent = (byServer ? 'Этот чек уже загружали: ' : 'Похоже, этот чек уже сохранён: ') + receiptBrief(dup) + '.';
+  if (dup) $('duplicateHintText').textContent = byServer ? t('Этот чек уже загружали: {brief}.', { brief: receiptBrief(dup) }) : t('Похоже, этот чек уже сохранён: {brief}.', { brief: receiptBrief(dup) });
 }
 $('duplicateHintOpen').onclick = () => { const id = $('duplicateHint').dataset.id; if (id) openReceipt(id); };
 // «Ввести вручную»: пустой черновик — сегодня, сейчас, основная валюта, одна пустая строка
 function startManualReceipt() {
   if (analyzing) return;
-  if (lastResult && !confirm('Заменить текущий черновик чека пустым?')) return;
+  if (lastResult && !confirm(t('Заменить текущий черновик чека пустым?'))) return;
   const now = new Date();
   lastResult = toDraft({ date: isoDay(now), time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`, currency: baseCurrency(), total: 0, items: [{ name: '', quantity: 1, price_per_unit: 0, total_price: 0 }] });
   showResultEditor();
@@ -1707,7 +1783,7 @@ function resetResult() {
   $('resultEditor').innerHTML = '';
   $('resultError').hidden = true;
   $('duplicateHint').hidden = true;
-  $('resultKicker').lastChild.textContent = 'Результат';
+  $('resultKicker').lastChild.textContent = t('Результат');
   $('currencyHint').hidden = true;
   clearFile();
 }
@@ -1715,7 +1791,7 @@ function resetResult() {
 const draftTouched = d => !!(d.store.trim() || num(d.total) > 0 || d.image_path || d.items.some(i => i.name.trim() || num(i.total_price)));
 $('resultClose').onclick = () => {
   if (!lastResult || $('saveReceiptBtn').disabled) return;
-  if (draftTouched(lastResult) && !confirm('Убрать черновик чека? Он ещё не сохранён.')) return;
+  if (draftTouched(lastResult) && !confirm(t('Убрать черновик чека? Он ещё не сохранён.'))) return;
   resetResult();
   // Фокус — туда, откуда обычно начинают: «Ввести вручную» или «Выбрать»
   ($('manualBtn').offsetParent ? $('manualBtn') : $('chooseBtn')).focus();
@@ -1726,7 +1802,7 @@ async function saveReceipt() {
   $('resultError').hidden = true;
   const problem = draftProblem(lastResult);
   if (problem) { showFormError('resultError', problem.message); focusDraftProblem($('resultEditor'), problem); return; }
-  if (!getToken()) { pendingSave = true; openAuth('login'); toast('Войдите, чтобы сохранить чек'); return; }
+  if (!getToken()) { pendingSave = true; openAuth('login'); toast(t('Войдите, чтобы сохранить чек')); return; }
   if (!confirmDraft(lastResult)) return;
   const btn = $('saveReceiptBtn');
   btn.disabled = true;
@@ -1745,8 +1821,8 @@ async function saveReceipt() {
   } catch (e) {
     if (!getToken()) { pendingSave = true; openAuth('login'); }
     // Ошибки проверки на сервере (422) — рядом с редактором, как есть
-    showFormError('resultError', 'Не удалось сохранить: ' + e.message);
-    toast('Ошибка при сохранении: ' + e.message);
+    showFormError('resultError', t('Не удалось сохранить: {error}', { error: e.message }));
+    toast(t('Ошибка при сохранении: {error}', { error: e.message }));
   } finally { btn.disabled = false; }
 }
 $('saveReceiptBtn').onclick = saveReceipt;
@@ -1782,7 +1858,7 @@ const historyList = () => {
 // Список категорий в фильтре — по текущим категориям; выбранная сохраняется, если она ещё есть
 function fillHistoryCategories() {
   const sel = $('historyCategory'), cur = sel.value, keys = [...categories, UNCATEGORIZED].map(catKey);
-  sel.innerHTML = '<option value="all">Все категории</option>' + categoryOptions(null);
+  sel.innerHTML = `<option value="all">${esc(t('Все категории'))}</option>` + categoryOptions(null);
   sel.value = keys.includes(cur) ? cur : 'all';
 }
 // Открыть историю с фильтром: из привычек профиля и карточек рекомендаций
@@ -1808,15 +1884,15 @@ function renderHistory() {
   $('exportCsvBtn').disabled = !list.length;
   const shown = list.slice(0, historyShown);
   let empty;
-  if (!currentUser) empty = '<div class="card empty"><button class="text-btn" data-open-auth type="button">Войдите</button>, чтобы видеть историю.</div>';
-  else if (searching) empty = '<div class="card empty">Ничего не найдено</div>';
-  else empty = '<div class="card empty">Чеков пока нет</div>';
+  if (!currentUser) empty = `<div class="card empty"><button class="text-btn" data-open-auth type="button">${esc(t('Войдите'))}</button>${esc(t(', чтобы видеть историю.'))}</div>`;
+  else if (searching) empty = `<div class="card empty">${esc(t('Ничего не найдено'))}</div>`;
+  else empty = `<div class="card empty">${esc(t('Чеков пока нет'))}</div>`;
   $('historyList').innerHTML = shown.length
-    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="Подробности покупки: ${esc(r.store || 'магазин не определён')}, ${esc(money(r.total, curOf(r)))}${isManual(r) ? ', введён вручную' : ''}"><div><h3>${esc(r.store || 'Магазин не определён')}${isManual(r) ? ' ' + MANUAL_BADGE : ''}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${(r.items || []).length} позиций</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="Удалить чек ${esc(r.store || '')}">Удалить</button></article>`).join('')
+    ? shown.map(r => `<article class="card receipt-row" data-open="${esc(r.id)}" tabindex="0" aria-label="${esc(t('Подробности покупки: {store}, {sum}', { store: r.store || t('магазин не определён'), sum: money(r.total, curOf(r)) }) + (isManual(r) ? t(', введён вручную') : ''))}"><div><h3>${esc(r.store || t('Магазин не определён'))}${isManual(r) ? ' ' + manualBadge() : ''}</h3><p>${esc(fmtPurchase(r) || fmtDateTime(r.created_at))} · ${esc(t('{n} позиций', { n: (r.items || []).length }))}</p></div><div class="receipt-amount">${esc(money(r.total, curOf(r)))}</div><button class="text-btn" data-delete="${esc(r.id)}" type="button" aria-label="${esc(t('Удалить чек {store}', { store: r.store || '' }))}">${esc(t('Удалить'))}</button></article>`).join('')
     : empty;
   const rest = list.length - shown.length;
   $('historyMore').hidden = rest <= 0;
-  $('historyMoreBtn').textContent = `Показать ещё (${Math.min(rest, HISTORY_PAGE)} из ${rest})`;
+  $('historyMoreBtn').textContent = t('Показать ещё ({n} из {rest})', { n: Math.min(rest, HISTORY_PAGE), rest });
   document.querySelectorAll('[data-open-auth]').forEach(b => b.onclick = () => openAuth('login'));
   $('historyList').querySelectorAll('[data-delete]').forEach(b => b.onclick = async e => {
     e.stopPropagation();
@@ -1850,18 +1926,19 @@ const csvNum = n => String(round2(n)).replace('.', ',');
 function exportCsv(list = historyList()) {
   if (!list.length) return;
   // Цены и суммы — в валюте чека, отдельная колонка — итог в основной валюте (пусто, если курса нет)
-  const rows = [['Дата', 'Время', 'Магазин', 'Валюта', 'Итог чека', `Итог в ${baseCurrency()}`, 'Товар', 'Количество', 'Цена', 'Сумма', 'Категория']];
+  // Заголовки — на языке интерфейса; формат дат и чисел одинаковый для всех языков (I18N_TASKS.md, п. 2.9)
+  const rows = [[t('Дата'), t('Время'), t('Магазин'), t('Валюта'), t('Итог чека'), t('Итог в {cur}', { cur: baseCurrency() }), t('Товар'), t('Количество'), t('Цена'), t('Сумма'), t('Категория')]];
   list.forEach(r => {
     const d = parseDate(r.date), day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : '';
     const inBase = toBase(r, r.total);
     const head = [day, r.time || '', r.store || '', curOf(r), csvNum(r.total), inBase == null ? '' : csvNum(inBase)];
     const items = r.items || [];
-    if (!items.length) rows.push([...head, '', '', '', '', r.category || '']);
-    items.forEach(i => rows.push([...head, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), itemCategory(i).name]));
+    if (!items.length) rows.push([...head, '', '', '', '', categoryNameByName(r.category) || '']);
+    items.forEach(i => rows.push([...head, i.name, csvNum(i.quantity ?? 1), csvNum(i.price_per_unit ?? i.total_price), csvNum(i.total_price), categoryName(itemCategory(i))]));
   });
   const csv = '﻿' + rows.map(row => row.map(csvCell).join(';')).join('\r\n');
   downloadFile(csv, 'text/csv;charset=utf-8', `checkai_${isoDay(new Date())}.csv`);
-  toast(`Выгружено чеков: ${list.length}`);
+  toast(t('Выгружено чеков: {n}', { n: list.length }));
 }
 $('exportCsvBtn').onclick = () => exportCsv();
 
@@ -1889,11 +1966,12 @@ async function loadCategories() {
   const user = currentUser;
   let list = [];
   try { list = await apiRequest(user ? '/api/categories' : '/api/categories/defaults'); }
-  catch (e) { toast('Не удалось загрузить категории: ' + e.message); }
+  catch (e) { toast(t('Не удалось загрузить категории: {error}', { error: e.message })); }
   // Пока шёл запрос, пользователь сменил аккаунт или вышел
   if (currentUser?.id !== user?.id) return;
   categories = (Array.isArray(list) ? list : [])
-    .map((c, i) => ({ id: c.id ?? null, name: c.name, description: c.description || null, icon: c.icon || '◌', position: c.position ?? i }))
+    // default_key: undefined — сервер его ещё не присылает, null — категория не стандартная (I18N_TASKS.md, п. 3.2)
+    .map((c, i) => ({ id: c.id ?? null, name: c.name, description: c.description || null, icon: c.icon || '◌', position: c.position ?? i, default_key: c.default_key }))
     .sort((a, b) => a.position - b.position);
   rerender();
 }
@@ -1902,7 +1980,7 @@ async function loadRules() {
   let list = [];
   if (user) {
     try { list = await apiRequest('/api/category-rules'); }
-    catch (e) { toast('Не удалось загрузить правила: ' + e.message); }
+    catch (e) { toast(t('Не удалось загрузить правила: {error}', { error: e.message })); }
   }
   if (currentUser?.id !== user?.id) return;
   categoryRules = Array.isArray(list) ? list : [];
@@ -1925,49 +2003,49 @@ function renderCategories() {
   if (openCategoryKey !== null && !cards.some(c => catKey(c) === openCategoryKey)) openCategoryKey = null;
   $('categoryGrid').innerHTML = cards.length
     ? cards.map((c, i) => categoryCard(c, i, sums[catKey(c)] || 0, rows[catKey(c)] || [], summary.converted)).join('')
-    : '<div class="card empty">Категорий нет</div>';
+    : `<div class="card empty">${esc(t('Категорий нет'))}</div>`;
   renderRules();
 }
 function categoryCard(c, index, sum, rows, converted) {
   const key = catKey(c), open = key === openCategoryKey, own = c !== UNCATEGORIZED, panelId = 'cat-items-' + (key || 'none');
   const menu = own ? `<div class="cat-menu-wrap">
-      <button class="icon-btn cat-menu-btn" type="button" data-cat-menu aria-haspopup="menu" aria-expanded="false" aria-label="Действия с категорией «${esc(c.name)}»">⋯</button>
+      <button class="icon-btn cat-menu-btn" type="button" data-cat-menu aria-haspopup="menu" aria-expanded="false" aria-label="${esc(t('Действия с категорией «{name}»', { name: categoryName(c) }))}">⋯</button>
       <div class="account-menu cat-menu" role="menu" hidden>
-        <button class="menu-item" type="button" role="menuitem" data-cat-action="edit">✎ Изменить</button>
-        <button class="menu-item" type="button" role="menuitem" data-cat-action="up" ${index === 0 ? 'disabled' : ''}>↑ Выше</button>
-        <button class="menu-item" type="button" role="menuitem" data-cat-action="down" ${index >= categories.length - 1 ? 'disabled' : ''}>↓ Ниже</button>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="edit">✎ ${esc(t('Изменить'))}</button>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="up" ${index === 0 ? 'disabled' : ''}>↑ ${esc(t('Выше'))}</button>
+        <button class="menu-item" type="button" role="menuitem" data-cat-action="down" ${index >= categories.length - 1 ? 'disabled' : ''}>↓ ${esc(t('Ниже'))}</button>
         <div class="menu-sep"></div>
-        <button class="menu-item danger-text" type="button" role="menuitem" data-cat-action="delete">✕ Удалить</button>
+        <button class="menu-item danger-text" type="button" role="menuitem" data-cat-action="delete">✕ ${esc(t('Удалить'))}</button>
       </div>
     </div>` : '';
-  const desc = c.description || (own ? '' : 'Не распределено');
+  const desc = categoryDescription(c) || (own ? '' : t('Не распределено'));
   return `<div class="card category-row${open ? ' open' : ''}" data-cat="${esc(key)}">
     <button class="cat-open" type="button" aria-expanded="${open}" aria-controls="${esc(panelId)}">
       <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
-      <span class="cat-text"><b>${esc(c.name)}</b><small>${esc(desc)}</small></span>
+      <span class="cat-text"><b>${esc(categoryName(c))}</b><small>${esc(desc)}</small></span>
       <span class="cat-total"><b>${esc(approx(money(sum), converted && sum > 0))}</b><small>${rows.length} ${plural(rows.length, 'позиция', 'позиции', 'позиций')}</small></span>
     </button>${menu}
   </div>${open ? categoryItems(c, rows, panelId) : ''}`;
 }
 function categoryItems(c, rows, id) {
   const key = catKey(c);
-  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">Пусто</div></div>`;
+  if (!rows.length) return `<div class="card cat-items" id="${esc(id)}"><div class="empty">${esc(t('Пусто'))}</div></div>`;
   // Сначала свежие покупки
   const sorted = rows.slice().sort((a, b) => String(b.r.iso || '').localeCompare(String(a.r.iso || '')));
   const shown = sorted.slice(0, categoryItemsShown), rest = sorted.length - shown.length;
-  const moveSelect = (attr, label) => `<select class="field" ${attr} aria-label="${esc(label)}"><option value="__" selected disabled>Переместить в…</option>${categoryOptions(null, key)}</select>`;
-  return `<div class="card cat-items" id="${esc(id)}" role="region" aria-label="Товары категории «${esc(c.name)}»">
-    <div class="cat-bulk" ${pickedItems.size ? '' : 'hidden'}>Выбрано: <b data-picked-count>${pickedItems.size}</b>
-      ${moveSelect('data-bulk-move', 'Переместить выбранные товары в категорию')}
-      <button class="text-btn" type="button" data-unpick>Снять выбор</button>
+  const moveSelect = (attr, label) => `<select class="field" ${attr} aria-label="${esc(label)}"><option value="__" selected disabled>${esc(t('Переместить в…'))}</option>${categoryOptions(null, key)}</select>`;
+  return `<div class="card cat-items" id="${esc(id)}" role="region" aria-label="${esc(t('Товары категории «{name}»', { name: categoryName(c) }))}">
+    <div class="cat-bulk" ${pickedItems.size ? '' : 'hidden'}>${esc(t('Выбрано:'))} <b data-picked-count>${pickedItems.size}</b>
+      ${moveSelect('data-bulk-move', t('Переместить выбранные товары в категорию'))}
+      <button class="text-btn" type="button" data-unpick>${esc(t('Снять выбор'))}</button>
     </div>
     ${shown.map(({ it, r }) => `<div class="cat-item${pickedItems.has(it.id) ? ' picked' : ''}" data-item="${esc(it.id)}"${canDrag ? ' draggable="true"' : ''}>
-      <input type="checkbox" data-pick="${esc(it.id)}" ${pickedItems.has(it.id) ? 'checked' : ''} aria-label="Выбрать «${esc(it.name)}»">
-      <span class="cat-item-main"><b>${esc(it.name)}</b><small>${esc((r.store || 'Магазин не определён') + ' · ' + (fmtPurchase(r) || fmtDateTime(r.created_at)))}</small></span>
+      <input type="checkbox" data-pick="${esc(it.id)}" ${pickedItems.has(it.id) ? 'checked' : ''} aria-label="${esc(t('Выбрать «{name}»', { name: it.name }))}">
+      <span class="cat-item-main"><b>${esc(it.name)}</b><small>${esc((r.store || t('Магазин не определён')) + ' · ' + (fmtPurchase(r) || fmtDateTime(r.created_at)))}</small></span>
       <span class="cat-item-sum">${esc(money(it.total_price, curOf(r)))}</span>
-      ${moveSelect(`data-move="${esc(it.id)}"`, `Переместить «${it.name}» в категорию`)}
+      ${moveSelect(`data-move="${esc(it.id)}"`, t('Переместить «{name}» в категорию', { name: it.name }))}
     </div>`).join('')}
-    ${rest > 0 ? `<div class="more-row"><button class="btn soft small" type="button" data-more-items>Показать ещё (${Math.min(rest, CATEGORY_ITEMS_PAGE)} из ${rest})</button></div>` : ''}
+    ${rest > 0 ? `<div class="more-row"><button class="btn soft small" type="button" data-more-items>${esc(t('Показать ещё ({n} из {rest})', { n: Math.min(rest, CATEGORY_ITEMS_PAGE), rest }))}</button></div>` : ''}
   </div>`;
 }
 const focusCategory = key => $('categoryGrid').querySelector(`[data-cat="${CSS.escape(key)}"] .cat-open`)?.focus();
@@ -1989,10 +2067,10 @@ async function moveItems(ids, key) {
     await loadReceipts();
     if (remember) loadRules();
     const n = res?.moved ?? ids.length;
-    toast(`Перемещено ${n} ${plural(n, 'позиция', 'позиции', 'позиций')} в «${cat.name}»`);
+    toast(t('Перемещено {n} {w} в «{cat}»', { n, w: plural(n, 'позиция', 'позиции', 'позиций'), cat: categoryName(cat) }));
     if (back !== null) focusCategory(back);
   } catch (e) {
-    toast('Не удалось переместить: ' + e.message);
+    toast(t('Не удалось переместить: {error}', { error: e.message }));
     renderCategories();
   }
 }
@@ -2012,7 +2090,7 @@ async function moveCategory(id, delta) {
     await apiRequest('/api/categories/order', { method: 'PUT', body: JSON.stringify({ ids }) });
     await loadCategories();
     $('categoryGrid').querySelector(`[data-cat="${CSS.escape(String(id))}"] [data-cat-menu]`)?.focus();
-  } catch (e) { toast('Не удалось изменить порядок: ' + e.message); }
+  } catch (e) { toast(t('Не удалось изменить порядок: {error}', { error: e.message })); }
 }
 
 $('categoryGrid').addEventListener('click', e => {
@@ -2095,14 +2173,22 @@ $('rememberMoves').onchange = () => { try { localStorage.setItem(REMEMBER_KEY, $
 
 // --- Окно «Новая категория» / «Изменить категорию» ---
 let editingCategory = null;
-$('categoryIconPicks').innerHTML = CATEGORY_ICONS.map(i => `<button class="icon-pick" type="button" data-icon="${esc(i)}" aria-label="Иконка ${esc(i)}" aria-pressed="false">${esc(i)}</button>`).join('');
+// Что показали в форме: переведённое название стандартной категории не должно уйти на сервер,
+// если пользователь его не менял, иначе категория перестанет быть стандартной (I18N_TASKS.md, п. 2.5)
+let categoryFormInitial = { name: '', description: '' };
+const renderIconPicks = () => {
+  $('categoryIconPicks').innerHTML = CATEGORY_ICONS.map(i => `<button class="icon-pick" type="button" data-icon="${esc(i)}" aria-label="${esc(t('Иконка {icon}', { icon: i }))}" aria-pressed="false">${esc(i)}</button>`).join('');
+  markIconPick();
+};
 const markIconPick = () => $('categoryIconPicks').querySelectorAll('[data-icon]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.icon === $('categoryIcon').value.trim())));
+renderIconPicks();
 function openCategoryModal(cat = null) {
   editingCategory = cat;
-  $('categoryModalTitle').textContent = cat ? 'Изменить категорию' : 'Новая категория';
-  $('categoryName').value = cat?.name || '';
+  $('categoryModalTitle').textContent = cat ? t('Изменить категорию') : t('Новая категория');
+  categoryFormInitial = { name: cat ? categoryName(cat) : '', description: cat ? categoryDescription(cat) || '' : '' };
+  $('categoryName').value = categoryFormInitial.name;
   $('categoryIcon').value = cat?.icon || '';
-  $('categoryDesc').value = cat?.description || '';
+  $('categoryDesc').value = categoryFormInitial.description;
   $('categoryError').hidden = true;
   markIconPick();
   openModal('categoryModal', $('categoryName'));
@@ -2110,12 +2196,13 @@ function openCategoryModal(cat = null) {
 // Те же проверки, что на сервере: длина считается в символах, а не в единицах UTF-16
 const charLen = s => [...s].length;
 function categoryFormProblem(name, icon, description) {
-  if (!name) return 'Введите название категории';
-  if (charLen(name) > CATEGORY_NAME_MAX) return `Название категории: от 1 до ${CATEGORY_NAME_MAX} символов`;
-  if (name.toLowerCase() === UNCATEGORIZED.name.toLowerCase()) return 'Это название зарезервировано';
-  if (categories.some(c => c.id !== editingCategory?.id && c.name.toLowerCase() === name.toLowerCase())) return `Категория «${name}» уже есть`;
-  if (charLen(icon) > CATEGORY_ICON_MAX) return `Иконка — не больше ${CATEGORY_ICON_MAX} символов`;
-  if (charLen(description) > CATEGORY_DESC_MAX) return `Описание — не больше ${CATEGORY_DESC_MAX} символов`;
+  const lower = name.toLowerCase();
+  if (!name) return t('Введите название категории');
+  if (charLen(name) > CATEGORY_NAME_MAX) return t('Название категории: от 1 до {max} символов', { max: CATEGORY_NAME_MAX });
+  if (lower === UNCATEGORIZED.name.toLowerCase() || lower === categoryName(UNCATEGORIZED).toLowerCase()) return t('Это название зарезервировано');
+  if (categories.some(c => c.id !== editingCategory?.id && (c.name.toLowerCase() === lower || categoryName(c).toLowerCase() === lower))) return t('Категория «{name}» уже есть', { name });
+  if (charLen(icon) > CATEGORY_ICON_MAX) return t('Иконка — не больше {max} символов', { max: CATEGORY_ICON_MAX });
+  if (charLen(description) > CATEGORY_DESC_MAX) return t('Описание — не больше {max} символов', { max: CATEGORY_DESC_MAX });
   return null;
 }
 $('categoryIconPicks').onclick = e => {
@@ -2131,13 +2218,22 @@ $('categoryForm').onsubmit = async e => {
   const name = $('categoryName').value.trim(), icon = $('categoryIcon').value.trim(), description = $('categoryDesc').value.trim();
   const problem = categoryFormProblem(name, icon, description);
   if (problem) { showFormError('categoryError', problem); return; }
-  const body = { name, icon: icon || null, description: description || null }, cat = editingCategory, btn = $('categorySave');
+  const cat = editingCategory, btn = $('categorySave');
+  let body = { name, icon: icon || null, description: description || null };
+  // Изменение: PATCH меняет только присланные поля — отправляем то, что пользователь действительно поменял
+  if (cat) {
+    body = {};
+    if (name !== categoryFormInitial.name.trim()) body.name = name;
+    if (icon !== (cat.icon || '').trim()) body.icon = icon || null;
+    if (description !== categoryFormInitial.description.trim()) body.description = description || null;
+    if (!Object.keys(body).length) { closeModal('categoryModal'); return; }
+  }
   btn.disabled = true;
   try {
     await apiRequest(cat ? `/api/categories/${cat.id}` : '/api/categories', { method: cat ? 'PATCH' : 'POST', body: JSON.stringify(body) });
     closeModal('categoryModal');
     await loadCategories();
-    toast(cat ? `Категория «${name}» сохранена` : `Категория «${name}» добавлена`);
+    toast(cat ? t('Категория «{name}» сохранена', { name }) : t('Категория «{name}» добавлена', { name }));
   } catch (err) {
     showFormError('categoryError', err.message);
   } finally { btn.disabled = false; }
@@ -2154,9 +2250,9 @@ function openDeleteCategory(cat) {
   // Позиции за всё время, а не за выбранный период: перенесутся все
   const count = receipts.reduce((n, r) => n + (r.items || []).filter(it => it.category_id === cat.id).length, 0);
   const others = categories.filter(c => c.id !== cat.id), limit = budgets.categories[catKey(cat)];
-  $('deleteCategoryTitle').textContent = `Удалить «${cat.name}»?`;
-  $('deleteCategoryText').textContent = (count ? `В ней ${count} ${plural(count, 'позиция', 'позиции', 'позиций')} за всё время.` : 'В ней пока нет позиций.')
-    + (limit ? ' Лимит бюджета этой категории будет удалён.' : '');
+  $('deleteCategoryTitle').textContent = t('Удалить «{name}»?', { name: categoryName(cat) });
+  $('deleteCategoryText').textContent = (count ? t('В ней {n} {w} за всё время.', { n: count, w: plural(count, 'позиция', 'позиции', 'позиций') }) : t('В ней пока нет позиций.'))
+    + (limit ? ' ' + t('Лимит бюджета этой категории будет удалён.') : '');
   $('deleteMoveTo').innerHTML = others.map(c => `<option value="${esc(c.id)}">${esc(categoryLabel(c))}</option>`).join('');
   // Переносить нечего или некуда — выбор не показываем
   $('deleteMoveRow').hidden = !others.length || !count;
@@ -2177,13 +2273,13 @@ $('deleteCategoryForm').onsubmit = async e => {
     const res = await apiRequest(`/api/categories/${cat.id}` + (moveTo ? `?move_to=${encodeURIComponent(moveTo)}` : ''), { method: 'DELETE' });
     closeModal('deleteCategoryModal');
     if (openCategoryKey === catKey(cat)) openCategoryKey = null;
-    const target = moveTo ? categoryById(Number(moveTo)).name : null;
+    const target = moveTo ? categoryName(categoryById(Number(moveTo))) : null;
     await loadCategories();
     await loadReceipts();
     loadBudgets();
     loadRules();
     const moved = res?.moved_items || 0;
-    toast(`Категория «${cat.name}» удалена` + (moved ? (target ? `, позиции перенесены в «${target}»` : ', позиции остались без категории') : ''));
+    toast(t('Категория «{name}» удалена', { name: categoryName(cat) }) + (moved ? (target ? t(', позиции перенесены в «{target}»', { target }) : t(', позиции остались без категории')) : ''));
   } catch (err) {
     showFormError('deleteCategoryError', err.message);
   } finally { btn.disabled = false; }
@@ -2199,9 +2295,9 @@ function renderRules() {
       const cat = r.category_id != null ? categoryById(r.category_id) : UNCATEGORIZED;
       const shown = cat === UNCATEGORIZED && r.category ? { icon: '◌', name: r.category } : cat;
       return `<div class="rule-row"><span class="rule-pattern">«${esc(r.pattern)}»</span><span aria-hidden="true">→</span><span>${esc(categoryLabel(shown))}</span>
-        <button class="text-btn" type="button" data-rule-del="${esc(r.id)}" aria-label="Удалить правило «${esc(r.pattern)}»">✕</button></div>`;
+        <button class="text-btn" type="button" data-rule-del="${esc(r.id)}" aria-label="${esc(t('Удалить правило «{pattern}»', { pattern: r.pattern }))}">✕</button></div>`;
     }).join('')
-    : '<p class="rules-empty">Правил пока нет</p>';
+    : `<p class="rules-empty">${esc(t('Правил пока нет'))}</p>`;
 }
 $('rulesList').onclick = async e => {
   const b = e.target.closest('[data-rule-del]');
@@ -2211,14 +2307,14 @@ $('rulesList').onclick = async e => {
     await apiRequest(`/api/category-rules/${b.dataset.ruleDel}`, { method: 'DELETE' });
     categoryRules = categoryRules.filter(r => String(r.id) !== b.dataset.ruleDel);
     renderRules();
-    toast('Правило удалено');
-  } catch (err) { b.disabled = false; toast('Не удалось удалить правило: ' + err.message); }
+    toast(t('Правило удалено'));
+  } catch (err) { b.disabled = false; toast(t('Не удалось удалить правило: {error}', { error: err.message })); }
 };
 $('categoriesPeriod').onchange = renderCategories;
 function renderAnalysis() {
   const p = $('analysisPeriod').value, cat = $('analysisCategory').value, list = filtered(p), allSums = sumsByCategory(list);
   const keys = [...categories, UNCATEGORIZED].map(catKey);
-  $('analysisCategory').innerHTML = '<option value="all">Все категории</option>' + categoryOptions(null);
+  $('analysisCategory').innerHTML = `<option value="all">${esc(t('Все категории'))}</option>` + categoryOptions(null);
   $('analysisCategory').value = keys.includes(cat) ? cat : 'all';
   const chosenCat = $('analysisCategory').value;
   // Траты чека в основной валюте; чек без курса не учитываем
@@ -2233,24 +2329,24 @@ function renderAnalysis() {
   showSkipped('analysisSkipped', summary.skipped);
   $('analysisItems').textContent = chosen.reduce((a, r) => a + (r.items || []).length, 0);
   const tops = Object.entries(allSums).sort((a, b) => b[1] - a[1]);
-  $('analysisTop').textContent = tops[0] ? categoryByKey(tops[0][0]).name : '—';
+  $('analysisTop').textContent = tops[0] ? categoryName(categoryByKey(tops[0][0])) : '—';
   const sums = chosenCat === 'all' ? allSums : { [chosenCat]: allSums[chosenCat] || 0 };
   const sorted = Object.entries(sums).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
   const maxSum = Math.max(...sorted.map(x => x[1]));
   $('breakdown').innerHTML = sorted.length
     ? sorted.map(([n, v]) => `<div class="legend-row"><i class="dot" aria-hidden="true"></i><div>${esc(categoryLabel(categoryByKey(n)))}<div class="progress" aria-hidden="true"><i style="width:${Math.round(v / maxSum * 100)}%"></i></div></div><strong>${money(v)}</strong></div>`).join('')
-    : '<div class="empty">Нет данных</div>';
+    : `<div class="empty">${esc(t('Нет данных'))}</div>`;
   const buckets = [], now = new Date();
   if (p === 'week') {
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      buckets.push({ label: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()], key: d.toDateString(), sum: 0 });
+      buckets.push({ label: [t('Вс'), t('Пн'), t('Вт'), t('Ср'), t('Чт'), t('Пт'), t('Сб')][d.getDay()], key: d.toDateString(), sum: 0 });
     }
   } else {
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.push({ label: d.toLocaleDateString('ru-RU', { month: 'short' }), key: d.getFullYear() + '-' + d.getMonth(), sum: 0 });
+      buckets.push({ label: fmtDateName(d, { month: 'short' }), key: d.getFullYear() + '-' + d.getMonth(), sum: 0 });
     }
   }
   chosen.forEach(r => {
@@ -2260,7 +2356,7 @@ function renderAnalysis() {
   });
   const max = Math.max(1, ...buckets.map(b => b.sum));
   $('chart').innerHTML = buckets.map(b => `<div class="bar-wrap" title="${esc(b.label)}: ${money(b.sum)}"><div class="bar" style="height:${Math.max(2, b.sum / max * 82)}%"></div><span class="bar-label">${esc(b.label)}</span></div>`).join('');
-  const title = p === 'week' ? 'Последние 7 дней' : p === 'year' ? 'По месяцам' : 'Динамика за 6 месяцев';
+  const title = p === 'week' ? t('Последние 7 дней') : p === 'year' ? t('По месяцам') : t('Динамика за 6 месяцев');
   $('chartTitle').textContent = title;
   $('chart').setAttribute('aria-label', title + ': ' + buckets.map(b => `${b.label} — ${money(b.sum)}`).join(', '));
 }
@@ -2300,7 +2396,7 @@ async function loadBudgets() {
     try { next = budgetsFromList(await apiRequest('/api/budgets')); }
     catch (e) {
       if (notSupported(e)) { local = true; next = budgetsFromList(readLocalBudgets(user.id)); }
-      else toast('Не удалось загрузить бюджеты: ' + e.message);
+      else toast(t('Не удалось загрузить бюджеты: {error}', { error: e.message }));
     }
   }
   // Пока шёл запрос, пользователь сменил аккаунт или вышел
@@ -2325,7 +2421,7 @@ const monthKey = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 const receiptMonth = r => { const d = new Date(r.iso || ''); return Number.isNaN(+d) ? '' : monthKey(d); };
 const shiftMonth = (key, delta) => { const [y, m] = key.split('-').map(Number); return monthKey(new Date(y, m - 1 + delta, 1)); };
 const monthLabel = key => {
-  const [y, m] = key.split('-').map(Number), s = new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const [y, m] = key.split('-').map(Number), s = fmtDateName(new Date(y, m - 1, 1), { month: 'long', year: 'numeric' });
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 // Траты за месяц в основной валюте: лимиты бюджетов тоже в ней
@@ -2346,29 +2442,30 @@ const overallLimit = b => b.total || Object.values(b.categories).reduce((s, v) =
 const overallSpent = (b, spending) => b.total ? spending.total : Object.keys(b.categories).reduce((s, c) => s + (spending.byCategory[c] || 0), 0);
 const budgetState = (spent, limit) => spent > limit ? 'over' : spent >= limit * BUDGET_WARN ? 'warn' : 'ok';
 const budgetPct = (spent, limit) => limit ? Math.round(spent / limit * 100) : 0;
-const budgetBar = (label, pct) => `<div class="progress budget-bar" role="progressbar" aria-label="${esc(label)}: потрачено ${pct}% лимита" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(pct, 100)}"><i style="width:${Math.min(pct, 100)}%"></i></div>`;
-const leftText = (spent, limit) => spent <= limit ? 'осталось ' + money(limit - spent) : 'перерасход ' + money(spent - limit);
+const budgetBar = (label, pct) => `<div class="progress budget-bar" role="progressbar" aria-label="${esc(t('{label}: потрачено {pct}% лимита', { label, pct }))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(pct, 100)}"><i style="width:${Math.min(pct, 100)}%"></i></div>`;
+const leftText = (spent, limit) => spent <= limit ? t('осталось {sum}', { sum: money(limit - spent) }) : t('перерасход {sum}', { sum: money(spent - limit) });
+const spentOfText = (spent, limit) => t('{spent} из {limit}', { spent: money(spent), limit: money(limit) });
 
 // Прогноз только для текущего месяца: траты в среднем за прошедшие дни × дней в месяце
 function budgetForecast(key, spent, limit) {
   const now = new Date();
   if (key !== monthKey(now) || !limit) return '';
-  if (spent > limit) return `Лимит месяца уже превышен на ${money(spent - limit)}.`;
+  if (spent > limit) return t('Лимит месяца уже превышен на {sum}.', { sum: money(spent - limit) });
   const day = now.getDate(), days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const projected = spent / day * days, perDay = money((limit - spent) / (days - day + 1));
   const pace = projected > limit
-    ? `По текущему темпу к концу месяца выйдет около ${money(projected)} — на ${money(projected - limit)} больше лимита.`
-    : `По текущему темпу к концу месяца выйдет около ${money(projected)} — укладываетесь в лимит.`;
-  return `${pace} Чтобы уложиться, тратьте не больше ${perDay} в день.`;
+    ? t('По текущему темпу к концу месяца выйдет около {sum} — на {over} больше лимита.', { sum: money(projected), over: money(projected - limit) })
+    : t('По текущему темпу к концу месяца выйдет около {sum} — укладываетесь в лимит.', { sum: money(projected) });
+  return `${pace} ${t('Чтобы уложиться, тратьте не больше {sum} в день.', { sum: perDay })}`;
 }
 function budgetRow(b) {
   const pct = budgetPct(b.spent, b.limit);
   return `<div class="card budget-row ${budgetState(b.spent, b.limit)}">
     <div class="cat-icon" aria-hidden="true">${esc(b.icon)}</div>
     <div class="budget-main">
-      <div class="budget-line"><h3>${esc(b.name)}</h3><span class="budget-pct">${pct}%</span></div>
-      ${budgetBar(b.name, pct)}
-      <small>${money(b.spent)} из ${money(b.limit)} · ${leftText(b.spent, b.limit)}</small>
+      <div class="budget-line"><h3>${esc(categoryName(b))}</h3><span class="budget-pct">${pct}%</span></div>
+      ${budgetBar(categoryName(b), pct)}
+      <small>${esc(spentOfText(b.spent, b.limit))} · ${esc(leftText(b.spent, b.limit))}</small>
     </div>
   </div>`;
 }
@@ -2396,21 +2493,21 @@ function renderBudgets() {
   fillBudgetMonths();
   const key = $('budgetMonth').value, spending = monthSpending(key);
   const limit = overallLimit(budgets), spent = overallSpent(budgets, spending), state = budgetState(spent, limit);
-  $('budgetLimitLabel').textContent = budgets.total || !limit ? 'Бюджет на месяц' : 'Сумма лимитов';
+  $('budgetLimitLabel').textContent = budgets.total || !limit ? t('Бюджет на месяц') : t('Сумма лимитов');
   $('budgetLimit').textContent = limit ? money(limit) : '—';
   $('budgetSpent').textContent = approx(money(spent), spending.converted);
   showSkipped('budgetSkipped', spending.skipped);
-  $('budgetLeftLabel').textContent = limit && spent > limit ? 'Перерасход' : 'Осталось';
+  $('budgetLeftLabel').textContent = limit && spent > limit ? t('Перерасход') : t('Осталось');
   $('budgetLeft').textContent = limit ? money(Math.abs(limit - spent)) : '—';
   $('budgetLeft').classList.toggle('over', !!limit && spent > limit);
   if (!hasBudgets(budgets)) {
-    $('budgetOverall').innerHTML = '<div class="card empty"><button class="text-btn" type="button" data-budget-edit>Задать лимиты</button></div>';
+    $('budgetOverall').innerHTML = `<div class="card empty"><button class="text-btn" type="button" data-budget-edit>${esc(t('Задать лимиты'))}</button></div>`;
   } else {
-    const pct = budgetPct(spent, limit), title = budgets.total ? 'Весь месяц' : 'Категории с лимитом', forecast = budgetForecast(key, spent, limit);
+    const pct = budgetPct(spent, limit), title = budgets.total ? t('Весь месяц') : t('Категории с лимитом'), forecast = budgetForecast(key, spent, limit);
     $('budgetOverall').innerHTML = `<div class="card budget-overall ${state}">
-      <div class="budget-line"><h3>${title}</h3><span class="budget-pct">${pct}%</span></div>
+      <div class="budget-line"><h3>${esc(title)}</h3><span class="budget-pct">${pct}%</span></div>
       ${budgetBar(title, pct)}
-      <small>${money(spent)} из ${money(limit)} · ${leftText(spent, limit)}</small>
+      <small>${esc(spentOfText(spent, limit))} · ${esc(leftText(spent, limit))}</small>
       ${forecast ? `<p>${esc(forecast)}</p>` : ''}
     </div>`;
   }
@@ -2423,7 +2520,7 @@ function renderBudgets() {
     .map(budgetRow).join('');
   const unlimited = Object.entries(spending.byCategory).filter(([n, v]) => v > 0 && !budgets.categories[n]).sort((a, b) => b[1] - a[1]);
   $('budgetUnlimited').hidden = !unlimited.length || !hasBudgets(budgets);
-  $('budgetUnlimited').textContent = 'Без лимита: ' + unlimited.map(([k, v]) => `${categoryByKey(k).name} — ${money(v)}`).join(', ');
+  $('budgetUnlimited').textContent = t('Без лимита: {list}', { list: unlimited.map(([k, v]) => `${categoryName(categoryByKey(k))} — ${money(v)}`).join(', ') });
 }
 // Предупреждение, если новый чек довёл лимит до 80% или превысил его. receipt — ответ сервера на сохранение
 function budgetAlert(receipt) {
@@ -2432,26 +2529,28 @@ function budgetAlert(receipt) {
   const spending = monthSpending(receiptMonth({ iso: receiptIso(receipt) })), added = {};
   (receipt.items || []).forEach(i => { const k = catKey(itemCategory(i)); added[k] = (added[k] || 0) + num(i.total_price) * rate; });
   const checks = Object.entries(budgets.categories).filter(([k]) => added[k])
-    .map(([k, limit]) => ({ name: `«${categoryByKey(k).name}»`, limit, spent: spending.byCategory[k] || 0, added: added[k] }));
-  if (budgets.total) checks.push({ name: 'месяца', limit: budgets.total, spent: spending.total, added: num(receipt.total) * rate });
+    .map(([k, limit]) => ({ name: `«${categoryName(categoryByKey(k))}»`, limit, spent: spending.byCategory[k] || 0, added: added[k] }));
+  if (budgets.total) checks.push({ name: t('месяца'), limit: budgets.total, spent: spending.total, added: num(receipt.total) * rate });
   const rank = { ok: 0, warn: 1, over: 2 };
   const crossed = checks
     .filter(c => rank[budgetState(c.spent, c.limit)] > rank[budgetState(c.spent - c.added, c.limit)])
     .sort((a, b) => b.spent / b.limit - a.spent / a.limit)[0];
   if (!crossed) return '';
   return crossed.spent > crossed.limit
-    ? `Бюджет ${crossed.name} превышен на ${money(crossed.spent - crossed.limit)}`
-    : `Бюджет ${crossed.name}: потрачено ${budgetPct(crossed.spent, crossed.limit)}%`;
+    ? t('Бюджет {name} превышен на {sum}', { name: crossed.name, sum: money(crossed.spent - crossed.limit) })
+    : t('Бюджет {name}: потрачено {pct}%', { name: crossed.name, pct: budgetPct(crossed.spent, crossed.limit) });
 }
-const budgetField = (cat, limit, avg) => `<label class="budget-field"><span><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(cat.name)}</span><input class="field" type="number" min="0" step="any" inputmode="decimal" data-cat="${esc(catKey(cat))}" value="${limit ? esc(limit) : ''}" placeholder="Без лимита"><small>${avg ? 'в среднем ' + money(avg) + ' в месяц' : 'трат пока не было'}</small></label>`;
-function openBudgetEditor() {
+const budgetField = (cat, limit, avg) => `<label class="budget-field"><span><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(categoryName(cat))}</span><input class="field" type="number" min="0" step="any" inputmode="decimal" data-cat="${esc(catKey(cat))}" value="${limit ? esc(limit) : ''}" placeholder="${esc(t('Без лимита'))}"><small>${esc(avg ? t('в среднем {sum} в месяц', { sum: money(avg) }) : t('трат пока не было'))}</small></label>`;
+// values — введённые, но не сохранённые лимиты: при смене языка форма перерисовывается без потери ввода
+function openBudgetEditor(values = null) {
   if (!currentUser) return;
   // Лимит — только на категории пользователя: у «Без категории» его нет
   const avg = averageSpending(3);
-  $('budgetFields').innerHTML = categories.map(c => budgetField(c, budgets.categories[catKey(c)], avg.byCategory[catKey(c)])).join('');
-  $('budgetTotalInput').value = budgets.total || '';
-  $('budgetEditorTitle').textContent = `Лимиты на месяц, ${currencyInfo(baseCurrency()).symbol}`;
-  $('budgetTotalHint').textContent = avg.total ? `В среднем ${money(avg.total)} в месяц. Без общего лимита бюджет — сумма лимитов по категориям` : 'Без общего лимита бюджет — сумма лимитов по категориям';
+  $('budgetFields').innerHTML = categories.map(c => budgetField(c, values ? values.categories[catKey(c)] : budgets.categories[catKey(c)], avg.byCategory[catKey(c)])).join('');
+  $('budgetTotalInput').value = values ? values.total : budgets.total || '';
+  $('budgetEditorTitle').textContent = t('Лимиты на месяц, {sym}', { sym: currencyInfo(baseCurrency()).symbol });
+  $('budgetTotalHint').textContent = avg.total ? t('В среднем {sum} в месяц. Без общего лимита бюджет — сумма лимитов по категориям', { sum: money(avg.total) }) : t('Без общего лимита бюджет — сумма лимитов по категориям');
+  if (values) return;
   $('budgetError').hidden = true;
   $('budgetEditor').hidden = false;
   $('budgetEditBtn').setAttribute('aria-expanded', 'true');
@@ -2475,7 +2574,7 @@ $('budgetEditor').onsubmit = async e => {
     closeBudgetEditor();
     renderBudgets();
     $('budgetEditBtn').focus();
-    toast(budgetsLocal ? 'Лимиты сохранены на этом устройстве' : 'Лимиты сохранены');
+    toast(budgetsLocal ? t('Лимиты сохранены на этом устройстве') : t('Лимиты сохранены'));
   } catch (err) {
     showFormError('budgetError', err.message);
   } finally { btn.disabled = false; }
@@ -2506,6 +2605,7 @@ let insights = emptyInsights(null);
 // Заглушка по контракту InsightsOut, пока бэкенд не готов: localStorage.setItem('checkai_insights_stub', '1')
 const INSIGHTS_STUB = (() => { try { return localStorage.getItem('checkai_insights_stub') === '1'; } catch (e) { return false; } })();
 const insightsStub = { data: null, doneAt: 0 };
+// i18n-ignore-start: заглушка для разработки, текст не переводится
 function stubInsightsData() {
   const [a, b] = categories, month = monthKey(new Date()), items = [];
   if (a) items.push({ id: `over_budget:${a.id}:${month}`, type: 'over_budget', priority: 1, title: `${a.name}: лимит превышен на 7 000 ₸`, text: 'Потрачено 32 000 ₸ при лимите 25 000 ₸. Больше всего — 14 покупок на 21 000 ₸.', category_id: a.id, action: { kind: 'open_history', category_id: a.id } });
@@ -2513,6 +2613,7 @@ function stubInsightsData() {
   items.push({ id: `uncategorized::${month}`, type: 'uncategorized', priority: 3, title: '18% трат без категории', text: 'Разложите их по категориям — советы и лимиты станут точнее.', category_id: null, action: { kind: 'open_categories' } });
   return { insights: { summary: 'Это пример по контракту: сервер рекомендаций ещё не подключён.', items }, created_at: new Date().toISOString(), model: 'rules', stale: false };
 }
+// i18n-ignore-end
 const insightsApi = {
   get: () => INSIGHTS_STUB ? Promise.resolve(insightsStub.data || { insights: null }) : apiRequest('/api/insights'),
   start: () => {
@@ -2587,7 +2688,7 @@ async function startInsights() {
     insights.running = false;
     if (e.status === 429) setInsightsRetry(e.data?.retry_after ?? e.data?.detail?.retry_after);
     else if (e.status === 403) { insights.consented = false; insights.error = e.message; }
-    else if (notSupported(e)) insights.error = 'Сервер пока не умеет готовить рекомендации';
+    else if (notSupported(e)) insights.error = t('Сервер пока не умеет готовить рекомендации');
     else insights.error = e.message;
   }
   renderInsights();
@@ -2607,7 +2708,7 @@ function pollInsights(taskId, user) {
     try { task = await insightsApi.task(taskId); }
     catch (e) {
       // Сеть или 5xx — пробуем ещё; задача пропала (404) — сообщаем
-      if (e.status && e.status < 500) return finish(e.status === 404 ? 'Анализ прервался. Попробуйте ещё раз' : e.message);
+      if (e.status && e.status < 500) return finish(e.status === 404 ? t('Анализ прервался. Попробуйте ещё раз') : e.message);
     }
     if (insights.userId !== user.id) return;
     if (task?.status === 'completed') {
@@ -2615,16 +2716,16 @@ function pollInsights(taskId, user) {
       if (!insights.data && task.result?.insights) insights.data = task.result;
       return finish('');
     }
-    if (task?.status === 'failed') return finish(task.error || 'Не удалось подготовить советы. Попробуйте позже');
-    if (++tries >= INSIGHTS_POLL_MAX) return finish('Анализ идёт слишком долго. Загляните сюда чуть позже');
+    if (task?.status === 'failed') return finish(task.error ? t(task.error) : t('Не удалось подготовить советы. Попробуйте позже'));
+    if (++tries >= INSIGHTS_POLL_MAX) return finish(t('Анализ идёт слишком долго. Загляните сюда чуть позже'));
     insights.poll = setTimeout(tick, INSIGHTS_POLL_MS);
   };
   insights.poll = setTimeout(tick, INSIGHTS_POLL_MS);
 }
 
 const clip = (s, n) => { const t = String(s ?? '').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
-const waitText = ms => ms >= 3600e3 ? `${Math.ceil(ms / 3600e3)} ч` : `${Math.max(1, Math.ceil(ms / 60e3))} мин`;
-const insightsModel = m => { const s = String(m || ''); return /^gemini/i.test(s) ? 'Gemini' : /^ollama/i.test(s) ? 'Ollama' : s === 'rules' ? 'базовые правила' : s; };
+const waitText = ms => ms >= 3600e3 ? t('{n} ч', { n: Math.ceil(ms / 3600e3) }) : t('{n} мин', { n: Math.max(1, Math.ceil(ms / 60e3)) });
+const insightsModel = m => { const s = String(m || ''); return /^gemini/i.test(s) ? 'Gemini' : /^ollama/i.test(s) ? 'Ollama' : s === 'rules' ? t('базовые правила') : s; };
 // Карточки по приоритету, без скрытых пользователем
 function visibleInsights() {
   const items = insights.data?.insights?.items;
@@ -2637,14 +2738,14 @@ function insightAction(it) {
   if (a.kind === 'set_budget') {
     // Категорию удалили или сумма странная — кнопку не показываем
     if (!cat || cat === UNCATEGORIZED || !(num(a.amount) > 0)) return '';
-    if (budgets.categories[catKey(cat)] === round2(a.amount)) return '<span class="ins-done">✓ Лимит поставлен</span>';
-    return `<button class="btn small" type="button" data-ins-act="set_budget" data-cat="${esc(catKey(cat))}" data-amount="${esc(round2(a.amount))}">Поставить лимит ${esc(money(a.amount))}</button>`;
+    if (budgets.categories[catKey(cat)] === round2(a.amount)) return `<span class="ins-done">✓ ${esc(t('Лимит поставлен'))}</span>`;
+    return `<button class="btn small" type="button" data-ins-act="set_budget" data-cat="${esc(catKey(cat))}" data-amount="${esc(round2(a.amount))}">${esc(t('Поставить лимит {sum}', { sum: money(a.amount) }))}</button>`;
   }
   if (a.kind === 'open_history') {
     const key = cat && cat !== UNCATEGORIZED ? catKey(cat) : 'all';
-    return `<button class="btn soft small" type="button" data-ins-act="open_history" data-cat="${esc(key)}" data-period="${INSIGHT_MONTH_TYPES.includes(it.type) ? 'month' : 'all'}">Смотреть траты</button>`;
+    return `<button class="btn soft small" type="button" data-ins-act="open_history" data-cat="${esc(key)}" data-period="${INSIGHT_MONTH_TYPES.includes(it.type) ? 'month' : 'all'}">${esc(t('Смотреть траты'))}</button>`;
   }
-  if (a.kind === 'open_categories') return '<button class="btn soft small" type="button" data-ins-act="open_categories">Разобрать</button>';
+  if (a.kind === 'open_categories') return `<button class="btn soft small" type="button" data-ins-act="open_categories">${esc(t('Разобрать'))}</button>`;
   return '';
 }
 const insightCard = it => `<article class="ins-card" data-insight="${esc(it.id)}">
@@ -2652,7 +2753,7 @@ const insightCard = it => `<article class="ins-card" data-insight="${esc(it.id)}
     <div class="ins-main">
       <h3>${esc(clip(it.title, 90))}</h3>
       <p>${esc(clip(it.text, 400))}</p>
-      <div class="ins-actions">${insightAction(it)}<button class="text-btn" type="button" data-ins-hide aria-label="Скрыть совет «${esc(clip(it.title, 90))}»">Скрыть</button></div>
+      <div class="ins-actions">${insightAction(it)}<button class="text-btn" type="button" data-ins-hide aria-label="${esc(t('Скрыть совет «{title}»', { title: clip(it.title, 90) }))}">${esc(t('Скрыть'))}</button></div>
     </div>
   </article>`;
 const INSIGHTS_SKELETON = '<div class="ins-cards" aria-hidden="true">' + '<div class="ins-card ins-skeleton"><span class="ins-ico"></span><div class="ins-main"><i></i><i></i><i></i></div></div>'.repeat(3) + '</div>';
@@ -2670,30 +2771,30 @@ function renderInsights() {
   // При «устарело» кнопка обновления — в плашке, вторая в шапке не нужна
   refresh.hidden = !data || insights.running || !!data.stale;
   refresh.disabled = blocked;
-  refresh.textContent = blocked ? `Обновить через ${waitText(wait)}` : 'Обновить';
-  const startBtn = label => `<button class="btn" type="button" data-ins-start ${blocked ? 'disabled' : ''}>${blocked ? `Можно через ${waitText(wait)}` : label}</button>`;
+  refresh.textContent = blocked ? t('Обновить через {wait}', { wait: waitText(wait) }) : t('Обновить');
+  const startBtn = label => `<button class="btn" type="button" data-ins-start ${blocked ? 'disabled' : ''}>${esc(blocked ? t('Можно через {wait}', { wait: waitText(wait) }) : label)}</button>`;
   let html;
-  if (insights.running) html = `${INSIGHTS_SKELETON}<p class="ins-status" role="status"><span class="ins-spin" aria-hidden="true"></span>Анализируем расходы…</p>`;
+  if (insights.running) html = `${INSIGHTS_SKELETON}<p class="ins-status" role="status"><span class="ins-spin" aria-hidden="true"></span>${esc(t('Анализируем расходы…'))}</p>`;
   else if (!data && receipts.length < INSIGHTS_MIN_RECEIPTS) {
     const n = INSIGHTS_MIN_RECEIPTS - receipts.length;
-    html = `<div class="ins-intro"><p class="ins-lead">Добавьте ещё ${n} ${plural(n, 'чек', 'чека', 'чеков')} — советам нужна история.</p><div class="button-row"><button class="btn soft" type="button" data-ins-upload>＋ Добавить чек</button></div></div>`;
+    html = `<div class="ins-intro"><p class="ins-lead">${esc(t('Добавьте ещё {n} {w} — советам нужна история.', { n, w: plural(n, 'чек', 'чека', 'чеков') }))}</p><div class="button-row"><button class="btn soft" type="button" data-ins-upload>${esc(t('＋ Добавить чек'))}</button></div></div>`;
   } else if (!data && !insightsConsent()) {
     html = `<div class="ins-intro">
-      <p class="ins-lead">ИИ проанализирует ваши расходы и даст советы: где перерасход, какой лимит поставить, что повторяется каждый месяц.</p>
-      <p class="ins-note">Для этого во внешний сервис (Google Gemini) уйдёт обезличенная сводка — только суммы по категориям и магазинам и ваши лимиты. Имя, email и фото чеков не передаются.</p>
-      <div class="button-row"><button class="btn" type="button" data-ins-consent ${blocked ? 'disabled' : ''}>Разрешить и проанализировать</button></div>
+      <p class="ins-lead">${esc(t('ИИ проанализирует ваши расходы и даст советы: где перерасход, какой лимит поставить, что повторяется каждый месяц.'))}</p>
+      <p class="ins-note">${esc(t('Для этого во внешний сервис (Google Gemini) уйдёт обезличенная сводка — только суммы по категориям и магазинам и ваши лимиты. Имя, email и фото чеков не передаются.'))}</p>
+      <div class="button-row"><button class="btn" type="button" data-ins-consent ${blocked ? 'disabled' : ''}>${esc(t('Разрешить и проанализировать'))}</button></div>
     </div>`;
   } else if (!data) {
-    html = `<div class="ins-intro"><p class="ins-lead">Посмотрим, что можно улучшить в расходах.</p><div class="button-row">${startBtn('Проанализировать')}</div></div>`;
+    html = `<div class="ins-intro"><p class="ins-lead">${esc(t('Посмотрим, что можно улучшить в расходах.'))}</p><div class="button-row">${startBtn(t('Проанализировать'))}</div></div>`;
   } else {
     const items = visibleInsights(), all = data.insights.items || [], when = data.created_at ? serverDate(data.created_at) : null;
-    const updated = when && !Number.isNaN(+when) ? `Обновлено ${when.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} в ${when.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : '';
-    html = (data.stale ? `<div class="ins-stale" role="status"><span>Есть новые чеки — обновить советы?</span>${blocked ? `<small>Можно через ${waitText(wait)}</small>` : '<button class="text-btn" type="button" data-ins-start>Обновить</button>'}</div>` : '')
+    const updated = when && !Number.isNaN(+when) ? t('Обновлено {date} в {time}', { date: when.toLocaleDateString(LOC(), { day: '2-digit', month: '2-digit' }), time: when.toLocaleTimeString(LOC(), { hour: '2-digit', minute: '2-digit' }) }) : '';
+    html = (data.stale ? `<div class="ins-stale" role="status"><span>${esc(t('Есть новые чеки — обновить советы?'))}</span>${blocked ? `<small>${esc(t('Можно через {wait}', { wait: waitText(wait) }))}</small>` : `<button class="text-btn" type="button" data-ins-start>${esc(t('Обновить'))}</button>`}</div>` : '')
       + (data.insights.summary ? `<p class="ins-summary">${esc(clip(data.insights.summary, 400))}</p>` : '')
       + (items.length ? `<div class="ins-cards">${items.map(insightCard).join('')}</div>`
-        : all.length ? '<p class="ins-empty">Все советы скрыты. <button class="text-btn" type="button" data-ins-unhide>Показать снова</button></p>'
-        : '<p class="ins-empty">Особых советов нет — расходы выглядят ровно.</p>')
-      + `<p class="ins-foot">${esc([updated, insightsModel(data.model)].filter(Boolean).join(' · '))}${data.model === 'rules' && !INSIGHTS_STUB ? '<br>ИИ сейчас недоступен — показаны базовые советы' : ''}</p>`;
+        : all.length ? `<p class="ins-empty">${esc(t('Все советы скрыты.'))} <button class="text-btn" type="button" data-ins-unhide>${esc(t('Показать снова'))}</button></p>`
+        : `<p class="ins-empty">${esc(t('Особых советов нет — расходы выглядят ровно.'))}</p>`)
+      + `<p class="ins-foot">${esc([updated, insightsModel(data.model)].filter(Boolean).join(' · '))}${data.model === 'rules' && !INSIGHTS_STUB ? '<br>' + esc(t('ИИ сейчас недоступен — показаны базовые советы')) : ''}</p>`;
   }
   if (insights.error) html += `<div class="auth-error" role="alert">${esc(insights.error)}</div>`;
   $('insightsBody').innerHTML = html;
@@ -2709,10 +2810,10 @@ function renderInsightsTeaser() {
   el.hidden = !currentUser || !insights.loaded || insights.unsupported;
   if (el.hidden) return;
   const items = visibleInsights(), seen = readIdList(insightsSeenKey(insights.userId)), fresh = items.filter(i => !seen.includes(String(i.id))).length;
-  $('profileInsightsText').textContent = insights.running ? 'Анализируем расходы…'
+  $('profileInsightsText').textContent = insights.running ? t('Анализируем расходы…')
     : fresh ? `${fresh} ${plural(fresh, 'новый совет', 'новых совета', 'новых советов')}`
-    : items.length ? `${items.length} ${plural(items.length, 'совет', 'совета', 'советов')} по расходам`
-    : 'ИИ-советы по вашим расходам';
+    : items.length ? t('{n} {w} по расходам', { n: items.length, w: plural(items.length, 'совет', 'совета', 'советов') })
+    : t('ИИ-советы по вашим расходам');
 }
 async function applyBudgetSuggestion(btn) {
   const key = btn.dataset.cat, amount = Number(btn.dataset.amount);
@@ -2721,10 +2822,10 @@ async function applyBudgetSuggestion(btn) {
   try {
     await saveBudgets({ total: budgets.total, categories: { ...budgets.categories, [key]: amount } });
     renderBudgets(); renderStartSteps(); renderInsights();
-    toast(`Лимит на «${categoryByKey(key).name}» — ${money(amount)} в месяц`);
+    toast(t('Лимит на «{name}» — {sum} в месяц', { name: categoryName(categoryByKey(key)), sum: money(amount) }));
     // Лимиты поменялись — сервер пометит анализ устаревшим
     loadInsights();
-  } catch (e) { btn.disabled = false; toast('Не удалось поставить лимит: ' + e.message); }
+  } catch (e) { btn.disabled = false; toast(t('Не удалось поставить лимит: {error}', { error: e.message })); }
 }
 $('insights').addEventListener('click', e => {
   const t = e.target.closest('button');
@@ -2743,6 +2844,83 @@ $('insights').addEventListener('click', e => {
   else if (t.dataset.insAct === 'open_categories') showPage('categories');
 });
 $('profileInsights').onclick = () => showPage('analysis');
+
+// --- Язык интерфейса (I18N_TASKS.md, п. 2.6) ---
+// Выбор хранится в localStorage (i18n.js) и у вошедшего — в preferences.language на сервере.
+// При входе и при старте язык берётся из аккаунта; новый аккаунт получает язык с этого устройства
+let langFromDevice = false;
+function renderLangPicks() {
+  const lang = I18N.getLang();
+  document.querySelectorAll('[data-lang-select]').forEach(s => { s.value = lang; });
+  document.querySelectorAll('[data-lang-pick]').forEach(b => {
+    const on = b.dataset.langPick === lang;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+async function saveLangOnServer(lang) {
+  try { await updateMe({ preferences: { language: lang } }); }
+  // Старый сервер поле пропускает (язык остаётся только в браузере), 404/405 — тоже не ошибка для пользователя
+  catch (e) { if (!notSupported(e)) toast(t('Не удалось сохранить язык в аккаунте: {error}', { error: e.message })); }
+}
+function chooseLang(lang) {
+  const next = I18N.normalize(lang);
+  if (!next) return;
+  I18N.setLang(next);
+  renderLangPicks();
+  if (currentUser && I18N.normalize(currentUser.preferences?.language) !== next) saveLangOnServer(next);
+}
+function applyUserLang(user) {
+  const server = I18N.normalize(user?.preferences?.language);
+  if (langFromDevice) {
+    langFromDevice = false;
+    if (server !== I18N.getLang()) saveLangOnServer(I18N.getLang());
+    return;
+  }
+  if (server && server !== I18N.getLang()) { I18N.setLang(server); renderLangPicks(); }
+}
+document.querySelectorAll('[data-lang-select]').forEach(s => { s.onchange = () => chooseLang(s.value); });
+document.querySelectorAll('[data-lang-pick]').forEach(b => { b.onclick = () => chooseLang(b.dataset.langPick); });
+$('langPicks').addEventListener('keydown', e => {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!step) return;
+  e.preventDefault();
+  const langs = I18N.LANGS, next = langs[(langs.indexOf(I18N.getLang()) + step + langs.length) % langs.length];
+  chooseLang(next);
+  document.querySelector(`[data-lang-pick="${next}"]`).focus();
+});
+// Смена языка без перезагрузки: статический текст переводит i18n.js, здесь — всё, что рисует app.js.
+// Черновик чека и введённые лимиты не теряются: редактор пересобирается из того же объекта черновика
+I18N.onChange(() => {
+  applyTheme(document.documentElement.dataset.theme || 'dark', false);
+  $('menuBtn').setAttribute('aria-label', $('drawer').classList.contains('open') ? t('Закрыть меню') : t('Открыть меню'));
+  renderAuthTexts();
+  document.querySelectorAll('[data-pw-toggle]').forEach(b => setPasswordShown(b, $(b.dataset.pwToggle).type === 'text'));
+  updatePasswordMeter();
+  setAnalyzing(analyzing, analyzingTest);
+  renderDrawerFoot();
+  if (currentUser) $('userMenuBtn').setAttribute('aria-label', t('Меню аккаунта: {name}', { name: currentUser.full_name || currentUser.email }));
+  renderIconPicks();
+  // Список валют в «Личном» — с сохранением выбранной, но ещё не сохранённой валюты
+  if (currentUser) { const v = $('editBaseCurrency').value; $('editBaseCurrency').innerHTML = currencyOptions(baseCurrency()); $('editBaseCurrency').value = v || baseCurrency(); }
+  if (lastResult && !$('resultContent').hidden) {
+    mountEditor($('resultEditor'), lastResult);
+    showDuplicateHint();
+    if (!$('currencyHint').hidden) $('currencyHint').textContent = currencyHintText();
+  }
+  $('resultKicker').lastChild.textContent = resultKickerText();
+  if (!$('budgetEditor').hidden) {
+    const values = { total: $('budgetTotalInput').value, categories: {} };
+    $('budgetFields').querySelectorAll('[data-cat]').forEach(i => { values.categories[i.dataset.cat] = i.value; });
+    openBudgetEditor(values);
+  }
+  rerender();
+  renderAccountMenu();
+  renderLangPicks();
+  // Рекомендации у сервера — отдельно для каждого языка (I18N_TASKS.md, п. 3.5)
+  if (currentUser && insights.loaded && !insights.unsupported) loadInsights();
+});
+renderLangPicks();
 
 renderAccess();
 loadCurrencies();

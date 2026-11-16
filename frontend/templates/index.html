@@ -6,9 +6,14 @@
   <script>
     // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
+    // Язык (i18n.js): страница скрыта, пока не переведена, чтобы не мигал русский текст. Через 2,5 с показываем в любом случае
+    (function(){let l=null;try{l=localStorage.getItem('checkai_lang')}catch(e){}const list=l?[l]:(navigator.languages||[navigator.language]);for(const v of list){let c=String(v||'').toLowerCase().split(/[-_]/)[0];if(c==='kz')c='kk';if(c==='ru'||c==='kk'||c==='en'){l=c;break}l=null}if(l==='kk'||l==='en'){const h=document.documentElement;h.lang=l;h.classList.add('i18n-pending');setTimeout(function(){h.classList.remove('i18n-pending')},2500)}})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=close-1">
-  <script src="/static/js/app.js?v=close-1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=i18n-1">
+  <script src="/static/js/locales/kk.js?v=i18n-1" defer></script>
+  <script src="/static/js/locales/en.js?v=i18n-1" defer></script>
+  <script src="/static/js/i18n.js?v=i18n-1" defer></script>
+  <script src="/static/js/app.js?v=i18n-1" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -17,10 +22,11 @@
     <button class="icon-btn" id="menuBtn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="drawer"><span class="hamb" aria-hidden="true"><i></i><i></i><i></i></span></button>
     <button class="brand-link" id="brandLink" type="button" aria-label="CheckAI — на главную"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></button>
     <div class="top-spacer"></div>
+    <select class="lang-select" id="langSelectTop" data-lang-select data-no-i18n aria-label="Язык · Тіл · Language"><option value="ru">РУС</option><option value="kk">ҚАЗ</option><option value="en">ENG</option></select>
     <button class="icon-btn theme-btn" id="themeBtn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
     <button class="btn soft auth-btn" id="loginBtn" type="button">Войти<span class="hide-sm"> / Регистрация</span></button>
     <div class="user-chip" id="userChip" hidden>
-      <button class="user-btn" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню аккаунта"><div class="avatar" id="userAvatar" aria-hidden="true">Я</div><div class="user-meta"><b id="userName"></b><small id="userEmail"></small></div></button>
+      <button class="user-btn" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню аккаунта"><div class="avatar" id="userAvatar" aria-hidden="true" data-no-i18n>Я</div><div class="user-meta"><b id="userName"></b><small id="userEmail"></small></div></button>
       <div class="account-menu" id="accountMenu" role="menu" hidden>
         <button class="menu-item" data-menu="profile" type="button" role="menuitem"><span aria-hidden="true">⚙</span><span>Профиль и настройки</span></button>
         <div class="menu-sep"></div><div class="menu-label">Сменить аккаунт</div><div id="menuAccounts"></div>
@@ -49,6 +55,7 @@
       <div class="land-top">
         <div class="landing-brand"><span class="brand-mark" aria-hidden="true"><span>C</span></span><span class="brand">Check<b>AI</b></span></div>
         <div class="land-top-actions">
+          <select class="lang-select" id="langSelectLanding" data-lang-select data-no-i18n aria-label="Язык · Тіл · Language"><option value="ru">РУС</option><option value="kk">ҚАЗ</option><option value="en">ENG</option></select>
           <button class="icon-btn theme-btn" data-theme-toggle type="button" aria-label="Включить светлую тему"><span aria-hidden="true">☀</span></button>
           <button class="btn soft small" id="heroLogin" type="button">Войти</button>
         </div>
@@ -277,7 +284,7 @@
       <div class="card pf-hero">
         <div class="pf-hero-top"><span class="block-idx">/профиль</span><span id="profileSince"></span></div>
         <div class="pf-hero-main">
-          <button class="pf-avatar" id="avatarBtn" type="button" aria-label="Изменить фото профиля"><span class="avatar" id="profileAvatar" aria-hidden="true">Я</span><span class="pf-avatar-edit" aria-hidden="true">Изменить</span></button>
+          <button class="pf-avatar" id="avatarBtn" type="button" aria-label="Изменить фото профиля"><span class="avatar" id="profileAvatar" aria-hidden="true" data-no-i18n>Я</span><span class="pf-avatar-edit" aria-hidden="true">Изменить</span></button>
           <div class="pf-id">
             <h1 id="profileName"></h1>
             <p id="profileEmail"></p>
@@ -381,6 +388,13 @@
               <button class="accent-pick" data-accent-pick="blue" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Синий</span></button>
               <button class="accent-pick" data-accent-pick="pink" type="button" role="radio" aria-checked="false"><i aria-hidden="true"></i><span>Розовый</span></button>
             </div>
+            <h4 class="pf-sub" id="langLabel">Язык</h4>
+            <div class="lang-picks" id="langPicks" role="radiogroup" aria-labelledby="langLabel" data-no-i18n>
+              <button class="lang-pick" data-lang-pick="ru" type="button" role="radio" aria-checked="false" lang="ru"><b>РУС</b><span>Русский</span></button>
+              <button class="lang-pick" data-lang-pick="kk" type="button" role="radio" aria-checked="false" lang="kk"><b>ҚАЗ</b><span>Қазақша</span></button>
+              <button class="lang-pick" data-lang-pick="en" type="button" role="radio" aria-checked="false" lang="en"><b>ENG</b><span>English</span></button>
+            </div>
+            <p class="hint">Язык сохраняется и в аккаунте — на другом устройстве он будет тем же.</p>
           </div>
 
           <div class="card pf-panel" id="pfPanel-data" role="tabpanel" aria-labelledby="pfTab-data" hidden>
@@ -476,7 +490,7 @@
       <button class="icon-btn modal-close" id="avatarClose" type="button" aria-label="Закрыть">✕</button>
       <h2 id="avatarTitle">Фото профиля</h2>
       <div class="av-step av-choose">
-        <div class="av-current"><span class="avatar" id="avatarCurrent" aria-hidden="true">Я</span></div>
+        <div class="av-current"><span class="avatar" id="avatarCurrent" aria-hidden="true" data-no-i18n>Я</span></div>
         <div class="av-actions">
           <button class="btn" id="avatarFileBtn" type="button">Загрузить с устройства</button>
           <button class="btn soft" id="avatarCameraBtn" type="button">Сделать фото</button>
