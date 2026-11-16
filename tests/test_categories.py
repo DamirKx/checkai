@@ -109,7 +109,8 @@ class TestCategoriesAPI(unittest.TestCase):
         r = self.client.get("/api/categories/defaults")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(r.json()), 8)
-        self.assertEqual(set(r.json()[0]), {"name", "description", "icon"})
+        # default_key — добавление контракта I18N_TASKS.md, п. 3.2.6
+        self.assertEqual(set(r.json()[0]), {"name", "description", "icon", "default_key"})
 
     def test_requires_token(self):
         self.assertEqual(self.client.get("/api/categories").status_code, 401)

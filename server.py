@@ -33,6 +33,9 @@ from app import currencies
 from app import rates
 from app import insights as insights_service
 from app.categories import CategoryError, DEFAULT_CATEGORIES, apply_rules
+from app.i18n import (
+    MESSAGES, AppError, Lang, get_lang, parse_accept_language, tr, tr_validation,
+)
 from app.duplicates import fiscal_id_from
 from app.rate_limit import limiter, get_client_ip
 from app.dates import normalize_date_time, split_date_time
@@ -94,7 +97,7 @@ AVATAR_PATH_RE = re.compile(rf"^{re.escape(config.AVATARS_URL_PREFIX)}/([0-9a-f]
 AVATAR_MAX_SIDE = 512
 AVATAR_MAX_PIXELS = 40_000_000
 AVATAR_FORMATS = {"JPEG", "PNG", "WEBP"}
-AVATAR_TOO_BIG = f"Фото слишком большое. Максимум — {config.MAX_AVATAR_BYTES // (1024 * 1024)} МБ"
+AVATAR_MAX_MB = config.MAX_AVATAR_BYTES // (1024 * 1024)
 # Стили и скрипты интерфейса
 FRONTEND_STATIC_DIR = os.path.join(BASE_DIR, "frontend", "static")
 os.makedirs(FRONTEND_STATIC_DIR, exist_ok=True)
@@ -122,6 +125,8 @@ RATE_LIMIT_METHOD_RULES = {
 async def upload_limit_and_headers(request: Request, call_next):
     # Ограничение частоты запросов
     rule = RATE_LIMIT_RULES.get(request.url.path) or RATE_LIMIT_METHOD_RULES.get((request.method, request.url.path))
+    # Зависимости FastAPI здесь ещё не работают — язык прямо из заголовка (I18N_TASKS.md, п. 3.4.3)
+    lang = parse_accept_language(request.headers.get("accept-language"))
     if rule:
         max_requests, window_seconds = rule
         client_ip = get_client_ip(request)
@@ -131,7 +136,7 @@ async def upload_limit_and_headers(request: Request, call_next):
         if not allowed:
             return JSONResponse(
                 status_code=429,
-                content={"detail": "Слишком много запросов. Пожалуйста, попробуйте позже."},
+                content=AppError(429, "too_many_requests").body(lang),
                 headers={"Retry-After": str(retry_after)},
             )
 
@@ -141,12 +146,12 @@ async def upload_limit_and_headers(request: Request, call_next):
         if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES + 64 * 1024:
             return JSONResponse(
                 status_code=413,
-                content={"detail": f"Файл слишком большой. Максимум — {config.MAX_UPLOAD_MB} МБ"},
+                content=AppError(413, "file_too_big", mb=config.MAX_UPLOAD_MB).body(lang),
             )
     if request.url.path == "/api/auth/me/avatar" and request.method == "POST":
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > config.MAX_AVATAR_BYTES + 64 * 1024:
-            return JSONResponse(status_code=413, content={"detail": AVATAR_TOO_BIG})
+            return JSONResponse(status_code=413, content=AppError(413, "avatar_too_big", mb=AVATAR_MAX_MB).body(lang))
     response = await call_next(request)
     # Браузер не должен «угадывать» тип загруженных файлов
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -155,12 +160,25 @@ async def upload_limit_and_headers(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Отдаёт ошибки валидации без технической приставки 'Value error, ' / 'Assertion failed, '."""
+    """Отдаёт ошибки валидации без технической приставки 'Value error, ' / 'Assertion failed, '.
+
+    msg — на языке запроса (I18N_TASKS.md, п. 3.4.5). Ошибка своего валидатора (app.i18n.validation_error)
+    отдаётся как раньше — type "value_error", ctx {"error": {}}, — плюс поле code с её кодом.
+    Встроенные ошибки Pydantic для ru — с прежним текстом Pydantic, для kk и en — с переводом.
+    """
+    lang = get_lang(request)
     errors = []
     for err in exc.errors():
         err_dict = dict(err)
         msg = err_dict.get("msg", "")
         msg = re.sub(r"^(Value error|Assertion failed),\s*", "", msg)
+        error_type = err_dict.get("type")
+        ctx = err_dict.get("ctx") if isinstance(err_dict.get("ctx"), dict) else {}
+        if error_type in MESSAGES:
+            msg = tr(error_type, lang, **ctx)
+            err_dict.update(type="value_error", ctx={"error": {}}, code=error_type)
+        elif lang != "ru":
+            msg = tr_validation(error_type, lang, ctx) or msg
         err_dict["msg"] = msg
         errors.append(err_dict)
     return JSONResponse(
@@ -180,10 +198,10 @@ def _json_safe(value):
     return value
 
 
-@app.exception_handler(CategoryError)
-async def category_error_handler(request: Request, exc: CategoryError):
-    """Ошибки из crud по категориям (чужая категория, дубль названия, лимит 50) → {"detail": "текст"}."""
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    """Ошибки по коду (AppError, CategoryError) → {"detail": текст на языке запроса, "code": код} (п. 3.4)."""
+    return JSONResponse(status_code=exc.status_code, content=exc.body(get_lang(request)), headers=exc.headers)
 
 
 # --- OCR: одна модель на процесс, распознавание по одному запросу за раз ---
@@ -217,7 +235,7 @@ def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
     with _ocr_run_lock:
         data = analyze_receipt(image_path, ocr=ocr, categories=categories)
     if not data.get("raw_lines"):
-        raise HTTPException(status_code=422, detail="На изображении не удалось найти текст чека")
+        raise AppError(422, "no_receipt_text")
     data["date"], data["time"] = normalize_date_time(data.get("date"), data.get("time"))
     cur = data.get("currency")
     if not cur or cur not in currencies.CURRENCIES:
@@ -308,7 +326,7 @@ def _pick_extension(file: UploadFile) -> str:
     ext = EXTENSION_BY_MIME.get((file.content_type or "").lower())
     if ext:
         return ext
-    raise HTTPException(status_code=415, detail="Поддерживаются изображения JPG, PNG, WEBP, BMP или TIFF")
+    raise AppError(415, "unsupported_image_type")
 
 
 def _save_upload(file: UploadFile) -> Tuple[str, str, str]:
@@ -324,10 +342,7 @@ def _save_upload(file: UploadFile) -> Tuple[str, str, str]:
             while chunk := file.file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Файл слишком большой. Максимум — {config.MAX_UPLOAD_MB} МБ",
-                    )
+                    raise AppError(413, "file_too_big", mb=config.MAX_UPLOAD_MB)
                 digest.update(chunk)
                 buffer.write(chunk)
     except BaseException:
@@ -335,7 +350,7 @@ def _save_upload(file: UploadFile) -> Tuple[str, str, str]:
         raise
     if size == 0:
         _remove_quietly(file_path)
-        raise HTTPException(status_code=422, detail="Файл пустой")
+        raise AppError(422, "file_empty")
     return file_path, filename, digest.hexdigest()
 
 
@@ -354,7 +369,7 @@ def _resolve_image_path(image_path: Optional[str]) -> Optional[str]:
             ext = os.path.splitext(filename)[1].lower()
             if ext in ALLOWED_EXTENSIONS and os.path.isfile(os.path.join(UPLOADS_DIR, filename)):
                 return image_path
-    raise HTTPException(status_code=422, detail="Некорректный путь к изображению чека")
+    raise AppError(422, "invalid_image_path")
 
 
 def _image_disk_path(image_path: Optional[str]) -> Optional[str]:
@@ -487,9 +502,9 @@ def health_check(db: Session = Depends(database.get_db)):
 
 
 @app.get("/api/currencies", response_model=List[schemas.CurrencyOut], tags=["Currencies"])
-def get_currencies():
-    """Список поддерживаемых валют (без авторизации)."""
-    return currencies.get_currencies_list()
+def get_currencies(lang: str = Lang):
+    """Список поддерживаемых валют (без авторизации). name — на языке запроса (I18N_TASKS.md, п. 3.6)."""
+    return currencies.get_currencies_list(lang)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -515,7 +530,7 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(database.get_d
 
     existing_user = crud.get_user_by_email(db, email=email)
     if existing_user:
-        raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
+        raise AppError(400, "email_taken")
 
     hashed_pw = auth.hash_password(user_data.password)
     # Код восстановления показывается один раз — фронт просит его сохранить
@@ -536,7 +551,7 @@ def login(user_data: schemas.UserLogin, db: Session = Depends(database.get_db)):
     email = user_data.email.strip().lower()
     user = crud.get_user_by_email(db, email=email)
     if not user or not auth.verify_password(user_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Неверный email или пароль")
+        raise AppError(400, "wrong_credentials")
 
     user.last_login_at = models.utcnow()
     db.commit()
@@ -549,7 +564,7 @@ def refresh_token(data: schemas.RefreshTokenInput, db: Session = Depends(databas
     user = auth.user_from_refresh_token(data.refresh_token, db)
     if user is None:
         # Токен истёк, подделан, пользователь удалён или сменил пароль — нужно войти заново
-        raise HTTPException(status_code=401, detail="Сессия истекла, войдите снова")
+        raise AppError(401, "session_expired")
 
     return _token_response(user)
 
@@ -567,14 +582,14 @@ def update_me(
     """Обновление профиля пользователя (имя, email, пароль, основная валюта)."""
     if user_data.email is not None or user_data.new_password is not None:
         if not user_data.current_password:
-            raise HTTPException(status_code=400, detail="Введите текущий пароль для смены email или пароля")
+            raise AppError(400, "current_password_required")
         if not auth.verify_password(user_data.current_password, current_user.hashed_password):
-            raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+            raise AppError(400, "wrong_current_password")
 
     if user_data.email and user_data.email != current_user.email:
         existing_user = crud.get_user_by_email(db, email=user_data.email)
         if existing_user and existing_user.id != current_user.id:
-            raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
+            raise AppError(400, "email_taken")
         current_user.email = user_data.email
 
     if user_data.new_password:
@@ -621,7 +636,7 @@ def delete_me(
 ):
     """Удаление аккаунта текущего пользователя со всеми его чеками, их фото и фото профиля."""
     if not auth.verify_password(data.password, current_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Неверный пароль")
+        raise AppError(400, "wrong_password")
 
     avatar_path = current_user.avatar_path
     image_paths = crud.delete_user(db, current_user)
@@ -651,16 +666,16 @@ def _read_avatar(file: UploadFile) -> Image.Image:
     """Читает загруженное фото и проверяет, что это действительно JPEG/PNG/WEBP — по содержимому, а не по Content-Type."""
     data = file.file.read(config.MAX_AVATAR_BYTES + 1)
     if len(data) > config.MAX_AVATAR_BYTES:
-        raise HTTPException(status_code=413, detail=AVATAR_TOO_BIG)
+        raise AppError(413, "avatar_too_big", mb=AVATAR_MAX_MB)
     if not data:
-        raise HTTPException(status_code=400, detail="Файл пустой")
-    unsupported = HTTPException(status_code=400, detail="Загрузите фото в формате JPG, PNG или WEBP")
+        raise AppError(400, "file_empty")
+    unsupported = AppError(400, "avatar_unsupported")
     try:
         with Image.open(io.BytesIO(data)) as probe:
             if probe.format not in AVATAR_FORMATS:
                 raise unsupported
             if probe.width * probe.height > AVATAR_MAX_PIXELS:
-                raise HTTPException(status_code=400, detail="Фото слишком большого разрешения")
+                raise AppError(400, "avatar_resolution")
             probe.verify()
         # После verify() картинку нужно открыть заново
         image = Image.open(io.BytesIO(data))
@@ -734,7 +749,7 @@ def get_profile_stats(
     try:
         zone = ZoneInfo(tz.strip()) if tz and tz.strip() else timezone.utc
     except (ZoneInfoNotFoundError, ValueError):
-        raise HTTPException(status_code=422, detail="Параметр tz: укажите часовой пояс, например Asia/Almaty")
+        raise AppError(422, "invalid_tz")
     return crud.get_profile_stats(db, current_user, zone)
 
 
@@ -746,7 +761,7 @@ def create_recovery_code(
 ):
     """Новый код восстановления (старый перестаёт действовать). Нужен текущий пароль."""
     if not auth.verify_password(data.password, current_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Неверный пароль")
+        raise AppError(400, "wrong_password")
     recovery_code = auth.generate_recovery_code()
     current_user.recovery_code_hash = auth.hash_recovery_code(recovery_code)
     db.commit()
@@ -766,7 +781,7 @@ def reset_password(
     user = crud.get_user_by_email(db, email=data.email)
     # Проверка кода идёт и для несуществующего email — по времени ответа не понять, есть ли такой пользователь
     if not auth.verify_recovery_code(data.recovery_code, user.recovery_code_hash if user else None):
-        raise HTTPException(status_code=400, detail="Неверный email или код восстановления")
+        raise AppError(400, "wrong_recovery_code")
 
     recovery_code = auth.generate_recovery_code()
     user.hashed_password = auth.hash_password(data.new_password)
@@ -788,14 +803,14 @@ def analyze_test_receipt(
     current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
 ):
     if not os.path.isfile(TEST_IMAGE_PATH):
-        raise HTTPException(status_code=404, detail="Демо-файл images.jpeg не найден")
+        raise AppError(404, "demo_not_found")
     try:
         data = _analyze(db, TEST_IMAGE_PATH, current_user, _file_sha256(TEST_IMAGE_PATH))
     except HTTPException:
         raise
     except Exception:
         logger.exception("Ошибка распознавания демо-чека")
-        raise HTTPException(status_code=500, detail="Не удалось распознать чек. Попробуйте ещё раз позже.")
+        raise AppError(500, "ocr_failed")
     return {"success": True, "data": data}
 
 @app.post("/api/analyze", tags=["OCR"])
@@ -805,7 +820,7 @@ def analyze_receipt_endpoint(
     current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=415, detail="Загрузите изображение чека")
+        raise AppError(415, "image_required")
 
     file_path, filename, image_hash = _save_upload(file)
     try:
@@ -816,7 +831,7 @@ def analyze_receipt_endpoint(
     except Exception:
         _remove_quietly(file_path)
         logger.exception("Ошибка распознавания чека")
-        raise HTTPException(status_code=500, detail="Не удалось распознать чек. Попробуйте ещё раз позже.")
+        raise AppError(500, "ocr_failed")
 
     # Путь к картинке клиент вернёт при сохранении чека
     data["image_path"] = f"{RECEIPTS_URL_PREFIX}/{filename}"
@@ -828,11 +843,12 @@ def analyze_receipt_endpoint(
 def analyze_receipt_async_endpoint(
     file: UploadFile = File(...),
     current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
+    lang: str = Lang,
 ):
     """Асинхронное распознавание чека через очередь фоновых задач.
     Возвращает task_id для периодического опроса статуса через GET /api/tasks/{task_id}."""
     if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=415, detail="Загрузите изображение чека")
+        raise AppError(415, "image_required")
 
     file_path, filename, image_hash = _save_upload(file)
     image_url = f"{RECEIPTS_URL_PREFIX}/{filename}"
@@ -844,7 +860,11 @@ def analyze_receipt_async_endpoint(
 
     def _worker_fn(task_id: str) -> dict:
         task_manager.update_task(task_id, step="ocr", progress=40)
-        data = _run_ocr(file_path, categories)
+        try:
+            data = _run_ocr(file_path, categories)
+        except AppError as e:
+            # Текст ошибки задачи (task.error) — на языке запроса: запроса к этому времени уже нет
+            raise e.in_lang(lang) from None
         with database.SessionLocal() as db:
             if user_id is not None:
                 apply_rules(db, user_id, data.get("items") or [])
@@ -871,7 +891,7 @@ def get_task_status(task_id: str):
     поэтому в result анализа ничего личного нет (B.2.4)."""
     task = task_manager.get_task(task_id) or insights_task_manager.get_task(task_id)
     if not task:
-        raise HTTPException(status_code=404, detail="Задача не найдена или устарела")
+        raise AppError(404, "task_not_found")
     return schemas.TaskStatusOut(
         task_id=task.id,
         status=task.status,
@@ -895,11 +915,11 @@ def _receipt_lock(user_id: int) -> threading.Lock:
         return _receipt_locks.setdefault(user_id, threading.Lock())
 
 
-def _duplicate_response(db: Session, user: models.User, duplicate: models.Receipt) -> JSONResponse:
+def _duplicate_response(db: Session, user: models.User, duplicate: models.Receipt, lang: str) -> JSONResponse:
     """409 с найденным чеком на верхнем уровне тела, а не внутри detail (C.2.4)."""
     out = schemas.ReceiptOut.model_validate(crud.attach_base_rates(db, duplicate, user.base_currency))
     return JSONResponse(status_code=409, content={
-        "detail": "Похоже, этот чек уже сохранён",
+        **AppError(409, "duplicate_receipt").body(lang),
         "duplicate_of": duplicate.id,
         "duplicate": jsonable_encoder(out),
     })
@@ -912,7 +932,8 @@ def _duplicate_response(db: Session, user: models.User, duplicate: models.Receip
 def save_receipt(
     receipt: schemas.ReceiptCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.get_current_user),
+    lang: str = Lang,
 ):
     """Сохранение чека в аккаунт текущего пользователя.
 
@@ -929,7 +950,7 @@ def save_receipt(
                 db, current_user.id, receipt, image_hash=image_hash, fiscal_id=fiscal_id,
             )
             if duplicate is not None:
-                return _duplicate_response(db, current_user, duplicate)
+                return _duplicate_response(db, current_user, duplicate, lang)
         saved = crud.create_receipt(
             db=db, data=receipt, user_id=current_user.id, image_path=image_path,
             image_hash=image_hash, fiscal_id=fiscal_id,
@@ -941,7 +962,7 @@ def _iso_query_date(value: Optional[str], name: str) -> Optional[str]:
         return None
     iso_date, _ = split_date_time(value)
     if iso_date is None:
-        raise HTTPException(status_code=422, detail=f"Параметр {name}: укажите дату в формате ГГГГ-ММ-ДД")
+        raise AppError(422, "invalid_query_date", name=name)
     return iso_date
 
 @app.get("/api/receipts", response_model=List[schemas.ReceiptOut], tags=["Receipts"])
@@ -979,7 +1000,7 @@ def read_receipt(
     """Получение одного чека по id (только своего)."""
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
     if receipt is None:
-        raise HTTPException(status_code=404, detail="Чек не найден")
+        raise AppError(404, "receipt_not_found")
     return crud.attach_base_rates(db, receipt, current_user.base_currency)
 
 @app.put(
@@ -991,6 +1012,7 @@ def update_receipt(
     data: schemas.ReceiptUpdate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
+    lang: str = Lang,
 ):
     """Редактирование сохранённого чека (магазин, дата, время, категория, позиции).
 
@@ -999,12 +1021,12 @@ def update_receipt(
     """
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
     if receipt is None:
-        raise HTTPException(status_code=404, detail="Чек не найден")
+        raise AppError(404, "receipt_not_found")
     with _receipt_lock(current_user.id):
         if not data.allow_duplicate:
             duplicate = crud.find_duplicate(db, current_user.id, data, exclude_id=receipt.id)
             if duplicate is not None:
-                return _duplicate_response(db, current_user, duplicate)
+                return _duplicate_response(db, current_user, duplicate, lang)
         updated = crud.update_receipt(db=db, receipt=receipt, data=data)
     return crud.attach_base_rates(db, updated, current_user.base_currency)
 
@@ -1025,7 +1047,7 @@ def delete_receipt(
     """Удаление своего чека (чужой чек для пользователя «не существует» → 404)."""
     receipt = crud.get_receipt_by_id(db, receipt_id, user_id=current_user.id)
     if receipt is None:
-        raise HTTPException(status_code=404, detail="Чек не найден")
+        raise AppError(404, "receipt_not_found")
     image_path = receipt.image_path
     crud.delete_receipt(db, receipt)
     if image_path and crud.count_receipts_with_image(db, image_path) == 0:
@@ -1069,7 +1091,7 @@ def get_budgets_status(
     else:
         target_month = month.strip()
         if not _MONTH_REGEX.match(target_month):
-            raise HTTPException(status_code=422, detail="Параметр month: укажите месяц в формате ГГГГ-ММ")
+            raise AppError(422, "invalid_month")
     return crud.get_budget_status(db, user_id=current_user.id, month=target_month, base_currency=current_user.base_currency)
 
 
@@ -1078,7 +1100,7 @@ def get_budgets_status(
 def _own_category(db: Session, user: models.User, category_id: int) -> models.Category:
     category = crud.get_user_category(db, user.id, category_id)
     if category is None:
-        raise HTTPException(status_code=404, detail="Категория не найдена")
+        raise AppError(404, "category_not_found")
     return category
 
 
@@ -1093,8 +1115,8 @@ def list_categories(
 
 @app.get("/api/categories/defaults", response_model=List[schemas.CategoryDefaultOut], tags=["Categories"])
 def list_default_categories():
-    """Стандартные категории — для гостя (без авторизации)."""
-    return DEFAULT_CATEGORIES
+    """Стандартные категории — для гостя (без авторизации). name и description — русские, перевод — по default_key."""
+    return [{**d, "default_key": d["key"]} for d in DEFAULT_CATEGORIES]
 
 
 @app.post("/api/categories", response_model=schemas.CategoryOut, status_code=201, tags=["Categories"])
@@ -1168,7 +1190,7 @@ def delete_category_rule(
 ):
     """Удаление своего правила (чужое — 404)."""
     if not crud.delete_rule(db, current_user.id, rule_id):
-        raise HTTPException(status_code=404, detail="Правило не найдено")
+        raise AppError(404, "rule_not_found")
     return {"success": True}
 
 
@@ -1183,6 +1205,7 @@ def categorize(
     data: schemas.CategorizeIn,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
+    lang: str = Lang,
 ):
     """Категории для названий без фото: правила пользователя, затем ML (ИИ или ключевые слова).
 
@@ -1193,7 +1216,7 @@ def categorize(
     if not allowed:
         return JSONResponse(
             status_code=429,
-            content={"detail": "Слишком много запросов. Пожалуйста, попробуйте позже."},
+            content=AppError(429, "too_many_requests").body(lang),
             headers={"Retry-After": str(retry_after)},
         )
     items = [
@@ -1216,7 +1239,7 @@ def categorize(
 
 # --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2) ---
 
-# Пользователь → id его задачи анализа, пока она идёт: повторный POST не запускает вторую
+# (пользователь, язык) → id задачи анализа, пока она идёт: повторный POST не запускает вторую
 _insights_running: dict = {}
 _insights_running_lock = threading.Lock()
 
@@ -1231,8 +1254,8 @@ def _insights_out(insight: models.Insight, current_hash: str) -> dict:
     }
 
 
-def _snapshot(db: Session, user: models.User) -> Tuple[dict, str]:
-    snapshot = crud.build_finance_snapshot(db, user)
+def _snapshot(db: Session, user: models.User, lang: str) -> Tuple[dict, str]:
+    snapshot = crud.build_finance_snapshot(db, user, lang=lang)
     return snapshot, crud.snapshot_hash(snapshot)
 
 
@@ -1240,12 +1263,14 @@ def _snapshot(db: Session, user: models.User) -> Tuple[dict, str]:
 def get_insights(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
+    lang: str = Lang,
 ):
-    """Последний анализ ({insights, created_at, model, stale}) или {"insights": null}, если его ещё нет."""
-    insight = crud.get_latest_insight(db, current_user.id)
+    """Последний анализ на языке запроса ({insights, created_at, model, stale}) или {"insights": null},
+    если на этом языке его ещё нет (I18N_TASKS.md, п. 3.5)."""
+    insight = crud.get_latest_insight(db, current_user.id, lang)
     if insight is None:
         return {"insights": None}
-    _, digest = _snapshot(db, current_user)
+    _, digest = _snapshot(db, current_user, lang)
     return _insights_out(insight, digest)
 
 
@@ -1257,53 +1282,56 @@ def get_insights(
 def start_insights(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
+    lang: str = Lang,
 ):
-    """Запуск нового анализа в фоне: {"task_id"}, статус — GET /api/tasks/{task_id}.
+    """Запуск нового анализа на языке запроса в фоне: {"task_id"}, статус — GET /api/tasks/{task_id}.
 
-    Данные не изменились с прошлого анализа — сразу 200 с прежним анализом, без запроса к ИИ.
-    Не чаще одного нового анализа за INSIGHTS_REFRESH_HOURS часов — иначе 429.
+    Данные не изменились с прошлого анализа на этом языке — сразу 200 с прежним анализом, без запроса к ИИ.
+    Не чаще одного нового анализа за INSIGHTS_REFRESH_HOURS часов на каждом языке — иначе 429:
+    первый анализ на kk разрешён, даже если час назад был ru (п. 3.5.5).
     """
     if not current_user.ai_insights_consent:
-        raise HTTPException(status_code=403, detail="Нужно согласие на анализ")
+        raise AppError(403, "insights_consent_required")
     user_id = current_user.id
+    running_key = (user_id, lang)
     with _insights_running_lock:
-        running = _insights_running.get(user_id)
+        running = _insights_running.get(running_key)
         if running and (task := insights_task_manager.get_task(running)) and task.status in ("pending", "processing"):
             return JSONResponse(status_code=202, content={"task_id": running})
 
-        snapshot, digest = _snapshot(db, current_user)
-        last = crud.get_latest_insight(db, user_id)
+        snapshot, digest = _snapshot(db, current_user, lang)
+        last = crud.get_latest_insight(db, user_id, lang)
         if last is not None and last.snapshot_hash == digest:
             return JSONResponse(status_code=200, content=_insights_out(last, digest))
         if last is not None and config.INSIGHTS_REFRESH_HOURS > 0:
             wait = int(config.INSIGHTS_REFRESH_HOURS * 3600 - (models.utcnow() - last.created_at).total_seconds())
             if wait > 0:
-                hours = -(-wait // 3600)
-                text = f"{hours} ч" if wait >= 3600 else f"{-(-wait // 60)} мин"
+                error = (AppError(429, "insights_retry_hours", hours=-(-wait // 3600)) if wait >= 3600
+                         else AppError(429, "insights_retry_minutes", minutes=-(-wait // 60)))
                 return JSONResponse(
                     status_code=429,
-                    content={"detail": f"Обновить советы можно через {text}", "retry_after": wait},
+                    content={**error.body(lang), "retry_after": wait},
                     headers={"Retry-After": str(wait)},
                 )
 
         base = current_user.base_currency or currencies.DEFAULT_CURRENCY
         kzt_per_base = 1.0 if base == "KZT" else (rates.rate_to_kzt(db, base, snapshot["today"], fetch=False) or 1.0)
         task = insights_task_manager.create_task(step="ai")
-        _insights_running[user_id] = task.id
+        _insights_running[running_key] = task.id
 
     def _worker(_task_id: str) -> dict:
         try:
-            model, result = insights_service.generate(snapshot, kzt_per_base)
+            model, result = insights_service.generate(snapshot, kzt_per_base, lang)
             # Сначала запись в базу, потом статус completed: фронт сразу перечитает GET /api/insights
             with database.SessionLocal() as worker_db:
-                crud.save_insight(worker_db, user_id, model, result, digest)
+                crud.save_insight(worker_db, user_id, model, result, digest, lang)
         except Exception:
             logger.exception("Не удалось подготовить рекомендации")
-            raise HTTPException(status_code=500, detail="Не удалось подготовить советы. Попробуйте позже")
+            raise AppError(500, "insights_failed", lang=lang)
         finally:
             with _insights_running_lock:
-                if _insights_running.get(user_id) == _task_id:
-                    del _insights_running[user_id]
+                if _insights_running.get(running_key) == _task_id:
+                    del _insights_running[running_key]
         # Задачу видит любой, кто знает id: в result ничего личного
         return {"ok": True}
 

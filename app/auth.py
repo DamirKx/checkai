@@ -6,13 +6,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app import config
 from app import database
 from app import models
+from app.i18n import AppError
 
 logger = logging.getLogger("checkai.auth")
 
@@ -141,11 +142,7 @@ def get_current_user(
     """Получение текущего авторизованного пользователя из токена."""
     user = _user_from_token(token, db)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Необходима авторизация",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise AppError(status.HTTP_401_UNAUTHORIZED, "auth_required", headers={"WWW-Authenticate": "Bearer"})
     return user
 
 def get_optional_current_user(
