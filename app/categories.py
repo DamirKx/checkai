@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
+from app.i18n import AppError
 
 UNCATEGORIZED_NAME = "Без категории"
 DEFAULT_ICON = "◌"
@@ -19,27 +20,30 @@ DESCRIPTION_MAX_LENGTH = 300
 ICON_MAX_LENGTH = 8
 
 # Порядок списка = position. Описание — не только для человека: по нему ML раскладывает товары.
+# key — default_key в базе (I18N_TASKS.md, п. 1.3): по нему фронт показывает перевод, а название
+# и описание в базе остаются русскими — их читает ML
 DEFAULT_CATEGORIES: List[Dict[str, str]] = [
-    {"name": "Продукты", "icon": "🥕",
+    {"key": "groceries", "name": "Продукты", "icon": "🥕",
      "description": "Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости"},
-    {"name": "Одежда", "icon": "🧥", "description": "Одежда, обувь, аксессуары"},
-    {"name": "Дом и быт", "icon": "🏠", "description": "Бытовая химия, хозтовары, посуда, мелочи для дома"},
-    {"name": "Транспорт", "icon": "🚌", "description": "Топливо, такси, проезд, парковка"},
-    {"name": "Кафе", "icon": "☕",
+    {"key": "clothing", "name": "Одежда", "icon": "🧥", "description": "Одежда, обувь, аксессуары"},
+    {"key": "home", "name": "Дом и быт", "icon": "🏠", "description": "Бытовая химия, хозтовары, посуда, мелочи для дома"},
+    {"key": "transport", "name": "Транспорт", "icon": "🚌", "description": "Топливо, такси, проезд, парковка"},
+    {"key": "cafe", "name": "Кафе", "icon": "☕",
      "description": "Готовая еда и напитки вне дома: кафе, рестораны, кофейни, доставка еды"},
-    {"name": "Здоровье", "icon": "✚", "description": "Аптека, лекарства, витамины, медицинские услуги"},
-    {"name": "Развлечения", "icon": "🎟", "description": "Кино, театр, концерты, игры, подписки"},
-    {"name": "Другое", "icon": "◌", "description": "Всё, что не подошло в другие категории"},
+    {"key": "health", "name": "Здоровье", "icon": "✚", "description": "Аптека, лекарства, витамины, медицинские услуги"},
+    {"key": "entertainment", "name": "Развлечения", "icon": "🎟", "description": "Кино, театр, концерты, игры, подписки"},
+    {"key": "other", "name": "Другое", "icon": "◌", "description": "Всё, что не подошло в другие категории"},
 ]
 
 
-class CategoryError(Exception):
-    """Ошибка операции с категориями: server.py превращает её в ответ {"detail": ...} с этим кодом."""
+class CategoryError(AppError):
+    """Ошибка операции с категориями: server.py превращает её в ответ {"detail": ..., "code": ...}.
 
-    def __init__(self, status_code: int, detail: str):
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
+    code — ключ app.i18n.MESSAGES, params — подстановки в текст.
+    """
+
+    def __init__(self, status_code: int, code: str, **params: Any):
+        super().__init__(status_code, code, **params)
 
 
 def normalize_item_name(name: str) -> str:
@@ -57,6 +61,7 @@ def create_default_categories(db: Session, user: models.User) -> None:
     for position, d in enumerate(DEFAULT_CATEGORIES):
         user.categories.append(models.Category(
             name=d["name"], description=d["description"], icon=d["icon"], position=position,
+            default_key=d["key"],
         ))
 
 
@@ -87,7 +92,7 @@ def resolve_category_id(
     """
     if category_id is not None:
         if get_user_category(db, user_id, category_id) is None:
-            raise CategoryError(422, "Категория не найдена")
+            raise CategoryError(422, "category_not_found")
         return category_id
     if name and name.strip():
         category = find_category_by_name(db, user_id, name)

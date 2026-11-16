@@ -122,7 +122,8 @@ class TestConsent(InsightsCase):
     def test_without_consent_403(self):
         r = self.client.post("/api/insights", headers=self.headers_a)
         self.assertEqual(r.status_code, 403)
-        self.assertEqual(r.json(), {"detail": "Нужно согласие на анализ"})
+        # code — добавление контракта I18N_TASKS.md, п. 3.4.3; detail прежний
+        self.assertEqual(r.json(), {"detail": "Нужно согласие на анализ", "code": "insights_consent_required"})
 
     def test_consent_saved_without_password(self):
         me = self.client.get("/api/auth/me", headers=self.headers_a).json()

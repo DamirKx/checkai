@@ -56,6 +56,9 @@ class Category(Base):
     description = Column(String(300), nullable=True)
     icon = Column(String(8), nullable=False, default="◌")
     position = Column(Integer, nullable=False, default=0)
+    # groceries … other у нетронутой стандартной категории, NULL — своя или переименованная
+    # (I18N_TASKS.md, п. 3.2). Название в базе всегда русское, перевод — на фронте по этому ключу
+    default_key = Column(String(32), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -174,3 +177,5 @@ class Insight(Base):
     data = Column(JSON, nullable=False)
     # Хеш сводки (crud.snapshot_hash): данные не изменились — повторно не генерируем
     snapshot_hash = Column(String(64), nullable=False)
+    # Язык текста анализа: ru | kk | en (I18N_TASKS.md, п. 3.5). На каждом языке — свой последний анализ
+    language = Column(String(2), nullable=False, default="ru", server_default="ru")

@@ -16,6 +16,7 @@ from app.categories import (
     main_category_id, normalize_item_name, resolve_category_id,
 )
 from app.currencies import DEFAULT_CURRENCY
+from app.i18n import CategoryName, category_display_name
 
 try:
     from ml.app.merchant import canonical_merchant
@@ -698,7 +699,7 @@ def set_user_budgets(db: Session, user_id: int, budgets_data: List[schemas.Budge
     """Заменяет весь список лимитов пользователя в одной транзакции. Чужая категория — CategoryError(422)."""
     for item in budgets_data:
         if item.category_id is not None and get_user_category(db, user_id, item.category_id) is None:
-            raise CategoryError(422, "Категория не найдена")
+            raise CategoryError(422, "category_not_found")
 
     db.query(models.Budget).filter(models.Budget.user_id == user_id).delete(synchronize_session=False)
 
@@ -820,13 +821,13 @@ def get_categories(db: Session, user_id: int) -> List[models.Category]:
 def _check_name_free(db: Session, user_id: int, name: str, exclude_id: Optional[int] = None) -> None:
     existing = find_category_by_name(db, user_id, name)
     if existing is not None and existing.id != exclude_id:
-        raise CategoryError(409, f"Категория «{existing.name}» уже есть")
+        raise CategoryError(409, "category_exists", name=CategoryName(existing.name, existing.default_key))
 
 
 def create_category(db: Session, user_id: int, data: schemas.CategoryCreate) -> models.Category:
     count = db.query(func.count(models.Category.id)).filter(models.Category.user_id == user_id).scalar() or 0
     if count >= MAX_CATEGORIES:
-        raise CategoryError(422, f"Можно создать не больше {MAX_CATEGORIES} категорий")
+        raise CategoryError(422, "categories_limit", max=MAX_CATEGORIES)
     _check_name_free(db, user_id, data.name)
 
     last = db.query(func.max(models.Category.position)).filter(models.Category.user_id == user_id).scalar()
@@ -846,6 +847,12 @@ def create_category(db: Session, user_id: int, data: schemas.CategoryCreate) -> 
 def update_category(db: Session, category: models.Category, data: schemas.CategoryUpdate) -> models.Category:
     """Меняет только поля, пришедшие в запросе. Позиции ссылаются по id — новое название видно сразу везде."""
     fields = data.model_fields_set
+    # Новое название или описание — категория больше не стандартная, перевода у неё нет (п. 3.2).
+    # Иконка и порядок, а также то же самое значение ключ не сбрасывают
+    if "name" in fields and data.name != category.name:
+        category.default_key = None
+    if "description" in fields and data.description != category.description:
+        category.default_key = None
     if "name" in fields:
         _check_name_free(db, category.user_id, data.name, exclude_id=category.id)
         category.name = data.name
@@ -875,9 +882,9 @@ def delete_category(
     """
     if move_to is not None:
         if move_to == category.id:
-            raise CategoryError(422, "Нельзя перенести позиции в удаляемую категорию")
+            raise CategoryError(422, "move_to_deleted_category")
         if get_user_category(db, user_id, move_to) is None:
-            raise CategoryError(422, "Категория не найдена")
+            raise CategoryError(422, "category_not_found")
 
     try:
         items = (
@@ -928,7 +935,7 @@ def delete_category(
 def reorder_categories(db: Session, user_id: int, ids: List[int]) -> List[models.Category]:
     categories = get_categories(db, user_id)
     if len(ids) != len(set(ids)) or set(ids) != {c.id for c in categories}:
-        raise CategoryError(422, "Передайте все свои категории, каждую один раз")
+        raise CategoryError(422, "categories_order_invalid")
     by_id = {c.id: c for c in categories}
     for position, category_id in enumerate(ids):
         by_id[category_id].position = position
@@ -947,7 +954,7 @@ def move_items(
     """
     ids = set(item_ids)
     if category_id is not None and get_user_category(db, user_id, category_id) is None:
-        raise CategoryError(422, "Категория не найдена")
+        raise CategoryError(422, "category_not_found")
     items = (
         db.query(models.ReceiptItem)
         .join(models.Receipt)
@@ -955,7 +962,7 @@ def move_items(
         .all()
     )
     if len(items) != len(ids):
-        raise CategoryError(404, "Позиция не найдена")
+        raise CategoryError(404, "item_not_found")
 
     try:
         for item in items:
@@ -1042,11 +1049,14 @@ def _store_name(r: Any) -> str:
 
 
 def build_finance_snapshot(
-    db: Session, user: models.User, months: int = SNAPSHOT_MONTHS, today: Optional[date] = None
+    db: Session, user: models.User, months: int = SNAPSHOT_MONTHS, today: Optional[date] = None,
+    lang: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Обезличенная сводка расходов для ИИ: только агрегаты в основной валюте, без email, имени и id пользователя.
 
     Пересчёт валют — attach_base_rates, как в get_analytics; чеки без курса только перечисляются в unconverted.
+    С lang в сводке есть language, а у категорий — display_name: название на этом языке, им ML
+    пишет текст (I18N_TASKS.md, п. 3.5). name остаётся русским, как в базе.
     """
     base = user.base_currency or DEFAULT_CURRENCY
     today = today or datetime.now(timezone.utc).date()
@@ -1120,6 +1130,8 @@ def build_finance_snapshot(
             "limit": limits.get(c.id),
             "receipts": len(receipts_in_category.get(c.id, ())),
         }
+        if lang is not None:
+            row["display_name"] = category_display_name(c.default_key, c.name, lang)
         # Категории без трат за полгода и без лимита ИИ не нужны
         if row["limit"] is not None or any(v for (cid, _), v in spent.items() if cid == c.id):
             categories.append(row)
@@ -1127,7 +1139,7 @@ def build_finance_snapshot(
     categorized_total = sum(spent.values())
     uncategorized = sum(v for (cid, _), v in spent.items() if cid is None)
 
-    return {
+    snapshot = {
         "base_currency": base,
         "today": today.isoformat(),
         "months": [{**m, "total": round(m["total"], 2)} for m in month_totals.values()],
@@ -1144,11 +1156,25 @@ def build_finance_snapshot(
         "uncategorized_share": round(uncategorized / categorized_total, 3) if categorized_total > 0 else 0.0,
         "unconverted": [{"currency": c, "count": n} for c, n in sorted(unconverted.items())],
     }
+    if lang is not None:
+        snapshot["language"] = lang
+    return snapshot
 
 
 def snapshot_hash(snapshot: Dict[str, Any]) -> str:
-    """Хеш сводки без точного дня: в пределах месяца те же данные — тот же анализ (B.2.4)."""
-    stable = {**snapshot, "today": str(snapshot.get("today", ""))[:7]}
+    """Хеш сводки без точного дня: в пределах месяца те же данные — тот же анализ (B.2.4).
+
+    Язык в хеш не входит: анализ сравнивается только с анализом на том же языке (get_latest_insight).
+    display_name входит, только если отличается от name, — поэтому у русских анализов хеш тот же,
+    что до перевода, и после выкладки они не становятся stale.
+    """
+    stable = {k: v for k, v in snapshot.items() if k != "language"}
+    stable["today"] = str(snapshot.get("today", ""))[:7]
+    if "categories" in snapshot:
+        stable["categories"] = [
+            {k: v for k, v in c.items() if not (k == "display_name" and v == c.get("name"))}
+            for c in snapshot["categories"] or []
+        ]
     return hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
@@ -1157,23 +1183,26 @@ def snapshot_hash(snapshot: Dict[str, Any]) -> str:
 INSIGHTS_KEEP = 3
 
 
-def get_latest_insight(db: Session, user_id: int) -> Optional[models.Insight]:
+def get_latest_insight(db: Session, user_id: int, language: str = "ru") -> Optional[models.Insight]:
+    """Последний анализ на языке language (I18N_TASKS.md, п. 3.5)."""
     return (
         db.query(models.Insight)
-        .filter(models.Insight.user_id == user_id)
+        .filter(models.Insight.user_id == user_id, models.Insight.language == language)
         .order_by(models.Insight.created_at.desc(), models.Insight.id.desc())
         .first()
     )
 
 
-def save_insight(db: Session, user_id: int, model: str, data: Dict[str, Any], digest: str) -> models.Insight:
-    """Новый анализ; старше последних INSIGHTS_KEEP удаляются."""
-    insight = models.Insight(user_id=user_id, model=model[:100], data=data, snapshot_hash=digest)
+def save_insight(
+    db: Session, user_id: int, model: str, data: Dict[str, Any], digest: str, language: str = "ru",
+) -> models.Insight:
+    """Новый анализ; на каждом языке хранятся последние INSIGHTS_KEEP, старше удаляются."""
+    insight = models.Insight(user_id=user_id, model=model[:100], data=data, snapshot_hash=digest, language=language)
     db.add(insight)
     db.flush()
     old = (
         db.query(models.Insight.id)
-        .filter(models.Insight.user_id == user_id)
+        .filter(models.Insight.user_id == user_id, models.Insight.language == language)
         .order_by(models.Insight.created_at.desc(), models.Insight.id.desc())
         .offset(INSIGHTS_KEEP)
         .all()

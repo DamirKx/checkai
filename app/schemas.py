@@ -8,6 +8,7 @@ from app.categories import (
     DEFAULT_ICON, DESCRIPTION_MAX_LENGTH, ICON_MAX_LENGTH, NAME_MAX_LENGTH, UNCATEGORIZED_NAME,
 )
 from app import rates
+from app.i18n import LANGS, normalize_lang, validation_error
 
 import math
 import re
@@ -38,7 +39,7 @@ MAX_QUANTITY = 100000
 def _check_finite(v: Optional[float]) -> Optional[float]:
     # NaN и Infinity JSON-парсер Python пропускает, а аналитику они ломают
     if v is not None and not math.isfinite(v):
-        raise ValueError("Укажите обычное число")
+        raise validation_error("not_finite")
     return v
 
 
@@ -47,9 +48,9 @@ def _check_amount(v: Optional[float]) -> Optional[float]:
     if v is None:
         return None
     if v < 0:
-        raise ValueError("Сумма не может быть отрицательной")
+        raise validation_error("amount_negative")
     if v > MAX_AMOUNT:
-        raise ValueError("Слишком большая сумма: не больше 1 000 000 000")
+        raise validation_error("amount_too_big")
     return v
 
 
@@ -74,7 +75,7 @@ class ItemIn(BaseModel):
     def _validate_name(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("Укажите название товара")
+            raise validation_error("item_name_required")
         return v
 
     @field_validator("quantity")
@@ -85,9 +86,9 @@ class ItemIn(BaseModel):
         if v is None:
             return 1.0
         if v <= 0:
-            raise ValueError("Количество должно быть больше нуля")
+            raise validation_error("quantity_not_positive")
         if v > MAX_QUANTITY:
-            raise ValueError("Слишком большое количество: не больше 100 000")
+            raise validation_error("quantity_too_big")
         return v
 
     @field_validator("price_per_unit", "total_price")
@@ -216,16 +217,16 @@ class UserCreate(BaseModel):
     def _validate_email(cls, v: str) -> str:
         v = v.strip().lower()
         if not _EMAIL_REGEX.match(v):
-            raise ValueError("Введите корректный email (например, user@example.com)")
+            raise validation_error("invalid_email")
         return v
 
     @field_validator("password")
     @classmethod
     def _check_password(cls, value: str) -> str:
         if len(value) < MIN_PASSWORD_LENGTH:
-            raise ValueError(f"Пароль должен содержать минимум {MIN_PASSWORD_LENGTH} символов")
+            raise validation_error("password_too_short", min=MIN_PASSWORD_LENGTH)
         if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
-            raise ValueError("Пароль слишком длинный")
+            raise validation_error("password_too_long")
         return value
 
 
@@ -234,12 +235,18 @@ ThemeName = Literal["dark", "light", "system"]
 AccentName = Literal["violet", "red", "orange", "green", "blue", "pink"]
 
 
+LanguageName = Literal["ru", "kk", "en"]
+
+
 class Preferences(BaseModel):
     """Настройки оформления (PROFILE_TASKS.md, п. 1.2). Неизвестное значение — 422."""
     theme: ThemeName = "system"
     accent: AccentName = "violet"
     # Согласие на ИИ-анализ расходов (NEXT_WEEK_TASKS.md, B.2.5)
     ai_insights: bool = False
+    # Язык интерфейса (I18N_TASKS.md, п. 3.1). None — пользователь язык не выбирал: ключа нет в ответе,
+    # и фронт оставляет язык устройства (п. 1.1), а не переключает вошедшего на русский
+    language: Optional[LanguageName] = Field(default=None, exclude_if=lambda v: v is None)
 
     @classmethod
     def from_stored(cls, value: Any) -> "Preferences":
@@ -263,13 +270,25 @@ class PreferencesUpdate(BaseModel):
     theme: Optional[str] = None
     accent: Optional[str] = None
     ai_insights: Optional[bool] = None
+    # kz → kk, регистр не важен; null — снова «не выбран» (русский по умолчанию)
+    language: Optional[str] = None
+
+    @field_validator("language")
+    @classmethod
+    def _check_language(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        lang = normalize_lang(v)
+        if lang is None or str(v).strip().lower() not in (*LANGS, "kz"):
+            raise validation_error("unknown_language", allowed=", ".join(LANGS))
+        return lang
 
     @field_validator("theme")
     @classmethod
     def _check_theme(cls, v: Optional[str]) -> Optional[str]:
         allowed = get_args(ThemeName)
         if v is not None and v not in allowed:
-            raise ValueError(f"Неизвестная тема. Доступны: {', '.join(allowed)}")
+            raise validation_error("unknown_theme", allowed=", ".join(allowed))
         return v
 
     @field_validator("accent")
@@ -277,7 +296,7 @@ class PreferencesUpdate(BaseModel):
     def _check_accent(cls, v: Optional[str]) -> Optional[str]:
         allowed = get_args(AccentName)
         if v is not None and v not in allowed:
-            raise ValueError(f"Неизвестный акцентный цвет. Доступны: {', '.join(allowed)}")
+            raise validation_error("unknown_accent", allowed=", ".join(allowed))
         return v
 
 
@@ -306,7 +325,7 @@ class UserUpdate(BaseModel):
             return None
         v = v.strip().lower()
         if not _EMAIL_REGEX.match(v):
-            raise ValueError("Введите корректный email (например, user@example.com)")
+            raise validation_error("invalid_email")
         return v
 
     @field_validator("new_password")
@@ -315,9 +334,9 @@ class UserUpdate(BaseModel):
         if value is None:
             return None
         if len(value) < MIN_PASSWORD_LENGTH:
-            raise ValueError(f"Пароль должен содержать минимум {MIN_PASSWORD_LENGTH} символов")
+            raise validation_error("password_too_short", min=MIN_PASSWORD_LENGTH)
         if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
-            raise ValueError("Пароль слишком длинный")
+            raise validation_error("password_too_long")
         return value
 
 
@@ -445,9 +464,9 @@ class ResetPasswordRequest(BaseModel):
     @classmethod
     def _check_password(cls, value: str) -> str:
         if len(value) < MIN_PASSWORD_LENGTH:
-            raise ValueError(f"Пароль должен содержать минимум {MIN_PASSWORD_LENGTH} символов")
+            raise validation_error("password_too_short", min=MIN_PASSWORD_LENGTH)
         if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
-            raise ValueError("Пароль слишком длинный")
+            raise validation_error("password_too_long")
         return value
 
 
@@ -486,16 +505,16 @@ class BudgetItem(BaseModel):
     def _reject_category_name(cls, data: Any) -> Any:
         # Иначе лимит старого формата {"category": "Кафе"} молча стал бы общим
         if isinstance(data, dict) and "category" in data and "category_id" not in data:
-            raise ValueError("Лимит задаётся по category_id, а не по названию категории")
+            raise validation_error("budget_by_name")
         return data
 
     @field_validator("limit")
     @classmethod
     def _validate_limit(cls, v: float) -> float:
         if v is None or v <= 0:
-            raise ValueError("Лимит бюджета должен быть больше нуля")
+            raise validation_error("budget_limit_not_positive")
         if v > 1e12:
-            raise ValueError("Лимит бюджета не может превышать 1 000 000 000 000")
+            raise validation_error("budget_limit_too_big")
         return round(float(v), 2)
 
 
@@ -506,14 +525,14 @@ class BudgetListUpdate(BaseModel):
     @classmethod
     def _validate_budgets_list(cls, items: List[BudgetItem]) -> List[BudgetItem]:
         if len(items) > 50:
-            raise ValueError("Количество лимитов не может превышать 50")
+            raise validation_error("budgets_too_many")
 
         seen_categories = set()
         for item in items:
             if item.category_id in seen_categories:
                 if item.category_id is None:
-                    raise ValueError("Общий лимит (без категории) указан несколько раз")
-                raise ValueError("Лимит для одной категории указан несколько раз")
+                    raise validation_error("budget_total_duplicate")
+                raise validation_error("budget_category_duplicate")
             seen_categories.add(item.category_id)
         return items
 
@@ -563,12 +582,16 @@ class CategoryOut(BaseModel):
     description: Optional[str] = None
     icon: str
     position: int
+    # Ключ стандартной категории (groceries … other) — по нему фронт показывает перевод.
+    # null — категория своя или переименованная (I18N_TASKS.md, п. 3.2)
+    default_key: Optional[str] = None
 
 
 class CategoryDefaultOut(BaseModel):
     name: str
     description: Optional[str] = None
     icon: str
+    default_key: Optional[str] = None
 
 
 class CategoryUpdate(BaseModel):
@@ -582,9 +605,9 @@ class CategoryUpdate(BaseModel):
     def _validate_name(cls, v: Any) -> str:
         name = str(v or "").strip()
         if not 1 <= len(name) <= NAME_MAX_LENGTH:
-            raise ValueError(f"Название категории: от 1 до {NAME_MAX_LENGTH} символов")
+            raise validation_error("category_name_length", max=NAME_MAX_LENGTH)
         if name.lower() == UNCATEGORIZED_NAME.lower():
-            raise ValueError("Это название зарезервировано")
+            raise validation_error("category_name_reserved")
         return name
 
     @field_validator("description", mode="before")
@@ -592,7 +615,7 @@ class CategoryUpdate(BaseModel):
     def _validate_description(cls, v: Any) -> Optional[str]:
         description = str(v).strip() if v is not None else ""
         if len(description) > DESCRIPTION_MAX_LENGTH:
-            raise ValueError(f"Описание категории: не больше {DESCRIPTION_MAX_LENGTH} символов")
+            raise validation_error("category_description_length", max=DESCRIPTION_MAX_LENGTH)
         return description or None
 
     @field_validator("icon", mode="before")
@@ -601,7 +624,7 @@ class CategoryUpdate(BaseModel):
         # Один эмодзи может занимать несколько символов (флаги, цвет кожи)
         icon = str(v).strip() if v is not None else ""
         if len(icon) > ICON_MAX_LENGTH:
-            raise ValueError(f"Иконка: не больше {ICON_MAX_LENGTH} символов")
+            raise validation_error("category_icon_length", max=ICON_MAX_LENGTH)
         return icon or DEFAULT_ICON
 
 
