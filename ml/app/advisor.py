@@ -68,7 +68,7 @@ def detect_facts(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Категории
     for c in snapshot.get("categories") or []:
         cid = c.get("id")
-        cname = c.get("name") or "Категория"
+        cname = c.get("display_name") or c.get("name") or "Категория"
         this_month = float(c.get("this_month") or 0.0)
         limit = float(c.get("limit")) if c.get("limit") is not None else None
         prev_months = [float(v) for v in c.get("prev_months") or [] if float(v) > 0]
@@ -177,85 +177,255 @@ def detect_facts(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 # --- 2. Шаблонные советы (Правила / Fallback) ---
 
-def _format_money(amount: float, cur: str) -> str:
+SUPPORTED_LANGUAGES = {"ru", "kk", "en"}
+_KAZAKH_LETTERS = set("әғқңөұүһіӘҒҚҢӨҰҮҺІ")
+_CYR_LETTER_RE = re.compile(r"[а-яёА-ЯЁәғқңөұүһіӘҒҚҢӨҰҮҺІ]")
+
+RULE_TEMPLATES: Dict[str, Dict[str, Tuple[str, str]]] = {
+    "ru": {
+        "over_budget": (
+            "{cname}: лимит превышен на {over}",
+            "Потрачено {spent} при лимите {limit}.",
+        ),
+        "budget_forecast": (
+            "{cname}: лимит может закончиться {day:02d}.{month:02d}",
+            "Уже потрачено {spent} из {limit}. При текущем темпе лимита не хватит до конца месяца.",
+        ),
+        "category_growth": (
+            "{cname}: на {pct}% больше обычного",
+            "В этом месяце — {spent}, обычно около {med} в месяц.",
+        ),
+        "frequent_small": (
+            "{store}: {count} небольших покупок",
+            "За этот месяц совершено {count} покупок на сумму {total}.",
+        ),
+        "recurring": (
+            "Регулярный платёж: {store}",
+            "Ежемесячная оплата около {amount}.",
+        ),
+        "budget_suggestion": (
+            "Поставить лимит на {cname_lower}",
+            "Ваши траты стабильны около {med}. Лимит {sugg} поможет держать их под контролем.",
+        ),
+        "uncategorized": (
+            "{share_pct}% трат без категории",
+            "Часть расходов не распределена по категориям. Разберите их, чтобы статистика была точнее.",
+        ),
+        "unconverted": (
+            "{count} чеков без курса валют",
+            "Чеки в валютах ({currencies}) не учтены в общих суммах из-за отсутствия курса.",
+        ),
+    },
+    "kk": {
+        "over_budget": (
+            "{cname}: лимит {over} асып кетті",
+            "{limit} лимит кезінде {spent} жұмсалды.",
+        ),
+        "budget_forecast": (
+            "{cname}: лимит {day:02d}.{month:02d} таусылуы мүмкін",
+            "{limit} лимиттің {spent} жұмсалды. Осы қарқынмен ай соңына дейін жетпейді.",
+        ),
+        "category_growth": (
+            "{cname}: әдеттегіден {pct}% көп",
+            "Осы айда — {spent}, әдетте айына шамамен {med}.",
+        ),
+        "frequent_small": (
+            "{store}: {count} шағын сатып алу",
+            "Осы айда жалпы сомасы {total} болатын {count} сатып алу жасалды.",
+        ),
+        "recurring": (
+            "Тұрақты төлем: {store}",
+            "Ай сайынғы төлем шамамен {amount}.",
+        ),
+        "budget_suggestion": (
+            "{cname}: лимит қоюды ұсынамыз",
+            "Шығындарыңыз тұрақты, шамамен {med}. {sugg} лимиті бақылауда ұстауға көмектеседі.",
+        ),
+        "uncategorized": (
+            "Шығындардың {share_pct}% санатсыз",
+            "Шығындардың бір бөлігі санаттарға бөлінбеген. Статистика дәл болуы үшін оларды реттеңіз.",
+        ),
+        "unconverted": (
+            "Бағамы жоқ {count} чек",
+            "Валюта бағамы болмағандықтан ({currencies}) чектері жалпы сомаға кірмеді.",
+        ),
+    },
+    "en": {
+        "over_budget": (
+            "{cname}: over limit by {over}",
+            "Spent {spent} out of {limit} limit.",
+        ),
+        "budget_forecast": (
+            "{cname}: limit may run out on {day:02d}.{month:02d}",
+            "Already spent {spent} of {limit}. At this pace the limit will run out before month end.",
+        ),
+        "category_growth": (
+            "{cname}: {pct}% higher than usual",
+            "This month is {spent}, usually around {med} per month.",
+        ),
+        "frequent_small": (
+            "{store}: {count} small purchases",
+            "Made {count} purchases totaling {total} this month.",
+        ),
+        "recurring": (
+            "Recurring payment: {store}",
+            "Monthly charge around {amount}.",
+        ),
+        "budget_suggestion": (
+            "Set a limit for {cname_lower}",
+            "Your spending is steady around {med}. A {sugg} limit can help keep it on track.",
+        ),
+        "uncategorized": (
+            "{share_pct}% of spending is uncategorized",
+            "Some expenses have no category yet. Categorize them for more accurate stats.",
+        ),
+        "unconverted": (
+            "{count} receipts missing exchange rate",
+            "Receipts in ({currencies}) were excluded from totals due to missing exchange rates.",
+        ),
+    },
+}
+
+_SUMMARY_TEMPLATES: Dict[str, Tuple[str, str]] = {
+    "ru": (
+        "Найдено {count} важных финансовых наблюдений за текущий месяц.",
+        "Расходы в пределах нормы, необычных трат или превышений лимитов не обнаружено.",
+    ),
+    "kk": (
+        "Осы айда {count} маңызды қаржылық байқау табылды.",
+        "Шығындар қалыпты деңгейде, артық шығын немесе лимиттен асу байқалмады.",
+    ),
+    "en": (
+        "Found {count} key spending insights for this month.",
+        "Spending looks normal with no unusual spikes or budget overruns detected.",
+    ),
+}
+
+_LOCALIZED_DEFAULTS: Dict[str, Dict[str, str]] = {
+    "ru": {"category": "Категория", "total_budget": "Общий бюджет", "store": "магазин", "service": "сервис"},
+    "kk": {"category": "Санат", "total_budget": "Жалпы бюджет", "store": "дүкен", "service": "сервис"},
+    "en": {"category": "Category", "total_budget": "Total budget", "store": "store", "service": "service"},
+}
+
+
+def normalize_language(language: Optional[str]) -> str:
+    """Нормализует код языка (ru | kk | en); kz -> kk, неизвестные -> ru."""
+    lang = str(language or "ru").strip().lower()
+    if lang == "kz":
+        lang = "kk"
+    return lang if lang in SUPPORTED_LANGUAGES else "ru"
+
+
+def _format_money(amount: float, cur: str, language: str = "ru") -> str:
+    lang = normalize_language(language)
     if round(amount) == amount:
-        s = f"{int(amount):,}".replace(",", " ")
+        if lang == "en":
+            s = f"{int(amount):,}"
+        else:
+            s = f"{int(amount):,}".replace(",", " ")
     else:
-        s = f"{amount:,.2f}".replace(",", " ").replace(".", ",")
+        if lang == "en":
+            s = f"{amount:,.2f}"
+        else:
+            s = f"{amount:,.2f}".replace(",", " ").replace(".", ",")
     symbols = {"KZT": "₸", "RUB": "₽", "USD": "$", "EUR": "€"}
     return f"{s} {symbols.get(cur, cur)}"
 
 
-def build_rule_insights(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_rule_insights(
+    snapshot: Dict[str, Any],
+    facts: List[Dict[str, Any]],
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """Строит шаблонные советы по найденным фактам без вызова LLM."""
+    lang = normalize_language(language if language is not None else snapshot.get("language", "ru"))
+    templates = RULE_TEMPLATES[lang]
+    defaults = _LOCALIZED_DEFAULTS[lang]
     cur = snapshot.get("base_currency") or "KZT"
     month_str = snapshot.get("today", "")[:7] or datetime.now(timezone.utc).date().isoformat()[:7]
     items: List[Dict[str, Any]] = []
 
     for f in facts:
         ftype = f["type"]
+        if ftype not in templates:
+            continue
         cid = f.get("category_id")
-        cname = f.get("category_name", "Категория")
+        raw_cname = f.get("category_name")
+        if cid is None and raw_cname == "Общий бюджет":
+            cname = defaults["total_budget"]
+        elif raw_cname:
+            cname = str(raw_cname)
+        else:
+            cname = defaults["category"]
+
+        title_tpl, text_tpl = templates[ftype]
+        params: Dict[str, Any] = {
+            "cname": cname,
+            "cname_lower": cname.lower(),
+        }
 
         if ftype == "over_budget":
-            over_str = _format_money(f["over"], cur)
-            spent_str = _format_money(f["spent"], cur)
-            limit_str = _format_money(f["limit"], cur)
-            title = f"{cname}: лимит превышен на {over_str}"
-            text = f"Потрачено {spent_str} при лимите {limit_str}."
-            action = {"kind": "open_history", "category_id": cid}
+            params.update({
+                "over": _format_money(f["over"], cur, lang),
+                "spent": _format_money(f["spent"], cur, lang),
+                "limit": _format_money(f["limit"], cur, lang),
+            })
+            action: Dict[str, Any] = {"kind": "open_history", "category_id": cid}
 
         elif ftype == "budget_forecast":
-            spent_str = _format_money(f["spent"], cur)
-            limit_str = _format_money(f["limit"], cur)
-            run_out = f.get("run_out_day", 20)
-            month_num = f.get("month", 11)
-            title = f"{cname}: лимит может закончиться {run_out:02d}.{month_num:02d}"
-            text = f"Уже потрачено {spent_str} из {limit_str}. При текущем темпе лимита не хватит до конца месяца."
+            params.update({
+                "spent": _format_money(f["spent"], cur, lang),
+                "limit": _format_money(f["limit"], cur, lang),
+                "day": f.get("run_out_day", 20),
+                "month": f.get("month", 11),
+            })
             action = {"kind": "open_history", "category_id": cid}
 
         elif ftype == "category_growth":
-            pct = f["growth_pct"]
-            spent_str = _format_money(f["spent"], cur)
-            med_str = _format_money(f["median"], cur)
-            title = f"{cname}: на {pct}% больше обычного"
-            text = f"В этом месяце — {spent_str}, обычно около {med_str} в месяц."
+            params.update({
+                "pct": f["growth_pct"],
+                "spent": _format_money(f["spent"], cur, lang),
+                "med": _format_money(f["median"], cur, lang),
+            })
             action = {"kind": "open_history", "category_id": cid}
 
         elif ftype == "frequent_small":
-            count = f["count"]
-            total_str = _format_money(f["total"], cur)
-            store = f.get("store", "магазин")
-            title = f"{store}: {count} небольших покупок"
-            text = f"За этот месяц совершено {count} покупок на сумму {total_str}."
+            params.update({
+                "count": f["count"],
+                "total": _format_money(f["total"], cur, lang),
+                "store": f.get("store") or defaults["store"],
+            })
             action = {"kind": "open_history", "category_id": cid}
 
         elif ftype == "recurring":
-            store = f.get("store", "сервис")
-            amount_str = _format_money(f["amount"], cur)
-            title = f"Регулярный платёж: {store}"
-            text = f"Ежемесячная оплата около {amount_str}."
+            params.update({
+                "store": f.get("store") or defaults["service"],
+                "amount": _format_money(f["amount"], cur, lang),
+            })
             action = {"kind": "open_history", "category_id": cid}
 
         elif ftype == "budget_suggestion":
-            sugg_str = _format_money(f["suggested_limit"], cur)
-            title = f"Поставить лимит на {cname.lower()}"
-            text = f"Ваши траты стабильны около {_format_money(f['median'], cur)}. Лимит {sugg_str} поможет держать их под контролем."
+            params.update({
+                "med": _format_money(f["median"], cur, lang),
+                "sugg": _format_money(f["suggested_limit"], cur, lang),
+            })
             action = {"kind": "set_budget", "category_id": cid, "amount": f["suggested_limit"]}
 
         elif ftype == "uncategorized":
-            title = f"{f['share_pct']}% трат без категории"
-            text = "Часть расходов не распределена по категориям. Разберите их, чтобы статистика была точнее."
+            params["share_pct"] = f["share_pct"]
             action = {"kind": "open_categories"}
 
         elif ftype == "unconverted":
-            count = f["count"]
-            title = f"{count} чеков без курса валют"
-            text = f"Чеки в валютах ({f.get('currencies')}) не учтены в общих суммах из-за отсутствия курса."
+            params.update({
+                "count": f["count"],
+                "currencies": f.get("currencies"),
+            })
             action = {"kind": "none"}
         else:
             continue
 
+        title = title_tpl.format(**params)
+        text = text_tpl.format(**params)
         item_id = f"{ftype}:{cid if cid is not None else ''}:{month_str}"
         items.append({
             "id": item_id[:100],
@@ -268,10 +438,11 @@ def build_rule_insights(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -
         })
 
     # Строим общее резюме
+    found_tpl, normal_msg = _SUMMARY_TEMPLATES[lang]
     if items:
-        summary = f"Найдено {len(items)} важных финансовых наблюдений за текущий месяц."
+        summary = found_tpl.format(count=len(items))
     else:
-        summary = "Расходы в пределах нормы, необычных трат или превышений лимитов не обнаружено."
+        summary = normal_msg
 
     return {
         "insights": {
@@ -299,18 +470,63 @@ def _collect_fact_numbers(facts: List[Dict[str, Any]]) -> Set[float]:
     return numbers
 
 
+_NUM_TOKEN_RE = re.compile(r"(?<!\d)(?:(?P<en>\d{1,3}(?:,\d{3})+(?:\.\d+)?)|(?P<plain>\d+(?:[.,]\d+)?))(?!\d)")
+
+
 def _extract_numbers_from_text(text: str) -> List[float]:
-    """Извлекает все числа из текста, включая разделенные пробелами (напр. 25 000)."""
-    # Удаляем неразрывные пробелы между цифрами
-    cleaned = re.sub(r"(?<=\d)[\s ](?=\d)", "", text)
-    matches = re.findall(r"\b\d+(?:[.,]\d+)?\b", cleaned)
-    res = []
-    for m in matches:
+    """Извлекает числа из текста во всех форматах: 12 500, 12 500,50, 12,500, 12,500.50, ₸12,500."""
+    # Склеиваем группы тысяч, разделённые обычным или неразрывным пробелом
+    cleaned = re.sub(r"(?<=\d)[\s\xa0\u202f]+(?=\d)", "", text or "")
+    res: List[float] = []
+    for m in _NUM_TOKEN_RE.finditer(cleaned):
         try:
-            res.append(float(m.replace(",", ".")))
+            if m.group("en") is not None:
+                res.append(float(m.group("en").replace(",", "")))
+            else:
+                res.append(float(m.group("plain").replace(",", ".")))
         except ValueError:
             pass
     return res
+
+
+def _looks_like_language(text: str, lang: str) -> bool:
+    """Грубая проверка, что текст написан на ожидаемом языке (en >= 80% латиницы, kk — кириллица + казахские буквы)."""
+    norm_lang = normalize_language(lang)
+    if norm_lang == "ru":
+        return True
+    letters = [ch for ch in (text or "") if ch.isalpha()]
+    if not letters:
+        return False
+    total = len(letters)
+    if norm_lang == "en":
+        lat_count = sum(1 for ch in letters if "a" <= ch.lower() <= "z")
+        return (lat_count / total) >= 0.8
+    if norm_lang == "kk":
+        cyr_count = sum(1 for ch in letters if _CYR_LETTER_RE.match(ch))
+        if (cyr_count / total) < 0.6:
+            return False
+        if total >= 50 and not any(ch in _KAZAKH_LETTERS for ch in letters):
+            return False
+        return True
+    return True
+
+
+def _response_matches_language(validated: Dict[str, Any], lang: str) -> bool:
+    """Проверяет, что summary и не менее половины карточек написаны на целевом языке."""
+    norm_lang = normalize_language(lang)
+    if norm_lang == "ru":
+        return True
+    if not _looks_like_language(validated.get("summary", ""), norm_lang):
+        return False
+    items = validated.get("items") or []
+    if not items:
+        return False
+    failed = sum(
+        1
+        for it in items
+        if not _looks_like_language(f"{it.get('title', '')} {it.get('text', '')}", norm_lang)
+    )
+    return failed <= len(items) / 2
 
 
 def _has_hallucinated_numbers(text: str, allowed: Set[float]) -> bool:
@@ -339,8 +555,10 @@ def _validate_ai_response(
     raw: Any,
     facts: List[Dict[str, Any]],
     snapshot: Dict[str, Any],
+    language: str = "ru",
 ) -> Optional[Dict[str, Any]]:
     """Валидирует ответ LLM. Если ответ некорректен или содержит выдуманные числа — возвращает None."""
+    lang = normalize_language(language)
     if not isinstance(raw, dict):
         return None
 
@@ -405,7 +623,12 @@ def _validate_ai_response(
         return None
 
     valid_items.sort(key=lambda i: i["priority"])
-    summary = str(body.get("summary") or "Рекомендации по вашим расходам.")[:SUMMARY_MAX]
+    default_summaries = {
+        "ru": "Рекомендации по вашим расходам.",
+        "kk": "Шығындарыңыз бойынша ұсыныстар.",
+        "en": "Insights on your spending.",
+    }
+    summary = str(body.get("summary") or default_summaries.get(lang, default_summaries["ru"]))[:SUMMARY_MAX]
 
     return {
         "summary": summary,
@@ -415,8 +638,24 @@ def _validate_ai_response(
 
 # --- 4. Промпт для LLM (B.1.2) ---
 
-def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -> str:
-    # Очищаем сводку: обрезаем слишком длинные названия магазинов
+_LANGUAGE_INSTRUCTIONS: Dict[str, str] = {
+    "ru": "",
+    "kk": (
+        "\nЯЗЫК ОТВЕТА: казахский (кириллица, с казахскими буквами ә, ғ, қ, ң, ө, ұ, ү, һ, і).\n"
+        "Пиши значения полей \"summary\", \"title\" и \"text\" СТРОГО на казахском языке.\n"
+        "Служебные поля (\"id\", \"type\", \"priority\", \"category_id\", \"action.kind\") оставь без перевода.\n"
+    ),
+    "en": (
+        "\nOUTPUT LANGUAGE: English.\n"
+        "Write all \"summary\", \"title\", and \"text\" values STRICTLY in English.\n"
+        "Keep structural fields (\"id\", \"type\", \"priority\", \"category_id\", \"action.kind\") unchanged.\n"
+    ),
+}
+
+
+def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]], language: str = "ru") -> str:
+    lang = normalize_language(language)
+    # Очищаем сводку: для категории берём display_name (или name), обрезаем слишком длинные названия
     clean_snap = {
         "base_currency": snapshot.get("base_currency", "KZT"),
         "today": snapshot.get("today"),
@@ -424,13 +663,14 @@ def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -> str:
         "categories": [
             {
                 "id": c.get("id"),
-                "name": str(c.get("name", ""))[:60],
+                "name": str(c.get("display_name") or c.get("name") or "")[:60],
                 "this_month": c.get("this_month"),
                 "limit": c.get("limit"),
             }
             for c in (snapshot.get("categories") or [])
         ],
     }
+    lang_rule = _LANGUAGE_INSTRUCTIONS.get(lang, "")
 
     return f"""Ты — заботливый помощник по личным финансам в сервисе CheckAI. Тон спокойный, практичный, без осуждения.
 НЕ давай инвестиционных и кредитных советов.
@@ -458,7 +698,7 @@ def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -> str:
 КРИТИЧЕСКИ ВАЖНОЕ ПРАВИЛО:
 Используй ТОЛЬКО те числа, которые есть в блоке ОБНАРУЖЕННЫЕ ФАКТЫ (суммы, проценты, дни, количества).
 СТРОГО ЗАПРЕЩЕНО придумывать любые другие числа и суммы!
-
+{lang_rule}
 Верни результат СТРОГО в формате JSON со структурой:
 {{
   "summary": "Краткий общий вывод по расходам за месяц (до 300 символов)",
@@ -471,35 +711,42 @@ def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]]) -> str:
 
 # --- 5. Публичная точка входа (B.1) ---
 
-def generate_insights(snapshot: Dict[str, Any], provider: str = "gemini") -> Dict[str, Any]:
+def generate_insights(
+    snapshot: Dict[str, Any],
+    provider: str = "gemini",
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """Главная функция модуля рекомендаций.
 
-    Принимает сводку расходов snapshot.
+    Принимает сводку расходов snapshot и код языка (ru | kk | en).
     Возвращает dict по схеме InsightsOut (NEXT_WEEK_TASKS.md).
     """
+    lang = normalize_language(language if language is not None else snapshot.get("language", "ru"))
     facts = detect_facts(snapshot)
 
     # Если фактов нет вообще — сразу возвращаем правила
     if not facts:
-        return build_rule_insights(snapshot, facts)
+        return build_rule_insights(snapshot, facts, language=lang)
 
     prov = (provider or os.getenv("AI_PROVIDER", "gemini")).strip().lower()
     if prov in ("off", "false", "0", "rules"):
-        return build_rule_insights(snapshot, facts)
+        return build_rule_insights(snapshot, facts, language=lang)
 
-    prompt = _build_prompt(snapshot, facts)
+    prompt = _build_prompt(snapshot, facts, language=lang)
 
     try:
         raw_response = complete_json(prompt, provider=prov)
-        validated = _validate_ai_response(raw_response, facts, snapshot)
+        validated = _validate_ai_response(raw_response, facts, snapshot, language=lang)
         if validated is not None and len(validated["items"]) >= MIN_ITEMS_FROM_AI:
-            model_name = f"{prov}"
-            return {
-                "insights": validated,
-                "model": model_name,
-            }
-        logger.info("Ответ ИИ не прошёл валидацию (мало валидных элементов), используется fallback rules")
+            if _response_matches_language(validated, lang):
+                return {
+                    "insights": validated,
+                    "model": f"{prov}",
+                }
+            logger.info("Ответ ИИ не соответствует языку '%s', используется fallback rules", lang)
+        else:
+            logger.info("Ответ ИИ не прошёл валидацию (мало валидных элементов), используется fallback rules")
     except Exception as e:
         logger.warning("Ошибка при вызове ИИ (%s: %s), используется fallback rules", type(e).__name__, e)
 
-    return build_rule_insights(snapshot, facts)
+    return build_rule_insights(snapshot, facts, language=lang)

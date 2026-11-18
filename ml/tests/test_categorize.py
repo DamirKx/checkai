@@ -229,6 +229,82 @@ def test_manual_item_names_categorization():
         assert items[i].get("category_source") == "keywords"
 
 
+def test_i18n_kazakh_and_english_categorization():
+    """10 казахских и 10 английских названий, маппинг по default_key и нематч по переведённому name."""
+    categories = [
+        {"id": 1, "name": "Food", "default_key": "groceries", "position": 0},
+        {"id": 2, "name": "Clothing", "default_key": "clothing", "position": 1},
+        {"id": 3, "name": "Home", "default_key": "home", "position": 2},
+        {"id": 4, "name": "Transport", "default_key": "transport", "position": 3},
+        {"id": 5, "name": "Cafe", "default_key": "cafe", "position": 4},
+        {"id": 6, "name": "Health", "default_key": "health", "position": 5},
+        {"id": 7, "name": "Entertainment", "default_key": "entertainment", "position": 6},
+        {"id": 8, "name": "Other", "default_key": "other", "description": "Everything that didn't fit", "position": 7},
+    ]
+
+    cases = [
+        # 10 казахских позиций
+        ("Қаймақ 20%", "Food"),
+        ("Жұмыртқа 10 дана", "Food"),
+        ("Шалбар ерлер", "Clothing"),
+        ("Етік қысқы", "Clothing"),
+        ("Тіс пастасы Colgate", "Home"),
+        ("Кір жуғыш ұнтақ", "Home"),
+        ("Көлік жуу қызметі", "Transport"),
+        ("Мәнті 5 дана", "Cafe"),
+        ("Дәрумен кешені", "Health"),
+        ("Балалар ойыншық", "Entertainment"),
+        # 10 английских позиций
+        ("Whole milk 1L", "Food"),
+        ("Sourdough bread", "Food"),
+        ("Winter jacket", "Clothing"),
+        ("Running sneakers", "Clothing"),
+        ("Dishwashing liquid", "Home"),
+        ("Paper towel 2pk", "Home"),
+        ("Taxi airport ride", "Transport"),
+        ("Cappuccino grande", "Cafe"),
+        ("Pharmacy aspirin 500mg", "Health"),
+        ("Cinema ticket IMAX", "Entertainment"),
+    ]
+
+    items = [{"name": n, "total_price": 500} for n, _ in cases]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "0"}):
+        categorize_items(items, categories)
+
+    for i, (name, expected) in enumerate(cases):
+        assert items[i]["category"] == expected, f"{name}: expected {expected}, got {items[i]['category']}"
+        assert items[i]["category_source"] == "keywords"
+
+    # Без default_key переведённое название "Food" не должно матчить встроенный словарь
+    no_key_cats = [{"id": 1, "name": "Food", "position": 0}]
+    no_key_items = [{"name": "Whole milk 1L"}]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "0"}):
+        categorize_items(no_key_items, no_key_cats)
+    assert no_key_items[0]["category"] is None
+
+    # Qwen не должен класть товары в Other (default_key == "other")
+    fake_resp = MagicMock(status_code=200)
+    fake_resp.json.return_value = {"response": '{"items": [{"index": 0, "category": "Other"}]}'}
+    other_items = [{"name": "Нечто непонятное XYZ"}]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("app.categorize.requests.post", return_value=fake_resp):
+        categorize_items(other_items, categories)
+    assert other_items[0]["category"] is None
+
+
+def test_custom_english_category_from_description():
+    """Пользовательская английская категория со словами описания ('dog food, cat litter, vet') матчит товар."""
+    categories = [
+        {"id": 1, "name": "Food", "default_key": "groceries", "position": 0},
+        {"id": 10, "name": "Pets", "description": "dog food, cat litter, vet", "position": 1},
+    ]
+    items = [{"name": "Royal Canin dog food"}]
+    with patch.dict(os.environ, {"USE_AI_PARSER": "0"}):
+        categorize_items(items, categories)
+    assert items[0]["category_id"] == 10
+    assert items[0]["category"] == "Pets"
+    assert items[0]["category_source"] == "keywords"
+
+
 if __name__ == "__main__":
     test_normalize_item_name()
     test_custom_category_beats_builtin_keywords()
@@ -237,4 +313,6 @@ if __name__ == "__main__":
     test_categorize_empty_inputs()
     test_category_source_present_for_every_item()
     test_manual_item_names_categorization()
+    test_i18n_kazakh_and_english_categorization()
+    test_custom_english_category_from_description()
     print("Все тесты категоризации пройдены!")
