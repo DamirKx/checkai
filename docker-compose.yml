@@ -15,6 +15,8 @@ services:
       - ./server.py:/app/server.py
       - ./migrations:/app/migrations
       - ./alembic.ini:/app/alembic.ini
+      # Модели распознавания PaddleOCR (~100 МБ): скачиваются один раз и переживают --build и down/up
+      - paddlex_models:/root/.paddlex
     environment:
       # Ключ подписи JWT берётся из файла .env рядом с docker-compose.yml (см. .env.example)
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env (see .env.example)}
@@ -36,6 +38,12 @@ services:
       - FLAGS_use_onednn=0
       - FLAGS_enable_pir_in_executor=0
       - FLAGS_pir_apply_inplace_pass=0
+      # Не проверять связь с серверами моделей при каждом старте: модели уже лежат в paddlex_models
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+      # Загружать модель распознавания при старте, а не при первом чеке (0 — выключить)
+      - OCR_WARMUP=${OCR_WARMUP:-1}
+      # Уровень логов приложения; на INFO видно время этапов распознавания
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       ollama:
         condition: service_started
@@ -75,3 +83,4 @@ services:
 volumes:
   ollama_data:
   postgres_data:
+  paddlex_models:

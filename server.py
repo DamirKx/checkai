@@ -44,6 +44,19 @@ from app.tasks import task_manager, insights_task_manager
 
 logger = logging.getLogger("checkai")
 
+
+def _setup_logging() -> None:
+    """Логи checkai.* в stderr. Без своего обработчика INFO теряются: корневой логгер пропускает только WARNING,
+    а uvicorn настраивает лишь свои логгеры. Остальные библиотеки (httpx, paddle) не трогаем — шумят на INFO."""
+    logger.setLevel(config.LOG_LEVEL)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(handler)
+
+
+_setup_logging()
+
 # Применяем миграции Alembic (создают таблицы в новой базе)
 database.init_db()
 
@@ -51,6 +64,9 @@ database.init_db()
 async def lifespan(_app: FastAPI):
     # Фоновая очистка стартует вместе с сервером, а не при импорте модуля (импортируют и тесты)
     stop_cleanup = _start_orphan_cleanup_thread()
+    if config.OCR_WARMUP:
+        # В фоне: сервер отвечает сразу, а чек, пришедший до конца загрузки, подождёт её в get_ocr()
+        threading.Thread(target=_warm_up_ocr, name="ocr-warmup", daemon=True).start()
     yield
     if stop_cleanup is not None:
         stop_cleanup.set()
@@ -218,6 +234,17 @@ def get_ocr():
             if _ocr_model is None:
                 _ocr_model = init_ocr()
     return _ocr_model
+
+
+def _warm_up_ocr() -> None:
+    """Загрузка модели распознавания при старте (OCR_WARMUP). Не вышло — загрузится при первом чеке."""
+    started = time.perf_counter()
+    try:
+        get_ocr()
+    except Exception:
+        logger.exception("Не удалось заранее загрузить модель распознавания — попробуем при первом чеке")
+        return
+    logger.info("Модель распознавания загружена за %.1f с", time.perf_counter() - started)
 
 
 def _categories_for(user: Optional[models.User]) -> List[dict]:
@@ -461,7 +488,13 @@ def health_check(db: Session = Depends(database.get_db)):
         db_status = f"error: {e}"
 
     # 2. OCR
-    ocr_status = "ready" if _ocr_model is not None else "standby"
+    # standby — ещё не загружалась, loading — загружается (прогрев или первый чек), ready — готова
+    if _ocr_model is not None:
+        ocr_status = "ready"
+    elif _ocr_init_lock.locked():
+        ocr_status = "loading"
+    else:
+        ocr_status = "standby"
 
     # 3. Ollama (ИИ-парсер)
     use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()

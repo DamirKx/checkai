@@ -18,6 +18,8 @@ os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///
 os.environ["UPLOADS_DIR"] = os.path.join(TMP_DIR, "receipts")
 os.environ["AVATARS_DIR"] = os.path.join(TMP_DIR, "avatars")
 os.environ["ORPHAN_CLEANUP_HOURS"] = "0"
+# OCR_WARMUP=1 из .env разработчика не должен грузить PaddleOCR в тестах
+os.environ["OCR_WARMUP"] = "0"
 os.environ.setdefault("SECRET_KEY", "test_secret_key_1234567890_antigravity_safe_key_32chars")
 
 
