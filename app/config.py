@@ -54,6 +54,16 @@ AVATARS_DIR = os.getenv("AVATARS_DIR", "").strip() or os.path.join(DATA_DIR, "av
 AVATARS_URL_PREFIX = "/avatars"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
+# Загружать модель распознавания при старте сервера (в фоне), а не при первом чеке.
+# В Docker включено (docker-compose.yml); локально и в тестах — нет: загрузка занимает память и время
+OCR_WARMUP = _bool_env("OCR_WARMUP", False)
+
+# Уровень логов приложения (логгеры checkai.*): DEBUG | INFO | WARNING | ERROR.
+# На INFO видно время этапов распознавания: «analyze: ocr=…s llm=…s categorize=…s»
+LOG_LEVEL = os.getenv("LOG_LEVEL", "").strip().upper() or "INFO"
+if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+    raise RuntimeError(f"LOG_LEVEL должен быть DEBUG, INFO, WARNING или ERROR, получено: {LOG_LEVEL!r}")
+
 
 # --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2.1) ---
 # gemini | ollama | off. off — только шаблонные советы по фактам, данные никуда не уходят
