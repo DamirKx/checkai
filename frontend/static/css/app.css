@@ -1264,3 +1264,28 @@ button, .tab-link { touch-action: manipulation; }
   .lang-select { padding: 0 22px 0 8px; background-position: right 11px center, right 6px center; }
   .account-row .icon-btn { width: 40px; height: 40px; }
 }
+
+/* --- Облегчённое оформление на телефонах и планшетах ---
+   Размытия (filter/backdrop-filter) и бесконечные анимации держат в памяти большие слои видеокарты.
+   На телефонах с небольшим объёмом памяти Android выгружает Chrome, пока открыта камера, и снимок теряется
+   («Недостаточно памяти для завершения предыдущей операции»). Здесь то же оформление, но статичное и без размытий */
+@media (hover: none) and (pointer: coarse) {
+  /* Фон: вместо трёх размытых анимированных пятен — статичные градиенты, без сетки и «зерна» */
+  .orb, .grain, .grid-lines { display: none; }
+  .backdrop {
+    background:
+      radial-gradient(70vmax 55vmax at 0% 0%, color-mix(in srgb, var(--orb-a) calc(var(--orb-opacity) * 100%), transparent), transparent 70%),
+      radial-gradient(60vmax 50vmax at 100% 35%, color-mix(in srgb, var(--orb-b) calc(var(--orb-opacity) * 70%), transparent), transparent 70%);
+  }
+  /* Шапка, нижняя панель, затемнение под меню и окнами — без размытия, фон плотнее */
+  .topbar, html[data-auth="user"] .tabbar { background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .overlay, .modal-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  :root[data-theme="light"] .overlay, :root[data-theme="light"] .modal-backdrop { background: #0d0e1480; }
+  /* Размытые «свечения» в карточках и подсветка под пальцем */
+  .stat::after, .pf-hero::after, .card::before { display: none; }
+  /* Зона загрузки: без вращающегося градиента и покачивания значка */
+  .dropzone::before { display: none; }
+  .upload-icon { animation: none; }
+}
+/* Пока открыта камера, фон не рисуется совсем (класс ставит app.js на время съёмки) */
+html.capturing .backdrop { display: none; }

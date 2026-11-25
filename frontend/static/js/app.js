@@ -1701,14 +1701,26 @@ function clearFile() {
   $('dropPrompt').hidden = false;
 }
 $('maxSizeText').textContent = MAX_UPLOAD_MB;
-$('chooseBtn').onclick = () => $('fileInput').click();
-$('cameraBtn').onclick = () => $('cameraInput').click();
+// Пока открыта камера или галерея, фон страницы не рисуется (CSS: html.capturing) — меньше памяти,
+// и Android реже выгружает Chrome вместе со снимком. Возвращаем, когда страница снова видна
+function startCapture(input) {
+  document.documentElement.classList.add('capturing');
+  input.click();
+}
+const endCapture = () => document.documentElement.classList.remove('capturing');
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(endCapture, 300); });
+window.addEventListener('focus', () => setTimeout(endCapture, 300));
+$('chooseBtn').onclick = () => startCapture($('fileInput'));
+$('cameraBtn').onclick = () => startCapture($('cameraInput'));
 $('dropzone').onclick = e => {
   if (analyzing || e.target.closest('button') || e.target.tagName === 'INPUT' || !$('previewBox').hidden) return;
   $('fileInput').click();
 };
-$('fileInput').onchange = e => { const f = e.target.files[0]; if (f) selectFile(f); };
-$('cameraInput').onchange = e => { const f = e.target.files[0]; if (f) selectFile(f); };
+$('fileInput').onchange = e => { endCapture(); const f = e.target.files[0]; if (f) selectFile(f); };
+$('cameraInput').onchange = e => { endCapture(); const f = e.target.files[0]; if (f) selectFile(f); };
+// Окно выбора закрыли без фото
+$('fileInput').addEventListener('cancel', endCapture);
+$('cameraInput').addEventListener('cancel', endCapture);
 $('removeBtn').onclick = clearFile;
 const dz = $('dropzone');
 ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, x => { x.preventDefault(); if (!analyzing) dz.classList.add('drag'); }));
@@ -3142,8 +3154,9 @@ if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     }), { threshold: .15, rootMargin: '0px 0px -40px 0px' });
     document.querySelectorAll('.reveal').forEach(el => io.observe(el));
   }
-  // Подсветка карточки под курсором (CSS читает --mx/--my)
-  document.addEventListener('pointermove', e => {
+  // Подсветка карточки под курсором (CSS читает --mx/--my). Только с мышью: на телефоне pointermove
+  // идёт при каждом движении пальца и зря пересчитывает стили
+  if (window.matchMedia('(hover: hover)').matches) document.addEventListener('pointermove', e => {
     const card = e.target.closest?.('.card');
     if (!card) return;
     const r = card.getBoundingClientRect();
