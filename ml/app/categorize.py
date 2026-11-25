@@ -11,6 +11,24 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 # Как в agent_parser.py: одинаковый num_ctx, чтобы Ollama не перезагружала модель между запросами
 NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+CATEGORIZE_TIMEOUT = int(os.getenv("OLLAMA_CATEGORIZE_TIMEOUT", "30"))
+CATEGORIZE_BATCH_SIZE = int(os.getenv("CATEGORIZE_BATCH_SIZE", "30"))
+
+# Ограниченный кэш по нормализованному названию (задача 3.3): (cats_sig, norm_name) -> cat_idx
+_CATEGORY_CACHE: Dict[tuple, int] = {}
+_MAX_CACHE_SIZE = 2000
+
+
+def clear_category_cache() -> None:
+    """Очищает in-memory кэш категоризации."""
+    _CATEGORY_CACHE.clear()
+
+
+def _categories_signature(categories: List[dict]) -> tuple:
+    return tuple(
+        (c.get("id"), str(c.get("name") or "").strip().lower(), str(c.get("default_key") or "").strip().lower())
+        for c in categories
+    )
 
 # Пытаемся импортировать единую функцию нормализации из бэкенда (п. 0.6),
 # а при автономном запуске из папки ml/ используем точную копию контракта.
@@ -197,23 +215,11 @@ def _extract_description_keys(description: Optional[str]) -> set:
     return keys
 
 
-def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, Optional[int]]:
-    """
-    Запрос к локальной модели Qwen через Ollama для распределения товаров по категориям.
-    Возвращает словарь маппинга: {item_index: category_list_index} (индекс в списке categories, 0-based).
-    """
-    if not items or not categories:
-        return {}
-
-    use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()
-    if use_ai in ("0", "false", "no", "off"):
-        return {}
-
-    # Категории — списком без номеров: модель отвечает названием. С номерами qwen2.5:3b копировал «1»
-    # из образца ответа, и почти всё уходило в первую категорию («Продукты»)
+def _categorize_batch_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, Optional[int]]:
+    """Один запрос к Ollama для батча товаров."""
     cats_text = ""
-    valid_cat_numbers = {}  # номер с 1 -> индекс в списке categories (0-based): старый формат ответа
-    index_by_name = {}       # название в нижнем регистре -> индекс в списке categories
+    valid_cat_numbers = {}
+    index_by_name = {}
     for idx, cat in enumerate(categories, start=1):
         valid_cat_numbers[idx] = idx - 1
         cat_name = str(cat.get("name") or "").strip()
@@ -226,7 +232,6 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         desc = cat.get("description") or "нет описания"
         cats_text += f"- {disp_name} — {desc}\n"
 
-    # Формируем список товаров с 0
     items_text = ""
     for idx, item in enumerate(items):
         items_text += f"{idx}. {item.get('name', 'Товар')}\n"
@@ -255,6 +260,7 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         "В ответе должны быть все товары, по одному разу каждый."
     )
 
+    timeout = max(CATEGORIZE_TIMEOUT, min(90, 20 + len(items) * 2))
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
@@ -262,21 +268,19 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
         "keep_alive": "30m",
         "options": {
             "temperature": 0.0,
-            "num_ctx": NUM_CTX
-        }
+            "num_ctx": NUM_CTX,
+        },
     }
 
     results: Dict[int, Optional[int]] = {}
     seen_indices = set()
-    duplicate_indices = set()
 
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
         if response.status_code == 200:
             data = response.json()
             raw_answer = data.get("response", "").strip()
 
-            # Очищаем возможные маркеры кода markdown
             if raw_answer.startswith("```"):
                 raw_answer = re.sub(r"^```(?:json)?\s*", "", raw_answer, flags=re.IGNORECASE)
                 raw_answer = re.sub(r"\s*```$", "", raw_answer)
@@ -292,13 +296,10 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
                     if not isinstance(i, int) or isinstance(i, bool) or i < 0 or i >= len(items):
                         continue
                     if i in seen_indices:
-                        # Повтор index -> для этой позиции ответа нет (уйдёт в ключевые слова)
-                        duplicate_indices.add(i)
                         results.pop(i, None)
                         continue
                     seen_indices.add(i)
 
-                    # Ответ — название категории; номер (старый формат) тоже принимаем
                     cat_idx = None
                     if isinstance(c_num, str):
                         cat_idx = index_by_name.get(c_num.strip().lower().replace("ё", "е"))
@@ -308,13 +309,34 @@ def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, 
                         cat_obj = categories[cat_idx]
                         cat_name_lower = str(cat_obj.get("name") or "").strip().lower()
                         cat_default_key = str(cat_obj.get("default_key") or "").strip().lower()
-                        # ML не кладёт в «Другое» сам, неподходящее остаётся «Без категории» (None)
                         if cat_default_key != "other" and cat_name_lower != "другое":
                             results[i] = cat_idx
     except Exception as e:
         logger.warning(f"Ошибка при запросе категоризации к Qwen: {e}")
 
     return results
+
+
+def categorize_via_qwen(items: List[dict], categories: List[dict]) -> Dict[int, Optional[int]]:
+    """Запрос к локальной модели Qwen через Ollama (с батчингом для длинных чеков, задачи 3.3, 5.3)."""
+    if not items or not categories:
+        return {}
+
+    use_ai = os.getenv("USE_AI_PARSER", "auto").strip().lower()
+    if use_ai in ("0", "false", "no", "off"):
+        return {}
+
+    batch_size = max(5, CATEGORIZE_BATCH_SIZE)
+    if len(items) <= batch_size:
+        return _categorize_batch_via_qwen(items, categories)
+
+    combined: Dict[int, Optional[int]] = {}
+    for start in range(0, len(items), batch_size):
+        batch = items[start:start + batch_size]
+        batch_res = _categorize_batch_via_qwen(batch, categories)
+        for local_idx, cat_idx in batch_res.items():
+            combined[start + local_idx] = cat_idx
+    return combined
 
 
 def _match_by_keywords(item_name: str, categories: List[dict], desc_keys_list: List[set]) -> Optional[int]:
@@ -371,10 +393,19 @@ def _match_by_keywords(item_name: str, categories: List[dict], desc_keys_list: L
     return best_cat_idx
 
 
-def categorize_items(items: List[dict], categories: List[dict]) -> None:
-    """Проставляет каждой позиции category_id, category и category_source ('ai' | 'keywords' | None).
-    categories: [{"id": int | None, "name": str, "description": str | None}] — категории пользователя
-    или стандартные (у гостя id = None). Меняет items на месте."""
+def categorize_items(
+    items: List[dict],
+    categories: List[dict],
+    rules: Optional[Dict[str, int]] = None,
+) -> None:
+    """Проставляет каждой позиции category_id, category и category_source ('rule' | 'cache' | 'ai' | 'keywords' | None).
+
+    При CATEGORIZE_FAST_FIRST=1 (или на длинных чеках > 20 позиций, задача 3.3) порядок:
+    1. Правила пользователя (rules: norm_name -> category_id) -> 'rule'
+    2. Кэш по нормализованному названию -> 'cache'
+    3. Уверенные ключевые слова -> 'keywords'
+    4. Qwen — только для оставшихся незнакомых позиций -> 'ai' (и сохраняется в кэш).
+    """
     if not items:
         return
 
@@ -385,33 +416,82 @@ def categorize_items(items: List[dict], categories: List[dict]) -> None:
             item["category_source"] = None
         return
 
-    # 1. Пробуем классифицировать через Qwen (AI)
-    ai_mapping = categorize_via_qwen(items, categories)
-
-    # Предварительно строим ключи из описаний категорий
     desc_keys_list = [_extract_description_keys(cat.get("description")) for cat in categories]
+    cat_idx_by_id = {cat.get("id"): idx for idx, cat in enumerate(categories) if cat.get("id") is not None}
+    cats_sig = _categories_signature(categories)
 
-    for idx, item in enumerate(items):
-        matched_cat_idx: Optional[int] = None
-        source: Optional[str] = None
+    fast_env = os.getenv("CATEGORIZE_FAST_FIRST", "").strip().lower()
+    fast_first = (
+        fast_env in ("1", "true", "yes", "on")
+        or (fast_env == "" and len(items) > 20)
+    )
 
-        # Проверяем результат от Qwen
-        if idx in ai_mapping and ai_mapping[idx] is not None:
-            c_idx = ai_mapping[idx]
-            if 0 <= c_idx < len(categories):
-                matched_cat_idx = c_idx
-                source = "ai"
+    resolved: Dict[int, tuple] = {}  # item_idx -> (cat_idx, source)
 
-        # 2. Если Qwen не определил, пробуем ключевые слова
-        if matched_cat_idx is None:
+    # 1. Правила пользователя (если переданы) — всегда имеют высший приоритет
+    if rules:
+        for idx, item in enumerate(items):
+            norm = normalize_item_name(item.get("name", ""))
+            if norm and norm in rules:
+                c_idx = cat_idx_by_id.get(rules[norm])
+                if c_idx is not None:
+                    resolved[idx] = (c_idx, "rule")
+
+    if fast_first:
+        # 2. Кэш по нормализованному названию
+        for idx, item in enumerate(items):
+            if idx in resolved:
+                continue
+            norm = normalize_item_name(item.get("name", ""))
+            if norm and (cats_sig, norm) in _CATEGORY_CACHE:
+                c_idx = _CATEGORY_CACHE[(cats_sig, norm)]
+                if 0 <= c_idx < len(categories):
+                    resolved[idx] = (c_idx, "cache")
+
+        # 3. Ключевые слова до Qwen
+        unknown_indices: List[int] = []
+        for idx, item in enumerate(items):
+            if idx in resolved:
+                continue
             kw_idx = _match_by_keywords(item.get("name", ""), categories, desc_keys_list)
             if kw_idx is not None:
-                matched_cat_idx = kw_idx
-                source = "keywords"
+                resolved[idx] = (kw_idx, "keywords")
+            else:
+                unknown_indices.append(idx)
 
-        # 3. Проставляем поля позиции
-        if matched_cat_idx is not None:
-            cat_obj = categories[matched_cat_idx]
+        # 4. Qwen только для незнакомых позиций
+        if unknown_indices:
+            unknown_items = [items[i] for i in unknown_indices]
+            ai_sub = categorize_via_qwen(unknown_items, categories)
+            for local_i, c_idx in ai_sub.items():
+                if c_idx is not None and 0 <= c_idx < len(categories):
+                    orig_idx = unknown_indices[local_i]
+                    resolved[orig_idx] = (c_idx, "ai")
+                    norm = normalize_item_name(items[orig_idx].get("name", ""))
+                    if norm:
+                        if len(_CATEGORY_CACHE) >= _MAX_CACHE_SIZE:
+                            _CATEGORY_CACHE.clear()
+                        _CATEGORY_CACHE[(cats_sig, norm)] = c_idx
+    else:
+        # Классический порядок (AI -> keywords), но с поддержкой rules и батчинга
+        remaining_indices = [i for i in range(len(items)) if i not in resolved]
+        if remaining_indices:
+            rem_items = [items[i] for i in remaining_indices]
+            ai_mapping = categorize_via_qwen(rem_items, categories)
+            for local_i, orig_idx in enumerate(remaining_indices):
+                c_idx = ai_mapping.get(local_i)
+                if c_idx is not None and 0 <= c_idx < len(categories):
+                    resolved[orig_idx] = (c_idx, "ai")
+                else:
+                    kw_idx = _match_by_keywords(items[orig_idx].get("name", ""), categories, desc_keys_list)
+                    if kw_idx is not None:
+                        resolved[orig_idx] = (kw_idx, "keywords")
+
+    # Проставляем поля позиции
+    for idx, item in enumerate(items):
+        if idx in resolved:
+            c_idx, source = resolved[idx]
+            cat_obj = categories[c_idx]
             item["category_id"] = cat_obj.get("id")
             item["category"] = cat_obj.get("name")
             item["category_source"] = source
