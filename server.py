@@ -1318,13 +1318,26 @@ _insights_running: dict = {}
 _insights_running_lock = threading.Lock()
 
 
+def _insights_wait(last: Optional[models.Insight]) -> int:
+    """Через сколько секунд можно запустить новый анализ после last (0 — уже можно)."""
+    if last is None or config.INSIGHTS_REFRESH_MINUTES <= 0:
+        return 0
+    wait = int(config.INSIGHTS_REFRESH_MINUTES * 60 - (models.utcnow() - last.created_at).total_seconds())
+    return max(0, wait)
+
+
 def _insights_out(insight: models.Insight, current_hash: str) -> dict:
-    """InsightsOut: сохранённый анализ и stale — после него менялись чеки или лимиты."""
+    """InsightsOut: сохранённый анализ и stale — после него менялись чеки или лимиты.
+
+    retry_after — через сколько секунд можно обновить (0 — можно сейчас). Фронт берёт срок отсюда,
+    а не только из прошлого 429: иначе после смены INSIGHTS_REFRESH_MINUTES кнопка оставалась бы заблокированной
+    по старому сроку."""
     return {
         "insights": insight.data,
         "created_at": jsonable_encoder(insight.created_at),
         "model": insight.model,
         "stale": insight.snapshot_hash != current_hash,
+        "retry_after": _insights_wait(insight),
     }
 
 
@@ -1361,7 +1374,7 @@ def start_insights(
     """Запуск нового анализа на языке запроса в фоне: {"task_id"}, статус — GET /api/tasks/{task_id}.
 
     Данные не изменились с прошлого анализа на этом языке — сразу 200 с прежним анализом, без запроса к ИИ.
-    Не чаще одного нового анализа за INSIGHTS_REFRESH_HOURS часов на каждом языке — иначе 429:
+    Не чаще одного нового анализа за INSIGHTS_REFRESH_MINUTES минут на каждом языке — иначе 429:
     первый анализ на kk разрешён, даже если час назад был ru (п. 3.5.5).
     """
     if not current_user.ai_insights_consent:
@@ -1377,8 +1390,8 @@ def start_insights(
         last = crud.get_latest_insight(db, user_id, lang)
         if last is not None and last.snapshot_hash == digest:
             return JSONResponse(status_code=200, content=_insights_out(last, digest))
-        if last is not None and config.INSIGHTS_REFRESH_HOURS > 0:
-            wait = int(config.INSIGHTS_REFRESH_HOURS * 3600 - (models.utcnow() - last.created_at).total_seconds())
+        if last is not None:
+            wait = _insights_wait(last)
             if wait > 0:
                 error = (AppError(429, "insights_retry_hours", hours=-(-wait // 3600)) if wait >= 3600
                          else AppError(429, "insights_retry_minutes", minutes=-(-wait // 60)))

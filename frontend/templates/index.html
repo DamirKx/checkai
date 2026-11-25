@@ -17,11 +17,11 @@
     // Язык (i18n.js): страница скрыта, пока не переведена, чтобы не мигал русский текст. Через 2,5 с показываем в любом случае
     (function(){let l=null;try{l=localStorage.getItem('checkai_lang')}catch(e){}const list=l?[l]:(navigator.languages||[navigator.language]);for(const v of list){let c=String(v||'').toLowerCase().split(/[-_]/)[0];if(c==='kz')c='kk';if(c==='ru'||c==='kk'||c==='en'){l=c;break}l=null}if(l==='kk'||l==='en'){const h=document.documentElement;h.lang=l;h.classList.add('i18n-pending');setTimeout(function(){h.classList.remove('i18n-pending')},2500)}})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=pwa-1">
-  <script src="/static/js/locales/kk.js?v=pwa-1" defer></script>
-  <script src="/static/js/locales/en.js?v=pwa-1" defer></script>
-  <script src="/static/js/i18n.js?v=pwa-1" defer></script>
-  <script src="/static/js/app.js?v=pwa-1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=pwa-3">
+  <script src="/static/js/locales/kk.js?v=pwa-3" defer></script>
+  <script src="/static/js/locales/en.js?v=pwa-3" defer></script>
+  <script src="/static/js/i18n.js?v=pwa-3" defer></script>
+  <script src="/static/js/app.js?v=pwa-3" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
