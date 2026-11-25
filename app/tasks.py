@@ -21,6 +21,8 @@ class Task:
     error: Optional[str] = None
     file_path: Optional[str] = None
     image_url: Optional[str] = None
+    # Владелец задачи распознавания: результат (чек и duplicate_of) отдаётся только ему. None — гость
+    user_id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -42,10 +44,11 @@ class TaskManager:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=f"{name}-worker")
         self._first_step = first_step
 
-    def create_task(self, file_path: Optional[str] = None, image_url: Optional[str] = None, step: str = "upload") -> Task:
+    def create_task(self, file_path: Optional[str] = None, image_url: Optional[str] = None, step: str = "upload",
+                    user_id: Optional[int] = None) -> Task:
         self.cleanup_old_tasks()
         task_id = uuid.uuid4().hex
-        task = Task(id=task_id, file_path=file_path, image_url=image_url, step=step)
+        task = Task(id=task_id, file_path=file_path, image_url=image_url, step=step, user_id=user_id)
         with self._lock:
             self._tasks[task_id] = task
         return task

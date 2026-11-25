@@ -1,19 +1,27 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07080d"><title>CheckAI — ваши расходы</title>
+  <!-- Мобильная версия (PWA): манифест и иконки, установка на главный экран -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="CheckAI">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <script>
     // Тема и акцентный цвет выставляются до отрисовки, чтобы страница не мигала
     (function(){let t=null;try{t=localStorage.getItem('checkai_theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;let c=null;try{c=localStorage.getItem('checkai_accent')}catch(e){}if(/^(red|orange|green|blue|pink)$/.test(c))document.documentElement.dataset.accent=c;let a=null;try{a=localStorage.getItem('checkai_token')}catch(e){}document.documentElement.dataset.auth=a?'user':'guest'})();
     // Язык (i18n.js): страница скрыта, пока не переведена, чтобы не мигал русский текст. Через 2,5 с показываем в любом случае
     (function(){let l=null;try{l=localStorage.getItem('checkai_lang')}catch(e){}const list=l?[l]:(navigator.languages||[navigator.language]);for(const v of list){let c=String(v||'').toLowerCase().split(/[-_]/)[0];if(c==='kz')c='kk';if(c==='ru'||c==='kk'||c==='en'){l=c;break}l=null}if(l==='kk'||l==='en'){const h=document.documentElement;h.lang=l;h.classList.add('i18n-pending');setTimeout(function(){h.classList.remove('i18n-pending')},2500)}})();
   </script>
-  <link rel="stylesheet" href="/static/css/app.css?v=i18n-1">
-  <script src="/static/js/locales/kk.js?v=i18n-1" defer></script>
-  <script src="/static/js/locales/en.js?v=i18n-1" defer></script>
-  <script src="/static/js/i18n.js?v=i18n-1" defer></script>
-  <script src="/static/js/app.js?v=i18n-1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=pwa-1">
+  <script src="/static/js/locales/kk.js?v=pwa-1" defer></script>
+  <script src="/static/js/locales/en.js?v=pwa-1" defer></script>
+  <script src="/static/js/i18n.js?v=pwa-1" defer></script>
+  <script src="/static/js/app.js?v=pwa-1" defer></script>
 </head>
 <body>
 <div class="backdrop" aria-hidden="true"><i class="orb orb-a"></i><i class="orb orb-b"></i><i class="orb orb-c"></i><i class="grid-lines"></i><i class="grain"></i></div>
@@ -46,6 +54,7 @@
       <button class="nav-link" data-page="analysis" type="button"><span aria-hidden="true">◔</span><span>Анализ расходов</span></button>
       <button class="nav-link" data-page="budgets" type="button"><span aria-hidden="true">◎</span><span>Бюджеты</span><span class="nav-badge" id="budgetBadge" hidden>перерасход</span></button>
       <button class="nav-link" data-page="profile" id="navProfile" type="button" hidden><span aria-hidden="true">⚙</span><span>Профиль</span></button>
+      <button class="nav-link install-link" id="installBtn" type="button" hidden><span aria-hidden="true">⤓</span><span>Установить приложение</span></button>
     </nav>
     <div class="drawer-foot" id="drawerFoot" hidden></div>
   </aside>
@@ -395,6 +404,11 @@
               <button class="lang-pick" data-lang-pick="en" type="button" role="radio" aria-checked="false" lang="en"><b>ENG</b><span>English</span></button>
             </div>
             <p class="hint">Язык сохраняется и в аккаунте — на другом устройстве он будет тем же.</p>
+            <h4 class="pf-sub" id="appLabel">Приложение на телефоне</h4>
+            <div class="pf-app" aria-labelledby="appLabel">
+              <p class="hint" id="appInstallText"></p>
+              <div class="button-row"><button class="btn soft" id="installBtnProfile" type="button" hidden>Установить приложение</button></div>
+            </div>
           </div>
 
           <div class="card pf-panel" id="pfPanel-data" role="tabpanel" aria-labelledby="pfTab-data" hidden>
@@ -417,6 +431,14 @@
       <div class="heat-tip" id="heatTip" aria-hidden="true" hidden></div>
     </section>
   </main>
+  <!-- Нижняя панель разделов на телефоне (только для вошедших; на широком экране скрыта) -->
+  <nav class="tabbar" id="tabbar" aria-label="Разделы">
+    <button class="tab-link" data-page="history" type="button"><span class="tab-ico" aria-hidden="true">▤</span><span class="tab-text">История</span></button>
+    <button class="tab-link" data-page="analysis" type="button"><span class="tab-ico" aria-hidden="true">◔</span><span class="tab-text">Анализ</span></button>
+    <button class="tab-link tab-add" data-page="upload" type="button" aria-label="Добавить чек"><span class="tab-ico" aria-hidden="true">＋</span><span class="tab-text">Чек</span></button>
+    <button class="tab-link" data-page="budgets" type="button"><span class="tab-ico" aria-hidden="true">◎</span><span class="tab-text">Бюджеты</span><i class="tab-dot" id="budgetDot" aria-hidden="true" hidden></i></button>
+    <button class="tab-link" data-page="categories" type="button"><span class="tab-ico" aria-hidden="true">◈</span><span class="tab-text">Категории</span></button>
+  </nav>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <div class="modal-backdrop" id="receiptModal" hidden>
