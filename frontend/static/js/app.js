@@ -1552,13 +1552,17 @@ $('authForm').onsubmit = async e => {
 };
 
 // --- Навигация ---
+const currentPage = () => document.querySelector('.page.active')?.id.slice('page-'.length) || 'home';
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
-  document.querySelectorAll('.nav-link').forEach(b => {
+  // Пункты меню и нижней панели (на телефоне) подсвечиваются одинаково
+  document.querySelectorAll('.nav-link[data-page], .tab-link').forEach(b => {
     const on = b.dataset.page === name;
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
+  // Текущий раздел — в записи истории браузера: кнопка «Назад» (жест на Android) возвращает к прошлому разделу
+  try { history.replaceState({ ...(history.state || {}), page: name }, ''); } catch (e) {}
   closeMenu();
   if (name === 'history') renderHistory();
   if (name === 'categories') renderCategories();
@@ -1583,8 +1587,27 @@ function setMenu(open) {
 function closeMenu() { if ($('drawer').classList.contains('open')) setMenu(false); }
 $('menuBtn').onclick = () => setMenu(!$('drawer').classList.contains('open'));
 $('overlay').onclick = closeMenu;
-document.querySelectorAll('.nav-link').forEach(b => b.onclick = () => showPage(b.dataset.page));
-$('brandLink').onclick = () => showPage(currentUser ? 'upload' : 'home');
+// Переход по разделам от пользователя — новая запись в истории; showPage из кода (вход, выход) — без неё
+function navigate(name) {
+  if (currentPage() !== name) { try { history.pushState({ page: name }, ''); } catch (e) {} }
+  showPage(name);
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+document.querySelectorAll('.nav-link[data-page], .tab-link').forEach(b => b.onclick = () => navigate(b.dataset.page));
+$('brandLink').onclick = () => navigate(currentUser ? 'upload' : 'home');
+// «Назад»: сначала закрывает открытое окно или меню (как Esc) и остаётся в разделе, потом — прошлый раздел
+window.addEventListener('popstate', e => {
+  const overlayOpen = document.querySelector('.modal-backdrop:not([hidden])') || $('drawer').classList.contains('open') || !$('accountMenu').hidden;
+  if (overlayOpen) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    try { history.pushState({ page: currentPage() }, ''); } catch (err) {}
+    return;
+  }
+  const page = e.state?.page;
+  // Гостю доступна только главная, вошедшему — всё, кроме неё
+  if (!page || !$('page-' + page) || (document.documentElement.dataset.auth === 'guest') !== (page === 'home')) return;
+  showPage(page);
+});
 $('heroRegister').onclick = $('landingRegister').onclick = $('uploadRegisterBtn').onclick = () => openAuth('register');
 $('heroLogin').onclick = $('landingLogin').onclick = $('uploadLoginBtn').onclick = () => openAuth('login');
 document.addEventListener('keydown', e => {
@@ -1617,8 +1640,45 @@ function fileProblem(file) {
   if (/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) return t('Формат HEIC (фото с iPhone) не поддерживается. Сохраните фото как JPG или включите в настройках камеры формат «Наиболее совместимый».');
   if (!(ALLOWED_TYPES.includes(file.type) || (!file.type && ALLOWED_EXT.test(file.name)))) return t('Это не изображение чека. Подойдут JPG, PNG, WEBP, BMP или TIFF.');
   if (!file.size) return t('Файл пустой. Выберите другое фото.');
-  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return t('Файл весит {size} МБ, а можно не больше {max} МБ. Уменьшите фото или снимите с меньшим разрешением.', { size: new Intl.NumberFormat(LOC(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(file.size / 1024 / 1024), max: MAX_UPLOAD_MB });
+  // JPG/PNG/WEBP браузер сам сожмёт перед отправкой (prepareUpload), поэтому для них предел больше
+  const limitMb = COMPRESSIBLE_TYPES.includes(file.type) ? MAX_SOURCE_MB : MAX_UPLOAD_MB;
+  if (file.size > limitMb * 1024 * 1024) return tooBigText(file.size, limitMb);
   return null;
+}
+const tooBigText = (bytes, maxMb) => t('Файл весит {size} МБ, а можно не больше {max} МБ. Уменьшите фото или снимите с меньшим разрешением.', { size: new Intl.NumberFormat(LOC(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(bytes / 1024 / 1024), max: maxMb });
+
+// --- Сжатие фото перед отправкой (мобильная версия) ---
+// Снимок с камеры телефона весит 3–8 МБ, а сервер всё равно уменьшает его перед OCR. Уменьшаем в браузере:
+// короткую сторону (ширину чека) — до UPLOAD_SHORT_SIDE. Длинную сторону отдельно не ограничиваем, чтобы длинный
+// чек остался читаемым (ML_TASKS.md, 3.2); ограничена только площадь — больше ~16 Мп холст на iPhone не создаётся.
+// Любая ошибка — отправляем исходный файл
+const MAX_SOURCE_MB = 40, UPLOAD_SHORT_SIDE = 1600, UPLOAD_MAX_PIXELS = 16e6, UPLOAD_QUALITY = 0.85;
+const COMPRESS_FROM_BYTES = 1.5 * 1024 * 1024;
+const COMPRESSIBLE_TYPES = ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp'];
+async function prepareUpload(file) {
+  if (!COMPRESSIBLE_TYPES.includes(file.type) || typeof createImageBitmap !== 'function') return file;
+  let bitmap;
+  try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { return file; }
+  try {
+    const { width, height } = bitmap;
+    const scale = Math.min(1, UPLOAD_SHORT_SIDE / Math.min(width, height), Math.sqrt(UPLOAD_MAX_PIXELS / (width * height)));
+    if (scale >= 1 && file.size <= COMPRESS_FROM_BYTES) return file;
+    const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; // прозрачный PNG → белый фон, как бумага чека
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', UPLOAD_QUALITY));
+    if (!blob || blob.size >= file.size) return file;
+    const name = String(file.name || 'receipt').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() });
+  } catch (e) {
+    return file;
+  } finally {
+    bitmap.close?.();
+  }
 }
 function selectFile(file) {
   if (analyzing) return;
@@ -1699,6 +1759,54 @@ function setAnalyzing(on, test) {
   $('analyzeBtn').textContent = on && !test ? t('Распознаём…') : t('Распознать чек');
   $('testBtn').textContent = on && test ? t('Распознаём демо-чек…') : t('Попробовать на демо-чеке →');
 }
+// --- Распознавание через фоновую задачу ---
+// POST /api/analyze/async сразу отвечает task_id, а результат забирается опросом GET /api/tasks/{id}.
+// Один долгий запрос на 20–30 с на телефоне обрывается, если погас экран или пользователь ушёл в другое
+// приложение; опрос же просто продолжается. id задачи — в sessionStorage: если браузер выгрузил вкладку,
+// после возврата распознавание подхватывается (resumePendingAnalyze)
+const PENDING_TASK_KEY = 'checkai_pending_task';
+const TASK_POLL_MS = 1500, TASK_POLL_HIDDEN_MS = 6000, TASK_MAX_MS = 10 * 60 * 1000, TASK_RETRIES = 8;
+const savePendingTask = value => {
+  try { if (value) sessionStorage.setItem(PENDING_TASK_KEY, JSON.stringify(value)); else sessionStorage.removeItem(PENDING_TASK_KEY); } catch (e) {}
+};
+const readPendingTask = () => { try { return JSON.parse(sessionStorage.getItem(PENDING_TASK_KEY) || 'null'); } catch (e) { return null; } };
+function waitTask(taskId, startedAt) {
+  return new Promise((resolve, reject) => {
+    let failures = 0, timer = null, busy = false, settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      fn(value);
+    };
+    const schedule = () => { if (!settled) timer = setTimeout(poll, document.hidden ? TASK_POLL_HIDDEN_MS : TASK_POLL_MS); };
+    async function poll() {
+      if (busy || settled) return;
+      clearTimeout(timer);
+      if (Date.now() - startedAt > TASK_MAX_MS) return finish(reject, new Error(t('Распознавание заняло слишком много времени. Попробуйте ещё раз')));
+      busy = true;
+      try {
+        const task = await apiRequest('/api/tasks/' + encodeURIComponent(taskId));
+        failures = 0;
+        if (task.status === 'completed') return finish(resolve, task.result || {});
+        if (task.status === 'failed') return finish(reject, new Error(task.error || t('Не удалось распознать чек')));
+      } catch (e) {
+        // Сеть на телефоне пропадает на секунды, сервер может перезапускаться — повторяем.
+        // 4xx (задача не найдена, нет доступа) — повторять бессмысленно
+        if (e.status >= 400 && e.status < 500) return finish(reject, e);
+        if (++failures > TASK_RETRIES) return finish(reject, e);
+      } finally {
+        busy = false;
+      }
+      schedule();
+    }
+    // Вернулись в приложение — проверяем сразу, не дожидаясь таймера
+    function onVisible() { if (!document.hidden) poll(); }
+    document.addEventListener('visibilitychange', onVisible);
+    poll();
+  });
+}
 async function analyze(test = false) {
   if (analyzing || (!test && !selectedFile)) return;
   setAnalyzing(true, test);
@@ -1708,18 +1816,37 @@ async function analyze(test = false) {
     let payload;
     if (test) payload = await apiRequest('/api/analyze-test', { method: 'POST' });
     else {
+      const file = await prepareUpload(selectedFile);
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) throw new Error(tooBigText(file.size, MAX_UPLOAD_MB));
       const fd = new FormData();
-      fd.append('file', selectedFile);
-      payload = await apiUpload('/api/analyze', fd, steps.progress);
+      fd.append('file', file);
+      const started = await apiUpload('/api/analyze/async', fd, steps.progress);
+      savePendingTask({ id: started.task_id, at: Date.now(), user: currentUser?.id ?? null });
+      payload = await waitTask(started.task_id, Date.now());
     }
     if (payload.success === false) throw new Error(payload.error ? t(payload.error) : t('Не удалось распознать чек'));
     renderResult(payload.data ?? payload);
   } catch (e) {
     showUploadMessage(t('Не получилось распознать чек: {error}', { error: e.message }));
   } finally {
+    if (!test) savePendingTask(null);
     stopSteps();
     setAnalyzing(false, test);
   }
+}
+// Браузер выгрузил вкладку во время распознавания (на телефоне это обычно) — после возврата ждём ту же задачу
+function resumePendingAnalyze() {
+  const pending = readPendingTask();
+  if (!pending || analyzing) return;
+  if (!pending.id || Date.now() - pending.at > TASK_MAX_MS || (pending.user ?? null) !== (currentUser?.id ?? null)) { savePendingTask(null); return; }
+  showPage('upload');
+  setAnalyzing(true, false);
+  showUploadMessage('');
+  startSteps(false);
+  waitTask(pending.id, pending.at)
+    .then(data => renderResult(data))
+    .catch(e => showUploadMessage(t('Не получилось распознать чек: {error}', { error: e.message })))
+    .finally(() => { savePendingTask(null); stopSteps(); setAnalyzing(false, false); });
 }
 $('analyzeBtn').onclick = () => analyze();
 $('testBtn').onclick = () => analyze(true);
@@ -2481,6 +2608,8 @@ function updateBudgetBadge() {
   $('budgetBadge').hidden = !(currentUser && (
     (budgets.total && spending.total > budgets.total) ||
     Object.entries(budgets.categories).some(([c, limit]) => (spending.byCategory[c] || 0) > limit)));
+  // Точка на вкладке «Бюджеты» в нижней панели (телефон)
+  $('budgetDot').hidden = $('budgetBadge').hidden;
 }
 function renderBudgets() {
   const guest = !currentUser;
@@ -2922,9 +3051,76 @@ I18N.onChange(() => {
 });
 renderLangPicks();
 
+// --- Мобильная версия (PWA): установка, service worker, клавиатура, сеть ---
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// Chrome и Edge предлагают установку событием beforeinstallprompt; Safari — только через «Поделиться»
+let installPrompt = null;
+function renderInstall() {
+  const canPrompt = !!installPrompt && !isStandalone();
+  $('installBtn').hidden = !canPrompt;
+  $('installBtnProfile').hidden = !canPrompt;
+  $('appInstallText').textContent = isStandalone() ? t('CheckAI установлен на этом устройстве.')
+    : canPrompt ? t('Иконка на главном экране и окно без адресной строки — как у обычного приложения.')
+    : isIos() ? t('На iPhone и iPad: откройте сайт в Safari → «Поделиться» → «На экран „Домой“».')
+    : !window.isSecureContext ? t('Установить приложение можно, когда сайт открыт по https.')
+    : t('Откройте сайт в Chrome на телефоне и выберите в меню «Установить приложение».');
+}
+async function promptInstall() {
+  const event = installPrompt;
+  if (!event) return;
+  installPrompt = null;
+  event.prompt();
+  try { await event.userChoice; } catch (e) {}
+  renderInstall();
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); toast(t('CheckAI установлен')); });
+$('installBtn').onclick = () => { closeMenu(); promptInstall(); };
+$('installBtnProfile').onclick = promptInstall;
+I18N.onChange(renderInstall);
+renderInstall();
+
+// Service worker: на рабочем сайте (https) включён. На localhost выключен, чтобы кэш не прятал правки
+// при разработке; включить для проверки — localStorage.checkai_sw = '1' и перезагрузить страницу
+function serviceWorkerEnabled() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return false;
+  let flag = null;
+  try { flag = localStorage.getItem('checkai_sw'); } catch (e) {}
+  return ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) ? flag === '1' : flag !== '0';
+}
+if (serviceWorkerEnabled()) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(err => console.warn('[pwa] service worker:', err)));
+} else if ('serviceWorker' in navigator) {
+  // Выключили — убираем прежнюю регистрацию и её кэш
+  navigator.serviceWorker.getRegistrations().then(list => list.forEach(r => r.unregister())).catch(() => {});
+}
+
+// Пока открыта экранная клавиатура, нижняя панель скрыта (CSS: html.kb-open)
+const TEXT_INPUT_SKIP = ['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'file', 'color', 'image'];
+const isTextField = el => !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !TEXT_INPUT_SKIP.includes(el.type)) || el.isContentEditable);
+if (matchMedia('(pointer: coarse)').matches) {
+  document.addEventListener('focusin', e => document.documentElement.classList.toggle('kb-open', isTextField(e.target)));
+  document.addEventListener('focusout', () => setTimeout(() => {
+    if (!isTextField(document.activeElement)) document.documentElement.classList.remove('kb-open');
+  }, 60));
+}
+
+// Сеть на телефоне то пропадает, то появляется: предупреждаем и обновляем данные, когда связь вернулась
+window.addEventListener('offline', () => toast(t('Нет сети. Данные обновятся, когда связь вернётся'), 4000));
+window.addEventListener('online', () => { toast(t('Связь восстановлена')); if (currentUser) loadReceipts(); });
+
+// После проверки входа: раздел из ярлыка приложения (?page=upload) и незаконченное распознавание
+function afterStartup() {
+  const page = new URLSearchParams(location.search).get('page');
+  if (currentUser && page && /^[a-z]+$/.test(page) && page !== 'home' && $('page-' + page)) showPage(page);
+  if (location.search) { try { history.replaceState(history.state, '', location.pathname + location.hash); } catch (e) {} }
+  if (currentUser) resumePendingAnalyze();
+}
+
 renderAccess();
 loadCurrencies();
-checkAuthOnStartup();
+checkAuthOnStartup().then(afterStartup);
 
 // --- Эффекты интерфейса: только оформление, на данные не влияют ---
 if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

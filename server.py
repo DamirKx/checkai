@@ -17,7 +17,7 @@ from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException, 
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.orm import Session
@@ -544,6 +544,28 @@ def get_currencies(lang: str = Lang):
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
+
+# --- Мобильная версия (PWA): манифест и service worker отдаются из корня сайта ---
+# Service worker управляет только путями ниже того, откуда загружен: из /static/sw.js он не увидел бы «/».
+# no-cache — браузер каждый раз сверяет файл с сервером, и обновление приложения доходит до телефонов сразу
+_PWA_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    return FileResponse(
+        os.path.join(FRONTEND_STATIC_DIR, "sw.js"), media_type="application/javascript", headers=_PWA_NO_CACHE,
+    )
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest():
+    return FileResponse(
+        os.path.join(FRONTEND_STATIC_DIR, "manifest.webmanifest"),
+        media_type="application/manifest+json", headers=_PWA_NO_CACHE,
+    )
+
+
 def _token_response(user: models.User, recovery_code: Optional[str] = None) -> schemas.TokenOut:
     access_token, refresh_token = auth.issue_tokens(user)
     return schemas.TokenOut(
@@ -885,19 +907,27 @@ def analyze_receipt_async_endpoint(
 
     file_path, filename, image_hash = _save_upload(file)
     image_url = f"{RECEIPTS_URL_PREFIX}/{filename}"
-    task = task_manager.create_task(file_path=file_path, image_url=image_url)
     # Сессия запроса закроется раньше, чем задача выполнится: категории берём сейчас,
     # а правила задача читает в своей сессии
     categories = _categories_for(current_user)
     user_id = current_user.id if current_user else None
+    # Задача помнит владельца: чужой task_id не отдаёт распознанный чек (GET /api/tasks/{id})
+    task = task_manager.create_task(file_path=file_path, image_url=image_url, user_id=user_id)
 
     def _worker_fn(task_id: str) -> dict:
         task_manager.update_task(task_id, step="ocr", progress=40)
         try:
             data = _run_ocr(file_path, categories)
         except AppError as e:
+            # Как в синхронном /api/analyze: фото нераспознанного чека не храним
+            _remove_quietly(file_path)
             # Текст ошибки задачи (task.error) — на языке запроса: запроса к этому времени уже нет
             raise e.in_lang(lang) from None
+        except Exception:
+            _remove_quietly(file_path)
+            # Пользователю — понятный текст, а не текст исключения; подробности в логе (_run_wrapper)
+            logger.exception("Ошибка распознавания чека (фоновая задача)")
+            raise AppError(500, "ocr_failed").in_lang(lang) from None
         with database.SessionLocal() as db:
             if user_id is not None:
                 apply_rules(db, user_id, data.get("items") or [])
@@ -919,12 +949,23 @@ def analyze_receipt_async_endpoint(
 
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.TaskStatusOut, tags=["OCR"])
-def get_task_status(task_id: str):
-    """Статус фоновой задачи: распознавание чека или ИИ-анализ расходов. Без авторизации —
-    поэтому в result анализа ничего личного нет (B.2.4)."""
+def get_task_status(
+    task_id: str,
+    current_user: Optional[models.User] = Depends(auth.get_optional_current_user),
+):
+    """Статус фоновой задачи: распознавание чека или ИИ-анализ расходов.
+
+    ИИ-анализ и распознавание у гостя — без авторизации (в result анализа ничего личного нет, B.2.4).
+    Распознавание у вошедшего пользователя — только с его токеном: в result его чек и duplicate_of.
+    Без токена или с истёкшим — 401 (фронт обновит токен и повторит), с чужим — 404, как у чеков."""
     task = task_manager.get_task(task_id) or insights_task_manager.get_task(task_id)
     if not task:
         raise AppError(404, "task_not_found")
+    if task.user_id is not None:
+        if current_user is None:
+            raise AppError(401, "auth_required", headers={"WWW-Authenticate": "Bearer"})
+        if current_user.id != task.user_id:
+            raise AppError(404, "task_not_found")
     return schemas.TaskStatusOut(
         task_id=task.id,
         status=task.status,

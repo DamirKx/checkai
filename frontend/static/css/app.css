@@ -1200,3 +1200,67 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
 @media (max-width: 560px) {
   .lang-select { height: 38px; padding: 0 24px 0 9px; font-size: 12px; background-position: right 12px top 17px, right 7px top 17px; }
 }
+
+/* --- Мобильная версия (PWA) --- */
+/* Высота экрана без адресной строки мобильного браузера: в Safari 100vh больше видимой области */
+@supports (height: 100dvh) {
+  body, .app { min-height: 100dvh; }
+  .modal { max-height: calc(100dvh - 32px); }
+}
+/* Вырезы экрана и системные полосы (viewport-fit=cover в index.html) */
+.topbar { padding-left: max(clamp(16px, 4vw, 56px), env(safe-area-inset-left)); padding-right: max(clamp(16px, 4vw, 56px), env(safe-area-inset-right)); }
+.layout { padding-left: max(clamp(16px, 4vw, 56px), env(safe-area-inset-left)); padding-right: max(clamp(16px, 4vw, 56px), env(safe-area-inset-right)); }
+.drawer { padding-top: calc(25px + env(safe-area-inset-top)); padding-left: max(21px, env(safe-area-inset-left)); }
+.drawer-foot { bottom: calc(23px + env(safe-area-inset-bottom)); }
+.toast { bottom: calc(26px + env(safe-area-inset-bottom)); }
+/* Без задержки и двойного касания для зума на кнопках */
+button, .tab-link { touch-action: manipulation; }
+.install-link span:first-child { color: var(--aqua); }
+.pf-app .hint { margin: 0 0 12px; }
+
+/* Нижняя панель разделов: только на узком экране и только у вошедших */
+.tabbar { display: none; }
+.tab-link {
+  position: relative; display: grid; align-content: end; justify-items: center; gap: 4px; min-width: 0; height: 64px; padding: 0 2px 11px;
+  border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 650; line-height: 1.2; -webkit-tap-highlight-color: transparent;
+  transition: color .2s;
+}
+.tab-ico { font-size: 20px; line-height: 1; transition: transform .25s var(--ease); }
+.tab-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-link.active { color: var(--aqua); }
+.tab-link.active .tab-ico { transform: translateY(-1px) scale(1.08); }
+.tab-add .tab-ico { display: grid; width: 48px; height: 48px; margin-top: -20px; place-items: center; border-radius: 16px; background: var(--grad); color: var(--on-grad); font-size: 24px; box-shadow: var(--glow); }
+.tab-add.active { color: var(--cream); }
+.tab-add.active .tab-ico { transform: none; }
+.tab-dot { position: absolute; top: 12px; left: calc(50% + 9px); width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--surface); }
+@media (max-width: 700px) {
+  html[data-auth="user"] .tabbar {
+    position: fixed; z-index: 8; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 0 max(6px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid var(--border); background: var(--topbar);
+    backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  }
+  html[data-auth="user"] .layout { padding-bottom: calc(64px + 40px + env(safe-area-inset-bottom)); }
+  html[data-auth="user"] .toast { bottom: calc(64px + 14px + env(safe-area-inset-bottom)); }
+  /* Пока открыта клавиатура, панель не нужна и закрывает поле ввода (класс ставит app.js) */
+  html.kb-open .tabbar { display: none !important; }
+}
+
+/* Окна на телефоне выезжают снизу и занимают всю ширину */
+@media (max-width: 560px) {
+  .modal-backdrop { place-items: end center; padding: max(16px, env(safe-area-inset-top)) 0 0; }
+  .modal, .modal.wide {
+    width: 100%; max-height: calc(100vh - 24px); padding: 26px max(18px, env(safe-area-inset-right)) calc(22px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+    border-bottom: 0; border-radius: 22px 22px 0 0; animation: sheet-in .4s var(--ease) both;
+  }
+  @supports (height: 100dvh) { .modal, .modal.wide { max-height: calc(100dvh - 24px); } }
+}
+@keyframes sheet-in { from { transform: translateY(100%); } }
+
+/* Сенсорные экраны: шрифт полей не меньше 16px, иначе iOS увеличивает страницу при вводе;
+   кнопки — не меньше 40px под палец */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
+  .lang-select { padding: 0 22px 0 8px; background-position: right 11px center, right 6px center; }
+  .account-row .icon-btn { width: 40px; height: 40px; }
+}
