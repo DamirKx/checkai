@@ -2783,6 +2783,14 @@ async function loadInsights() {
     if (insights.userId !== user.id) return;
     insights.data = data?.insights ? data : null;
     insights.unsupported = false;
+    // Срок «обновить можно через…» — по серверу: запомненный в браузере мог остаться от прежнего, более долгого лимита
+    if (typeof data?.retry_after === 'number') {
+      insights.retryAt = data.retry_after > 0 ? Date.now() + data.retry_after * 1000 : 0;
+      try {
+        if (insights.retryAt) localStorage.setItem(insightsRetryKey(user.id), String(insights.retryAt));
+        else localStorage.removeItem(insightsRetryKey(user.id));
+      } catch (e) {}
+    }
   } catch (e) {
     if (insights.userId !== user.id) return;
     if (notSupported(e)) insights.unsupported = true;

@@ -362,7 +362,7 @@ class TestInsightsLanguages(InsightsI18nCase):
         self.assertNotRegex(out["insights"]["summary"], CYRILLIC)
 
     def test_429_text_translated(self):
-        with patch.object(config, "INSIGHTS_REFRESH_HOURS", 6):
+        with patch.object(config, "INSIGHTS_REFRESH_MINUTES", 360):
             self.run_analysis(EN)
             self.save(store="Coffee Boom", date=TODAY.isoformat(), total=1000, allow_duplicate=True,
                       items=[{"name": "Кофе", "total_price": 1000, "category_id": self.cafe.id}])

@@ -73,5 +73,14 @@ if AI_PROVIDER not in ("gemini", "ollama", "off"):
 # Ключ только на сервере: во фронт и в логи не попадает. Читает ML (ml/app/llm.py)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
-# Не чаще одного нового анализа на пользователя за столько часов
-INSIGHTS_REFRESH_HOURS = _int_env("INSIGHTS_REFRESH_HOURS", 6)
+# Не чаще одного нового анализа на пользователя (на каждом языке) за столько минут; 0 — без ограничения.
+# Старая настройка в часах (INSIGHTS_REFRESH_HOURS) учитывается, только если INSIGHTS_REFRESH_MINUTES не задана
+def insights_refresh_minutes() -> int:
+    if os.getenv("INSIGHTS_REFRESH_MINUTES", "").strip():
+        return _int_env("INSIGHTS_REFRESH_MINUTES", 1)
+    if os.getenv("INSIGHTS_REFRESH_HOURS", "").strip():
+        return _int_env("INSIGHTS_REFRESH_HOURS", 0) * 60
+    return 1
+
+
+INSIGHTS_REFRESH_MINUTES = insights_refresh_minutes()

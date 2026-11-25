@@ -33,6 +33,8 @@ services:
       - OLLAMA_URL=${DOCKER_OLLAMA_HOST:-http://ollama:11434}/api/generate
       # Режим работы: auto (Ollama при наличии, fallback на быстрый regex-парсер)
       - USE_AI_PARSER=${USE_AI_PARSER:-auto}
+      # ИИ-рекомендации: не чаще одного нового анализа на пользователя за столько минут (0 — без ограничения)
+      - INSIGHTS_REFRESH_MINUTES=${INSIGHTS_REFRESH_MINUTES:-1}
       # Отключаем багнутые фичи PaddlePaddle 3.0 на Intel/AMD процессорах
       - FLAGS_enable_pir_api=0
       - FLAGS_use_onednn=0

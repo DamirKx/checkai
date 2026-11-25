@@ -3,6 +3,7 @@
 ИИ подменяется заглушкой (insights._advisor): в тестах наружу ничего не уходит.
 """
 import json
+import os
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
@@ -162,7 +163,7 @@ class TestFlow(InsightsCase):
         self.assertEqual(task["result"], {"ok": True})
 
         out = self.client.get("/api/insights", headers=self.headers_a).json()
-        self.assertEqual(set(out), {"insights", "created_at", "model", "stale"})
+        self.assertEqual(set(out), {"insights", "created_at", "model", "stale", "retry_after"})
         self.assertFalse(out["stale"])
         self.assertEqual(out["model"], "gemini-test")
         items = out["insights"]["items"]
@@ -198,12 +199,45 @@ class TestFlow(InsightsCase):
         self.assertEqual(r.status_code, 429, r.text)
         body = r.json()
         self.assertIsInstance(body["retry_after"], int)
-        self.assertTrue(0 < body["retry_after"] <= config.INSIGHTS_REFRESH_HOURS * 3600)
+        self.assertTrue(0 < body["retry_after"] <= config.INSIGHTS_REFRESH_MINUTES * 60)
         self.assertTrue(body["detail"].startswith("Обновить советы можно через"))
 
-        with patch.object(config, "INSIGHTS_REFRESH_HOURS", 0):
+        with patch.object(config, "INSIGHTS_REFRESH_MINUTES", 0):
             self.run_analysis()
         self.assertFalse(self.client.get("/api/insights", headers=self.headers_a).json()["stale"])
+
+    def test_get_reports_retry_after(self):
+        """GET отдаёт срок до следующего обновления: фронт синхронизирует по нему кнопку «Обновить»."""
+        self.receipt(month_day(0), 1500)
+        self.consent()
+        self.run_analysis()
+        with patch.object(config, "INSIGHTS_REFRESH_MINUTES", 1):
+            wait = self.client.get("/api/insights", headers=self.headers_a).json()["retry_after"]
+            self.assertTrue(0 < wait <= 60, wait)
+            self.receipt(month_day(0, 2), 700)
+            r = self.client.post("/api/insights", headers=self.headers_a)
+            self.assertEqual(r.status_code, 429)
+            self.assertEqual(r.json()["code"], "insights_retry_minutes")
+        # Лимит сняли — можно сразу, хотя в браузере мог остаться прежний срок
+        with patch.object(config, "INSIGHTS_REFRESH_MINUTES", 0):
+            self.assertEqual(self.client.get("/api/insights", headers=self.headers_a).json()["retry_after"], 0)
+
+    def test_refresh_setting_from_env(self):
+        """INSIGHTS_REFRESH_MINUTES важнее старой INSIGHTS_REFRESH_HOURS; без обеих — 1 минута."""
+        cases = [
+            ({}, 1),
+            ({"INSIGHTS_REFRESH_HOURS": "6"}, 360),
+            ({"INSIGHTS_REFRESH_HOURS": "6", "INSIGHTS_REFRESH_MINUTES": "1"}, 1),
+            ({"INSIGHTS_REFRESH_MINUTES": "0"}, 0),
+        ]
+        keys = ("INSIGHTS_REFRESH_HOURS", "INSIGHTS_REFRESH_MINUTES")
+        for env, expected in cases:
+            # patch.dict вернёт окружение (в том числе значения из .env разработчика) после проверки
+            with self.subTest(env=env), patch.dict(os.environ, {}):
+                for key in keys:
+                    os.environ.pop(key, None)
+                os.environ.update(env)
+                self.assertEqual(config.insights_refresh_minutes(), expected)
 
     def test_budget_change_makes_stale(self):
         self.receipt(month_day(0), 1500)
@@ -251,7 +285,7 @@ class TestFlow(InsightsCase):
 
     def test_keeps_only_last_analyses(self):
         self.consent()
-        with patch.object(config, "INSIGHTS_REFRESH_HOURS", 0):
+        with patch.object(config, "INSIGHTS_REFRESH_MINUTES", 0):
             for amount in range(1, insights_keep() + 3):
                 self.receipt(month_day(0), amount * 100)
                 self.run_analysis()
