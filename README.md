@@ -102,7 +102,7 @@ CheckAI/
 │   ├── database.py         # Подключение к БД, сессии, миграции при старте
 │   ├── models.py           # ORM-модели (SQLAlchemy)
 │   ├── schemas.py          # Pydantic-схемы запросов и ответов
-│   ├── crud.py             # Все запросы к базе данных
+│   ├── crud/               # Все запросы к базе данных, по разделам: users, receipts, analytics, profile, budgets, categories, insights
 │   ├── auth.py             # Пароли и JWT
 │   ├── categories.py       # Стандартные категории и правила «товар → категория»
 │   ├── currencies.py       # Справочник валют
@@ -635,7 +635,7 @@ app/main.py — FastAPI
    ├─ app/routers/*  эндпоинты по разделам (def, выполняются в пуле потоков)
    │     ├─ app/auth.py      JWT, пароли, текущий пользователь
    │     ├─ app/schemas.py   Pydantic: проверка входа и формат ответа
-   │     ├─ app/crud.py      все запросы к БД
+   │     ├─ app/crud/        все запросы к БД
    │     │     └─ app/models.py → app/database.py → SQLite / PostgreSQL
    │     ├─ app/uploads.py   фото чеков и профиля на диске
    │     └─ app/ocr.py → ml/ocr.py   распознавание (под общей блокировкой)
@@ -652,7 +652,7 @@ app/main.py — FastAPI
 
 - **Эндпоинты объявлены через `def`, а не `async def`.** FastAPI выполняет их в пуле потоков, поэтому долгий OCR не блокирует остальные запросы. Не делайте эндпоинты `async`, если внутри синхронная работа с БД или OCR.
 - **Одна модель OCR на процесс.** `app.ocr.get_ocr()` создаёт её лениво (или при старте, если `OCR_WARMUP=1`). PaddleOCR не потокобезопасен, поэтому распознавание идёт под `_ocr_run_lock` — строго по одному.
-- **Бизнес-логика запросов к БД — только в `crud.py`.** Эндпоинт проверяет права и вызывает функцию из `crud`.
+- **Бизнес-логика запросов к БД — только в `app/crud/`.** Эндпоинт проверяет права и вызывает функцию из `crud`.
 - **Фронт получает данные только через API**, к базе не обращается.
 - **Папка `ml/` — зона ML-разработчика.** Бэкенд вызывает из неё `ml.ocr` (через `app/ocr.py`), `ml.categorize`, `ml.advisor` и `ml.merchant`.
 
@@ -666,7 +666,7 @@ app/main.py — FastAPI
 | [app/database.py](app/database.py) | Engine и сессии SQLAlchemy, `get_db()`, `init_db()` с Alembic. Для SQLite включает внешние ключи и подменяет `lower()` на версию, понимающую кириллицу (иначе `ilike` не найдёт «магнум» в «Магнум»). Адрес `postgresql://…` переводит на драйвер `psycopg2` |
 | [app/models.py](app/models.py) | Таблицы: `User`, `Category`, `CategoryRule`, `Receipt`, `ReceiptItem`, `Budget`, `ExchangeRate`, `Insight` |
 | [app/schemas.py](app/schemas.py) | Pydantic-схемы запросов и ответов, проверка email, пароля, лимитов, нормализация дат |
-| [app/crud.py](app/crud.py) | Пользователи, чеки (фильтры, поиск, пагинация, поиск дубликатов), аналитика, бюджеты, категории, сводка профиля, сводка для ИИ (`build_finance_snapshot`) и сохранённые анализы |
+| [app/crud/](app/crud/) | Запросы к БД по разделам: `users`, `receipts` (курсы, фильтры, поиск, пагинация, поиск дубликатов), `analytics`, `profile` (сводка профиля), `budgets`, `categories` (категории и правила), `insights` (сводка для ИИ `build_finance_snapshot` и сохранённые анализы). Роутеры вызывают их как `crud.<функция>`: `__init__.py` реэкспортирует все имена — новую функцию добавьте и туда |
 | [app/auth.py](app/auth.py) | bcrypt, выпуск и проверка JWT, зависимости `get_current_user` / `get_optional_current_user` |
 | [app/categories.py](app/categories.py) | Стандартные категории (`DEFAULT_CATEGORIES` — единственный источник), `normalize_item_name` для правил, категория чека (`main_category_id`), поиск категории позиции (`resolve_category_id`), применение правил к распознанному чеку (`apply_rules`), `CategoryError` |
 | [app/currencies.py](app/currencies.py) | Справочник валют, нормализация и проверка кода |
@@ -750,7 +750,7 @@ exchange_rates (курсы валют к тенге на даты покупок
 
 **Код**
 
-- Запросы к БД — в `crud.py`, эндпоинты — в `app/routers/<раздел>.py`, схемы — в `schemas.py`. Новый раздел — новый файл в `app/routers/` и строка в списке роутеров в `app/main.py`.
+- Запросы к БД — в `app/crud/<раздел>.py` (и строка в `app/crud/__init__.py`), эндпоинты — в `app/routers/<раздел>.py`, схемы — в `schemas.py`. Новый раздел — новый файл в `app/routers/` и строка в списке роутеров в `app/main.py`.
 - Схемы ответа указывайте в `response_model` — так в ответ не попадут лишние поля (например, `hashed_password`).
 - Новые настройки — в `app/config.py` через `os.getenv` с разумным значением по умолчанию, плюс строка в `.env.example` и в `docker-compose.yml`.
 - Новые тексты интерфейса — в `scripts/i18n_source.py` (перевод на kk и en), затем `python scripts/i18n_source.py` и `node scripts/check_i18n.js`.
@@ -767,7 +767,7 @@ exchange_rates (курсы валют к тенге на даты покупок
    class ReceiptNoteUpdate(BaseModel):
        note: Optional[str] = Field(default=None, max_length=1000)
    ```
-3. **Функция в** [app/crud.py](app/crud.py):
+3. **Функция в** модуле раздела — здесь [app/crud/receipts.py](app/crud/receipts.py), и её имя в списке импорта [app/crud/\_\_init\_\_.py](app/crud/__init__.py):
    ```python
    def set_receipt_note(db: Session, receipt: models.Receipt, note: Optional[str]) -> models.Receipt:
        receipt.note = note.strip() if note else None
