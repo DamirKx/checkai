@@ -1,5 +1,5 @@
 /* Цвета задаются только здесь: тёмная тема по умолчанию, светлая — через [data-theme="light"].
-   Имена переменных прежние (app.js читает --bg), значения — новая палитра: графит + лайм, фиолетовый, бирюза */
+   Имена переменных прежние (js/app/core.js читает --bg), значения — новая палитра: графит + лайм, фиолетовый, бирюза */
 :root {
   color-scheme: dark;
   --bg: #07080d;
@@ -401,7 +401,7 @@ h3 { color: var(--cream); font-size: 16px; font-weight: 650; }
   background: linear-gradient(160deg, var(--surface-raised), var(--surface) 70%); box-shadow: var(--shadow);
   transition: border-color .3s, transform .4s var(--ease), box-shadow .3s;
 }
-/* Подсветка за курсором: --mx/--my выставляет app.js */
+/* Подсветка за курсором: --mx/--my выставляет js/app/main.js */
 .card::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0; pointer-events: none;
   background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), #ffffff0f, transparent 45%); transition: opacity .3s;
@@ -1242,7 +1242,7 @@ button, .tab-link { touch-action: manipulation; }
   }
   html[data-auth="user"] .layout { padding-bottom: calc(64px + 40px + env(safe-area-inset-bottom)); }
   html[data-auth="user"] .toast { bottom: calc(64px + 14px + env(safe-area-inset-bottom)); }
-  /* Пока открыта клавиатура, панель не нужна и закрывает поле ввода (класс ставит app.js) */
+  /* Пока открыта клавиатура, панель не нужна и закрывает поле ввода (класс ставит js/app/pwa.js) */
   html.kb-open .tabbar { display: none !important; }
 }
 
@@ -1287,5 +1287,5 @@ button, .tab-link { touch-action: manipulation; }
   .dropzone::before { display: none; }
   .upload-icon { animation: none; }
 }
-/* Пока открыта камера, фон не рисуется совсем (класс ставит app.js на время съёмки) */
+/* Пока открыта камера, фон не рисуется совсем (класс ставит js/app/analyze.js на время съёмки) */
 html.capturing .backdrop { display: none; }

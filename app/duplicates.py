@@ -1,6 +1,6 @@
 """Правило «тот же чек по содержимому».
 
-Повторяет findDuplicate / normText / itemsSimilarity из frontend/static/js/app.js. Пороги и нормализацию
+Повторяет findDuplicate / normText / itemsSimilarity из frontend/static/js/app/receipt.js. Пороги и нормализацию
 менять только вместе с фронтом, иначе пользователь увидит окно дубликата дважды или не увидит вовсе.
 Общие примеры для обеих сторон — tests/fixtures/duplicates.json.
 """

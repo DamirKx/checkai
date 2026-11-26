@@ -31,7 +31,7 @@ CategorySource = Literal["ai", "keywords", "rule", "user"]
 # photo — распознан с фото, manual — введён руками
 ReceiptSource = Literal["photo", "manual"]
 
-# Пределы чисел в чеке. Те же константы — MAX_AMOUNT / MAX_QUANTITY во frontend/static/js/app.js
+# Пределы чисел в чеке. Те же константы — MAX_AMOUNT / MAX_QUANTITY во frontend/static/js/app/receipt.js
 MAX_AMOUNT = 1e9
 MAX_QUANTITY = 100000
 

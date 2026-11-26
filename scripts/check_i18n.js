@@ -21,11 +21,11 @@ const dicts = sandbox.window.CHECKAI_LOCALES || {};
 
 const keys = new Map();          // ключ → где встретился
 const pluralKeys = new Set();    // ключи «one|few|many»
-const unwrapped = [];            // русский текст в app.js без t()
+const unwrapped = [];            // русский текст в js/app/*.js без t()
 const REGEX_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'delete', 'void', 'throw', 'new', 'else', 'do', 'yield', 'await']);
 const addKey = (key, where) => { if (CYR.test(key) && !keys.has(key)) keys.set(key, where); };
 
-// --- app.js: разбор с учётом строк, шаблонов, регулярных выражений и комментариев ---
+// --- js/app/*.js: разбор с учётом строк, шаблонов, регулярных выражений и комментариев ---
 function scanApp(file) {
   const lines = read(file).split('\n');
   // Строки, которые не проверяются (// i18n-ignore, блок i18n-ignore-start…end), и строки-таблицы ключей
@@ -128,7 +128,8 @@ function scanApp(file) {
     i++;
   }
 }
-scanApp('frontend/static/js/app.js');
+const APP_DIR = 'frontend/static/js/app';
+for (const name of fs.readdirSync(path.join(ROOT, APP_DIR)).filter(n => n.endsWith('.js')).sort()) scanApp(`${APP_DIR}/${name}`);
 
 // --- index.html: текстовые узлы и атрибуты, как их собирает i18n.js ---
 function scanHtml(file) {
