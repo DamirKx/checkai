@@ -31,7 +31,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const round2 = n => Math.round(num(n) * 100) / 100;
-// Переводы (i18n.js, I18N_TASKS.md, раздел 2): ключ — русский текст, для ru строка не меняется
+// Переводы (i18n.js): ключ — русский текст, для ru строка не меняется
 const t = (text, params) => I18N.t(text, params);
 // Формы — русские; для kk и en форма берётся из словаря по ключу «one|few|many»
 const plural = (n, one, few, many) => I18N.plural(n, one, few, many);
@@ -140,7 +140,7 @@ const receiptIso = r => { const d = parseDate(r.date); return d && !Number.isNaN
 // «Без категории» — позиция с category_id = null: это не категория, её нельзя изменить или удалить
 const UNCATEGORIZED = { id: null, name: 'Без категории', icon: '○', description: null }; // i18n-key
 const CATEGORY_ICONS = ['💄', '🐶', '🎁', '📚', '💊', '🏋', '✈', '🎮', '🧸', '🍷', '🚗', '💡', '📱', '🧾', '🏠', '◌'];
-// Ограничения — те же, что на сервере (CATEGORIES_TASKS.md, п. 0.4)
+// Ограничения — те же, что на сервере
 const CATEGORY_NAME_MAX = 50, CATEGORY_DESC_MAX = 300, CATEGORY_ICON_MAX = 8;
 // Откуда у позиции категория после распознавания
 const CATEGORY_SOURCE_TEXT = { rule: 'по вашему правилу', ai: 'определил ИИ', keywords: 'по ключевым словам' }; // i18n-key
@@ -153,7 +153,7 @@ const catKey = c => c.id != null ? String(c.id) : c === UNCATEGORIZED ? '' : 'na
 const categoryByKey = key => key === '' ? UNCATEGORIZED
   : String(key).startsWith('name:') ? categories.find(c => c.name === key.slice(5)) || UNCATEGORIZED
   : categoryById(Number(key));
-// Стандартные категории (I18N_TASKS.md, п. 1.3): в базе — на русском, на экране — на языке интерфейса.
+// Стандартные категории: в базе — на русском, на экране — на языке интерфейса.
 // default_key присылает сервер (null — категорию переименовали). Пока поля нет, узнаём её по русскому названию.
 // Название и описание по-прежнему хранятся и отправляются на русском: логика работает с c.name
 /* i18n-keys */
@@ -356,7 +356,7 @@ async function apiRequest(url, options = {}, retried = false) {
   const token = getToken();
   options.headers = options.headers || {};
   if (token) options.headers['Authorization'] = `Bearer ${token}`;
-  // Сервер отвечает ошибками и рекомендациями на языке интерфейса (I18N_TASKS.md, п. 1.1)
+  // Сервер отвечает ошибками и рекомендациями на языке интерфейса
   options.headers['Accept-Language'] = I18N.getLang();
   if (options.body && !(options.body instanceof FormData) && !options.headers['Content-Type']) options.headers['Content-Type'] = 'application/json';
   let response;
@@ -387,7 +387,7 @@ function apiUpload(url, formData, onProgress) {
 
 // --- Сессия пользователя ---
 const initial = u => String(u?.full_name || u?.email || '?').trim().charAt(0).toUpperCase() || '?';
-// Фото профиля: avatar_url с сервера, а пока его нет — сжатая копия в localStorage (PROFILE_TASKS.md, п. 1.2)
+// Фото профиля: avatar_url с сервера, а пока его нет — сжатая копия в localStorage
 // В ключе и дата регистрации: id удалённого аккаунта база может выдать новому
 const avatarKey = u => `checkai_avatar_${u.id}_${u.created_at || ''}`;
 const localAvatar = u => { try { return u ? localStorage.getItem(avatarKey(u)) : null; } catch (e) { return null; } };
@@ -997,7 +997,7 @@ function toDraft(src) {
     // Откуда распознавание взяло валюту: symbol | country | default (у сохранённых чеков нет)
     currency_source: src.currency_source || null,
     image_path: src.image_path || null,
-    // id сохранённого чека с тем же фото или фискальным номером — сервер сообщает при распознавании (C.2)
+    // id сохранённого чека с тем же фото или фискальным номером — сервер сообщает при распознавании
     duplicate_of: src.duplicate_of ?? null,
     // photo | manual: без фото чек считается введённым вручную (так же решает сервер)
     source: src.source || (src.image_path ? 'photo' : 'manual'),
@@ -1021,7 +1021,7 @@ function toPayload(draft) {
       // Есть id — отправляем его; нет (гость) — название, сервер найдёт категорию пользователя
       if (i.category_id != null) item.category_id = i.category_id;
       else item.category = i.category || null;
-      // Откуда категория: ai | keywords | rule | user (PROFILE_TASKS.md, п. 2.1). Старый сервер поле пропустит
+      // Откуда категория: ai | keywords | rule | user. Старый сервер поле пропустит
       if (i.category_source) item.category_source = i.category_source;
       return item;
     });
@@ -1037,7 +1037,7 @@ function toPayload(draft) {
     items,
   };
 }
-// Пределы — те же, что проверяет сервер (NEXT_WEEK_TASKS.md, A.2.2)
+// Пределы — те же, что проверяет сервер
 const MAX_AMOUNT = 1e9, MAX_QUANTITY = 100000;
 // Текст ошибки или null, если черновик можно сохранять; field — поле позиции index, куда поставить фокус
 function draftProblem(draft) {
@@ -1078,7 +1078,7 @@ function historyHints() {
 }
 const datalist = (id, values) => `<datalist id="${esc(id)}">${values.slice(0, HINTS_MAX).map(v => `<option value="${esc(v)}"></option>`).join('')}</datalist>`;
 
-// Автокатегория для вписанных руками названий: POST /api/categorize (NEXT_WEEK_TASKS.md, A.2.3)
+// Автокатегория для вписанных руками названий: POST /api/categorize
 const CATEGORIZE_DELAY_MS = 500;
 // Нет эндпоинта (404/405) — больше не спрашиваем до перезагрузки страницы
 let categorizeSupported = true;
@@ -1262,9 +1262,9 @@ function focusDraftProblem(root, problem) {
   root.querySelector(`[data-i="${problem.index}"] [data-k="${problem.field || 'name'}"]`)?.focus();
 }
 
-// --- Проверка на дубликат (NEXT_WEEK_TASKS.md, задача C) ---
+// --- Проверка на дубликат ---
 // Тот же чек, сохранённый второй раз: та же валюта и итог, та же дата, время в пределах 2 минут,
-// тот же магазин и почти те же позиции. Правила совпадают с crud.find_duplicate на сервере (C.2)
+// тот же магазин и почти те же позиции. Правила совпадают с crud.find_duplicate на сервере
 const DUP_TIME_MIN = 2, DUP_ITEMS_MIN = 0.6, DUP_NODATE_ITEMS_MIN = 0.8;
 // Название магазина или товара для сравнения: регистр, ё, знаки и правовая форма (ТОО, ИП…) не важны
 const normText = s => (' ' + String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9әғқңөұүһі]+/gi, ' ') + ' ') // i18n-ignore
@@ -1330,7 +1330,7 @@ $('duplicateCancel').onclick = $('duplicateClose').onclick = () => resolveDuplic
 $('duplicateOpen').onclick = () => resolveDuplicate('open');
 $('duplicateSave').onclick = () => resolveDuplicate('save');
 $('duplicateModal').onclick = e => { if (e.target.id === 'duplicateModal') resolveDuplicate('cancel'); };
-// Сохранение с проверкой: сначала по загруженной истории, затем сервер может ответить 409 (C.2).
+// Сохранение с проверкой: сначала по загруженной истории, затем сервер может ответить 409.
 // «Всё равно сохранить» — повтор с allow_duplicate: true. Возвращает {saved} или {choice, existing}
 async function sendReceipt(url, method, draft, excludeId = null) {
   const payload = toPayload(draft), canOpen = excludeId == null;
@@ -1359,7 +1359,7 @@ async function openExisting(existing) {
 }
 
 // --- Подробности покупки (чека) ---
-// Чек, введённый без фото (поле source с сервера, NEXT_WEEK_TASKS.md, A.2.1)
+// Чек, введённый без фото (поле source с сервера)
 const isManual = r => r?.source === 'manual';
 const manualBadge = () => `<span class="pill pill-manual">${esc(t('вручную'))}</span>`;
 let openedReceipt = null, editDraft = null;
@@ -1650,7 +1650,7 @@ const tooBigText = (bytes, maxMb) => t('Файл весит {size} МБ, а мо
 // --- Сжатие фото перед отправкой (мобильная версия) ---
 // Снимок с камеры телефона весит 3–8 МБ, а сервер всё равно уменьшает его перед OCR. Уменьшаем в браузере:
 // короткую сторону (ширину чека) — до UPLOAD_SHORT_SIDE. Длинную сторону отдельно не ограничиваем, чтобы длинный
-// чек остался читаемым (ML_TASKS.md, 3.2); ограничена только площадь — больше ~16 Мп холст на iPhone не создаётся.
+// чек остался читаемым; ограничена только площадь — больше ~16 Мп холст на iPhone не создаётся.
 // Любая ошибка — отправляем исходный файл
 const MAX_SOURCE_MB = 40, UPLOAD_SHORT_SIDE = 1600, UPLOAD_MAX_PIXELS = 16e6, UPLOAD_QUALITY = 0.85;
 const COMPRESS_FROM_BYTES = 1.5 * 1024 * 1024;
@@ -2065,7 +2065,7 @@ const csvNum = n => String(round2(n)).replace('.', ',');
 function exportCsv(list = historyList()) {
   if (!list.length) return;
   // Цены и суммы — в валюте чека, отдельная колонка — итог в основной валюте (пусто, если курса нет)
-  // Заголовки — на языке интерфейса; формат дат и чисел одинаковый для всех языков (I18N_TASKS.md, п. 2.9)
+  // Заголовки — на языке интерфейса; формат дат и чисел одинаковый для всех языков
   const rows = [[t('Дата'), t('Время'), t('Магазин'), t('Валюта'), t('Итог чека'), t('Итог в {cur}', { cur: baseCurrency() }), t('Товар'), t('Количество'), t('Цена'), t('Сумма'), t('Категория')]];
   list.forEach(r => {
     const d = parseDate(r.date), day = d && !Number.isNaN(+d) ? d.toLocaleDateString('ru-RU') : '';
@@ -2109,7 +2109,7 @@ async function loadCategories() {
   // Пока шёл запрос, пользователь сменил аккаунт или вышел
   if (currentUser?.id !== user?.id) return;
   categories = (Array.isArray(list) ? list : [])
-    // default_key: undefined — сервер его ещё не присылает, null — категория не стандартная (I18N_TASKS.md, п. 3.2)
+    // default_key: undefined — сервер его ещё не присылает, null — категория не стандартная
     .map((c, i) => ({ id: c.id ?? null, name: c.name, description: c.description || null, icon: c.icon || '◌', position: c.position ?? i, default_key: c.default_key }))
     .sort((a, b) => a.position - b.position);
   rerender();
@@ -2313,7 +2313,7 @@ $('rememberMoves').onchange = () => { try { localStorage.setItem(REMEMBER_KEY, $
 // --- Окно «Новая категория» / «Изменить категорию» ---
 let editingCategory = null;
 // Что показали в форме: переведённое название стандартной категории не должно уйти на сервер,
-// если пользователь его не менял, иначе категория перестанет быть стандартной (I18N_TASKS.md, п. 2.5)
+// если пользователь его не менял, иначе категория перестанет быть стандартной
 let categoryFormInitial = { name: '', description: '' };
 const renderIconPicks = () => {
   $('categoryIconPicks').innerHTML = CATEGORY_ICONS.map(i => `<button class="icon-pick" type="button" data-icon="${esc(i)}" aria-label="${esc(t('Иконка {icon}', { icon: i }))}" aria-pressed="false">${esc(i)}</button>`).join('');
@@ -2726,7 +2726,7 @@ $('budgetOverall').onclick = e => { if (e.target.closest('[data-budget-edit]')) 
 $('budgetLoginBtn').onclick = () => openAuth('login');
 $('budgetMonth').onchange = renderBudgets;
 
-// --- Рекомендации ИИ (NEXT_WEEK_TASKS.md, B.3) ---
+// --- Рекомендации ИИ ---
 // Цифры считает сервер, ИИ только пишет текст. Фронт показывает ответ InsightsOut и ничего не пересчитывает.
 // Текст модели выводится только через esc(): в названиях магазинов и товаров может оказаться что угодно
 const INSIGHTS_MIN_RECEIPTS = 5, INSIGHTS_POLL_MS = 2000, INSIGHTS_POLL_MAX = 90;
@@ -2798,7 +2798,7 @@ async function loadInsights() {
   insights.loaded = true;
   renderInsights();
 }
-// Согласие хранит сервер: preferences.ai_insights или временная колонка ai_insights_consent (B.2.5).
+// Согласие хранит сервер: preferences.ai_insights или временная колонка ai_insights_consent.
 // Есть готовый анализ — значит, согласие уже было
 const insightsConsent = () => !!(insights.consented || currentUser?.preferences?.ai_insights || currentUser?.ai_insights_consent || insights.data);
 async function grantInsightsConsent() {
@@ -2994,7 +2994,7 @@ $('insights').addEventListener('click', e => {
 });
 $('profileInsights').onclick = () => showPage('analysis');
 
-// --- Язык интерфейса (I18N_TASKS.md, п. 2.6) ---
+// --- Язык интерфейса ---
 // Выбор хранится в localStorage (i18n.js) и у вошедшего — в preferences.language на сервере.
 // При входе и при старте язык берётся из аккаунта; новый аккаунт получает язык с этого устройства
 let langFromDevice = false;
@@ -3066,7 +3066,7 @@ I18N.onChange(() => {
   rerender();
   renderAccountMenu();
   renderLangPicks();
-  // Рекомендации у сервера — отдельно для каждого языка (I18N_TASKS.md, п. 3.5)
+  // Рекомендации у сервера — отдельно для каждого языка
   if (currentUser && insights.loaded && !insights.unsupported) loadInsights();
 });
 renderLangPicks();

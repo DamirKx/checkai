@@ -1,4 +1,4 @@
-"""ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2.3)
+"""ИИ-рекомендации по расходам
 
 Revision ID: 0009_insights
 Revises: 0008_receipt_source

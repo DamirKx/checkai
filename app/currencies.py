@@ -12,7 +12,7 @@ CURRENCIES: Dict[str, Dict[str, Any]] = {
     "TRY": {"symbol": "₺", "name": "Турецкая лира", "digits": 2},
 }
 
-# Названия на kk и en (I18N_TASKS.md, п. 3.6). Русское — поле name выше
+# Названия на kk и en. Русское — поле name выше
 CURRENCY_NAMES: Dict[str, Dict[str, str]] = {
     "KZT": {"kk": "Қазақстан теңгесі", "en": "Kazakhstani tenge"},
     "RUB": {"kk": "Ресей рублі", "en": "Russian ruble"},

@@ -1,7 +1,7 @@
-"""Язык ответов API: ru, kk, en (I18N_TASKS.md, раздел 3).
+"""Язык ответов API: ru, kk, en.
 
 Язык запроса — заголовок Accept-Language, без него — ru. preferences.language пользователя для ответов
-не используется: фронт всегда присылает заголовок (п. 3.3).
+не используется: фронт всегда присылает заголовок.
 
 Тексты для человека — в MESSAGES по стабильному коду. Русские тексты совпадают с прежними буква в букву:
 без заголовка ответы такие же, как до перевода (правило 0.1). Логи и комментарии остаются на русском.
@@ -14,7 +14,7 @@ from pydantic_core import PydanticCustomError
 
 LANGS = ("ru", "kk", "en")
 DEFAULT_LANG = "ru"
-# Синоним kz принимается на входе, хранится и отдаётся только kk (п. 1.1)
+# Синоним kz принимается на входе, хранится и отдаётся только kk
 _ALIASES = {"kz": "kk"}
 
 
@@ -53,7 +53,7 @@ Lang = Depends(get_lang)
 
 # --- Тексты ---
 # Код → {язык: шаблон str.format}. У всех трёх языков одинаковый набор {параметров} (tests/test_i18n.py).
-# Казахские тексты — на проверку носителю языка (п. 5.6), как и frontend/static/js/locales/kk.js.
+# Казахские тексты — на проверку носителю языка, как и frontend/static/js/locales/kk.js.
 
 MESSAGES: Dict[str, Dict[str, str]] = {
     # Общие
@@ -504,7 +504,7 @@ VALIDATION_MESSAGES: Dict[str, Dict[str, str]] = {
     "literal_error": {"kk": "Рұқсат етілген мәндер: {expected}", "en": "Allowed values: {expected}"},
 }
 
-# Стандартные категории (п. 1.3). В базе — русское название, перевод — по default_key
+# Стандартные категории. В базе — русское название, перевод — по default_key
 CATEGORY_NAMES: Dict[str, Dict[str, str]] = {
     "groceries": {"ru": "Продукты", "kk": "Азық-түлік", "en": "Groceries"},
     "clothing": {"ru": "Одежда", "kk": "Киім", "en": "Clothing"},
@@ -567,7 +567,7 @@ def validation_error(code: str, **params: Any) -> PydanticCustomError:
 
 
 class AppError(HTTPException):
-    """Ошибка API по коду: ответ {"detail": текст на языке запроса, "code": code} (п. 3.4).
+    """Ошибка API по коду: ответ {"detail": текст на языке запроса, "code": code}.
 
     detail исключения — текст на языке lang (по умолчанию русский): его видят фоновые задачи
     (app/tasks.py), где запроса уже нет. Обработчик в server.py переводит по Accept-Language.
@@ -587,7 +587,7 @@ class AppError(HTTPException):
         return {"detail": tr(self.code, lang, **self.params), "code": self.code}
 
 
-# --- Проверка языка ответа ИИ (п. 3.5.8, порог согласован с ML, п. 4.1.5) ---
+# --- Проверка языка ответа ИИ (порог согласован с ML) ---
 
 KAZAKH_LETTERS = set("әғқңөұүһіӘҒҚҢӨҰҮҺІ")
 EN_MIN_LATIN_SHARE = 0.8

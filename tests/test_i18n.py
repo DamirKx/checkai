@@ -1,4 +1,4 @@
-"""Три языка ответов API: ru, kk, en (I18N_TASKS.md, раздел 3; чек-лист — п. 3.7).
+"""Три языка ответов API: ru, kk, en.
 
 Без Accept-Language всё по-русски и как раньше — это проверяют остальные тесты, не меняя ожиданий.
 """
@@ -195,7 +195,7 @@ class TestPreferencesLanguage(AppTestCase):
         return self.client.patch("/api/auth/me", headers=self.headers_a, json={"preferences": prefs})
 
     def test_not_set_by_default(self):
-        # Ключа нет: фронт оставляет язык устройства, а не переключает на русский (п. 1.1)
+        # Ключа нет: фронт оставляет язык устройства, а не переключает на русский
         self.assertNotIn("language", self.me()["preferences"])
 
     def test_change_keeps_theme_and_accent(self):

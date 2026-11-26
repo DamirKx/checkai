@@ -1,8 +1,8 @@
-"""ИИ-рекомендации по расходам: генерация и проверка ответа (NEXT_WEEK_TASKS.md, B.2).
+"""ИИ-рекомендации по расходам: генерация и проверка ответа.
 
 Цифры считает бэкенд (crud.build_finance_snapshot), текст пишет ML — ml.app.advisor.generate_insights.
 Пока модуля ML нет, он упал или AI_PROVIDER=off, работают шаблонные советы по фактам (model = "rules"):
-так B.2 можно выкатить раньше B.1. Ответ ML всё равно проверяется здесь: фронт показывает его как есть.
+сервер работает и без ML. Ответ ML всё равно проверяется здесь: фронт показывает его как есть.
 """
 import calendar
 import inspect
@@ -57,7 +57,7 @@ def _snapshot_lang(snapshot: Dict[str, Any], lang: Optional[str] = None) -> str:
 
 
 def _accepts_language(fn: Callable[..., Any]) -> bool:
-    """Принимает ли generate_insights параметр language (ML добавляет его в п. 4.1). Не понять — нет."""
+    """Принимает ли generate_insights параметр language. Не понять — нет."""
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
@@ -76,7 +76,7 @@ def generate(snapshot: Dict[str, Any], kzt_per_base: float = 1.0, lang: Optional
         try:
             kwargs: Dict[str, Any] = {"provider": config.AI_PROVIDER}
             # Старый generate_insights без language пишет по-русски: на kk/en его ответ отбракует
-            # проверка языка в sanitize, и пользователь увидит шаблоны на своём языке (п. 3.5.6)
+            # проверка языка в sanitize, и пользователь увидит шаблоны на своём языке
             if _accepts_language(advisor):
                 kwargs["language"] = lang
             raw = advisor(snapshot, **kwargs)
@@ -109,12 +109,12 @@ def _number(value: Any) -> Optional[float]:
 
 
 def sanitize(raw: Any, snapshot: Dict[str, Any], lang: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
-    """Приводит ответ generate_insights к контракту InsightsOut (B.1.4, «Контракты API»).
+    """Приводит ответ generate_insights к контракту InsightsOut.
 
     Карточка с неизвестным типом или без текста отбрасывается; category_id не из сводки — null,
     действие с такой категорией — none; id внутри ответа не повторяются; не больше MAX_ITEMS.
     Ответ не на языке lang (summary или больше половины карточек) — ValueError: вызывающий
-    покажет шаблонные советы (I18N_TASKS.md, п. 3.5.8).
+    покажет шаблонные советы.
     """
     lang = _snapshot_lang(snapshot, lang)
     if not isinstance(raw, dict):
@@ -194,7 +194,7 @@ def rule_insights(snapshot: Dict[str, Any], kzt_per_base: float = 1.0, lang: Opt
     """Советы по готовым фактам сводки, без ИИ, на языке lang. Числа в тексте — только из сводки.
 
     Название категории — display_name из сводки (перевод стандартной), без него — name.
-    id, type, priority, category_id и action от языка не зависят (п. 2.8).
+    id, type, priority, category_id и action от языка не зависят.
     """
     lang = _snapshot_lang(snapshot, lang)
     cur = snapshot.get("base_currency") or "KZT"

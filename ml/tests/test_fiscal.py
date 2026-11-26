@@ -1,4 +1,4 @@
-"""Тесты извлечения реквизитов фискального чека (NEXT_WEEK_TASKS.md, C.3)."""
+"""Тесты извлечения реквизитов фискального чека."""
 import pytest
 from app.fiscal import extract_fiscal_info, clean_digits
 

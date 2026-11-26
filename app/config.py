@@ -49,7 +49,7 @@ TRUST_PROXY = _bool_env("TRUST_PROXY", False)
 # Удаляются только файлы старше суток.
 ORPHAN_CLEANUP_HOURS = _int_env("ORPHAN_CLEANUP_HOURS", 6)
 
-# Фото профиля (PROFILE_TASKS.md, п. 1.1). Раздаётся статикой только эта папка, не data/ целиком.
+# Фото профиля. Раздаётся статикой только эта папка, не data/ целиком.
 AVATARS_DIR = os.getenv("AVATARS_DIR", "").strip() or os.path.join(DATA_DIR, "avatars")
 AVATARS_URL_PREFIX = "/avatars"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
@@ -65,7 +65,7 @@ if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR"):
     raise RuntimeError(f"LOG_LEVEL должен быть DEBUG, INFO, WARNING или ERROR, получено: {LOG_LEVEL!r}")
 
 
-# --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2.1) ---
+# --- ИИ-рекомендации по расходам ---
 # gemini | ollama | off. off — только шаблонные советы по фактам, данные никуда не уходят
 AI_PROVIDER = (os.getenv("AI_PROVIDER", "").strip().lower() or "gemini")
 if AI_PROVIDER not in ("gemini", "ollama", "off"):

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from app.categorize import categorize_items, normalize_item_name
 from app.currency import detect_currency, SUPPORTED
 
-# Стандартные категории из п. 0.3 контракта для оценки качества категоризации
+# Стандартные категории для оценки качества категоризации
 EVAL_CATEGORIES = [
     {"id": 1, "name": "Продукты", "description": "Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости", "position": 0},
     {"id": 2, "name": "Одежда", "description": "Одежда, обувь, аксессуары", "position": 1},

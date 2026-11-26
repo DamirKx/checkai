@@ -124,7 +124,7 @@ def test_categorize_empty_inputs():
 
 
 def _assert_source_invariant(items):
-    """У каждой позиции есть category_source; он None тогда и только тогда, когда категории нет (PROFILE_TASKS.md, п. 2.1)."""
+    """У каждой позиции есть category_source; он None тогда и только тогда, когда категории нет."""
     for item in items:
         assert {"category_id", "category", "category_source"} <= set(item), item
         assert (item["category"] is None) == (item["category_source"] is None), item
@@ -169,7 +169,7 @@ def test_category_source_present_for_every_item():
 
 
 def test_manual_item_names_categorization():
-    """Тест категоризации коротких ручных названий (NEXT_WEEK_TASKS.md, A.3)."""
+    """Тест категоризации коротких ручных названий."""
     categories = [
         {"id": 1, "name": "Продукты", "position": 0},
         {"id": 2, "name": "Одежда", "position": 1},

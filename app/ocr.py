@@ -1,4 +1,4 @@
-"""Тонкая обёртка для сервера: единая реализация OCR живёт в ml/app/ocr.py (ML_TASKS.md, 3.0)."""
+"""Тонкая обёртка для сервера: единая реализация OCR живёт в ml/app/ocr.py."""
 import sys
 
 from ml.app.ocr import (  # noqa: F401
