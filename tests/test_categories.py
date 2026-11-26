@@ -328,12 +328,14 @@ class TestCategoriesAPI(unittest.TestCase):
             self.assertEqual(items[0]["category_source"], "rule")
             self.assertEqual((items[1]["category_id"], items[1]["category"], items[1]["category_source"]), (None, None, None))
             # В ML уходят категории пользователя с id
-            self.assertIn({"id": cosmetics, "name": "Косметика", "description": None}, fake_analyze.categories)
+            self.assertIn({"id": cosmetics, "name": "Косметика", "description": None, "default_key": None},
+                          fake_analyze.categories)
 
             r_guest = self.client.post("/api/analyze", files={"file": ("check.jpg", b"fake-image", "image/jpeg")})
             self.assertEqual(r_guest.status_code, 200)
             self.assertIsNone(r_guest.json()["data"]["items"][0]["category_source"])
-            self.assertEqual(fake_analyze.categories[0], {"id": None, "name": "Продукты", "description": DEFAULT_CATEGORIES[0]["description"]})
+            self.assertEqual(fake_analyze.categories[0], {"id": None, "name": "Продукты", "description": DEFAULT_CATEGORIES[0]["description"],
+                                                          "default_key": "groceries"})
 
     # --- сохранение чеков ---
 

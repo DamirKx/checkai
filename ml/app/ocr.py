@@ -543,7 +543,9 @@ def analyze_receipt(
 
     t_cat_start = time.perf_counter()
     try:
-        categorize_items(parsed.get("items") or [], categories or [])
+        # Название магазина — подсказка для двусмысленных товаров («Кофе» в кофейне и в супермаркете)
+        categorize_items(parsed.get("items") or [], categories or [],
+                         store=" ".join(s for s in (parsed.get("merchant"), parsed.get("store")) if s) or None)
     except Exception as e:
         logger.warning("Ошибка в categorize_items: %s", e)
     cat_elapsed = time.perf_counter() - t_cat_start
@@ -610,7 +612,7 @@ def analyze_receipt_comparison(
     lines = ocr_image(ocr, image_input)
     regex_result = parse_receipt_regex(lines)
     ai_result = parse_receipt_with_correction("\n".join(lines))
-    categorize_items(ai_result.get("items", []), categories or [])
+    categorize_items(ai_result.get("items", []), categories or [], store=ai_result.get("store"))
     currency, currency_source = resolve_currency(lines, ai_result)
     ai_result["currency"] = currency
     ai_result["currency_source"] = currency_source

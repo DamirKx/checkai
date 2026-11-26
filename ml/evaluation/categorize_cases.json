@@ -1,0 +1,424 @@
+{
+ "_about": "Эталонные позиции для проверки категоризации (стандартные категории). store — магазин из чека, подсказка для Qwen. Проверка: ml/evaluation/categorize_eval.py (с Ollama) и ml/tests/test_categorize_cases.py (только ключевые слова). holdout: true — отложенный набор: по нему словарь не подбирался, это честная оценка.",
+ "cases": [
+  {
+   "name": "Молоко Зенек 3,2% 1л",
+   "expected": "groceries"
+  },
+  {
+   "name": "Хлеб Бородинский 400г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Сыр Российский 200г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Кефир 2,5% 900мл",
+   "expected": "groceries"
+  },
+  {
+   "name": "Колбаса докторская 500г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Бананы вес",
+   "expected": "groceries"
+  },
+  {
+   "name": "Вода Тассай 1,5л",
+   "expected": "groceries"
+  },
+  {
+   "name": "Йогурт Danone клубника",
+   "expected": "groceries"
+  },
+  {
+   "name": "Кофе Jacobs Monarch 95г",
+   "expected": "groceries",
+   "store": "Magnum"
+  },
+  {
+   "name": "Чай Пиала черный 100пак",
+   "expected": "groceries"
+  },
+  {
+   "name": "Паста Barilla спагетти 450г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Масло подсолнечное Шедевр 1л",
+   "expected": "groceries"
+  },
+  {
+   "name": "Роллтон лапша 60г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Пицца замороженная Ristorante",
+   "expected": "groceries"
+  },
+  {
+   "name": "Шампиньоны 400г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Майонез Махеевъ 380г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Конфеты Рафаэлло 150г",
+   "expected": "groceries"
+  },
+  {
+   "name": "Шоколад бельгийский",
+   "expected": "groceries"
+  },
+  {
+   "name": "МОЛ.ПАСТ.2,5% 1Л",
+   "expected": "groceries"
+  },
+  {
+   "name": "ХЛ.БАТОН НАРЕЗН.",
+   "expected": "groceries"
+  },
+  {
+   "name": "СЛИВ.МАСЛО 72,5% 180Г",
+   "expected": "groceries"
+  },
+  {
+   "name": "ЙОГ.ПИТ.КЛУБН.",
+   "expected": "groceries"
+  },
+  {
+   "name": "КОНД.ВАФЛИ АРТЕК",
+   "expected": "groceries"
+  },
+  {
+   "name": "ГОВЯД.ФАРШ ОХЛ.",
+   "expected": "groceries"
+  },
+  {
+   "name": "Сүт 2,5% 1л",
+   "expected": "groceries"
+  },
+  {
+   "name": "Нан ақ",
+   "expected": "groceries"
+  },
+  {
+   "name": "Ет сиыр",
+   "expected": "groceries"
+  },
+  {
+   "name": "Пакет майка",
+   "expected": "home"
+  },
+  {
+   "name": "Зубная паста Colgate 100мл",
+   "expected": "home"
+  },
+  {
+   "name": "Порошок Ariel 3кг",
+   "expected": "home"
+  },
+  {
+   "name": "Салфетки влажные",
+   "expected": "home"
+  },
+  {
+   "name": "Губки для посуды 5шт",
+   "expected": "home"
+  },
+  {
+   "name": "Шампунь Head&Shoulders 400мл",
+   "expected": "home"
+  },
+  {
+   "name": "Туалетная бумага Zewa 8 рул",
+   "expected": "home"
+  },
+  {
+   "name": "СР-ВО Д/МЫТЬЯ ПОСУДЫ FAIRY",
+   "expected": "home"
+  },
+  {
+   "name": "Парацетамол 500мг №10",
+   "expected": "health"
+  },
+  {
+   "name": "Витамин С шипучий",
+   "expected": "health"
+  },
+  {
+   "name": "Капли в нос Називин",
+   "expected": "health"
+  },
+  {
+   "name": "Носки мужские",
+   "expected": "clothing"
+  },
+  {
+   "name": "Майка женская",
+   "expected": "clothing"
+  },
+  {
+   "name": "Футболка хлопок",
+   "expected": "clothing"
+  },
+  {
+   "name": "Капучино 300мл",
+   "expected": "cafe"
+  },
+  {
+   "name": "Бургер классический",
+   "expected": "cafe"
+  },
+  {
+   "name": "Американо",
+   "expected": "cafe"
+  },
+  {
+   "name": "Латте с собой",
+   "expected": "cafe"
+  },
+  {
+   "name": "Кофе",
+   "expected": "cafe",
+   "store": "Coffee BOOM"
+  },
+  {
+   "name": "Бензин АИ-92",
+   "expected": "transport"
+  },
+  {
+   "name": "Масло моторное Shell 4л",
+   "expected": "transport"
+  },
+  {
+   "name": "Омыватель стекла -20",
+   "expected": "transport"
+  },
+  {
+   "name": "Билет в кино",
+   "expected": "entertainment"
+  },
+  {
+   "name": "Игрушка машинка",
+   "expected": "entertainment"
+  },
+  {
+   "name": "Книга Гарри Поттер",
+   "expected": "entertainment"
+  },
+  {
+   "name": "АЙРАН 2,5% 1Л",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ТАН 0,5Л",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "КУРТ СОЛЕНЫЙ",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ГРЕЧКА ЯДРИЦА 900Г",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ОВСЯН.ХЛОПЬЯ ГЕРКУЛЕС",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "МАНДАРИНЫ ВЕС",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "СОСИСКИ МОЛОЧНЫЕ",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "СМЕТ.20% 400Г",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "COCA-COLA 1Л",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ЖВАЧКА ORBIT",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "БАУЫРСАКИ 300Г",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ПЕРСИКИ КОНСЕРВ.",
+   "expected": "groceries",
+   "holdout": true
+  },
+  {
+   "name": "ЗУБОЧИСТКИ 100ШТ",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ФОЛЬГА АЛЮМИН. 10М",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "БАТАРЕЙКИ AA 4ШТ",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ОСВЕЖ.ВОЗДУХА GLADE",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ПРОКЛ.ALWAYS ULTRA",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ПАМПЕРСЫ 4 MAXI",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "МУСОР.МЕШКИ 60Л",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ТАРЕЛКИ ОДНОРАЗ.",
+   "expected": "home",
+   "holdout": true
+  },
+  {
+   "name": "ИБУПРОФЕН 200МГ",
+   "expected": "health",
+   "holdout": true
+  },
+  {
+   "name": "ТЕРМОМЕТР ЭЛЕКТРОН.",
+   "expected": "health",
+   "holdout": true
+  },
+  {
+   "name": "МАСКИ МЕДИЦ. 10ШТ",
+   "expected": "health",
+   "holdout": true
+  },
+  {
+   "name": "ШНУРКИ 120СМ",
+   "expected": "clothing",
+   "holdout": true
+  },
+  {
+   "name": "ТАПОЧКИ ДОМАШНИЕ",
+   "expected": "clothing",
+   "holdout": true
+  },
+  {
+   "name": "ПИЖАМА ЖЕН.",
+   "expected": "clothing",
+   "holdout": true
+  },
+  {
+   "name": "КОНСТРУКТОР LEGO CITY",
+   "expected": "entertainment",
+   "holdout": true
+  },
+  {
+   "name": "ПАЗЛ 1000 ДЕТ.",
+   "expected": "entertainment",
+   "holdout": true
+  },
+  {
+   "name": "РАСКРАСКА ДЕТСКАЯ",
+   "expected": "entertainment",
+   "holdout": true
+  },
+  {
+   "name": "ПАРКОВКА 1 ЧАС",
+   "expected": "transport",
+   "holdout": true
+  },
+  {
+   "name": "ДИЗ.ТОПЛИВО ЕВРО",
+   "expected": "transport",
+   "holdout": true
+  },
+  {
+   "name": "ГАЗ ПРОПАН",
+   "expected": "transport",
+   "holdout": true,
+   "store": "Helios"
+  },
+  {
+   "name": "ЛАТТЕ КАРАМЕЛЬ 400",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Coffee BOOM"
+  },
+  {
+   "name": "ЧИЗКЕЙК",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Coffee BOOM"
+  },
+  {
+   "name": "ЭСПРЕССО ДВОЙНОЙ",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Coffee BOOM"
+  },
+  {
+   "name": "МАНТЫ 5 ШТ",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Кафе Алаша"
+  },
+  {
+   "name": "ЛАГМАН",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Кафе Алаша"
+  },
+  {
+   "name": "ЧАЙ С МОЛОКОМ",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Кафе Алаша"
+  },
+  {
+   "name": "ПЛОВ ПОРЦИЯ",
+   "expected": "cafe",
+   "holdout": true,
+   "store": "Кафе Алаша"
+  },
+  {
+   "name": "КОФЕ МОЛОТЫЙ LAVAZZA 250Г",
+   "expected": "groceries",
+   "holdout": true,
+   "store": "Small"
+  }
+ ]
+}
