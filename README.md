@@ -119,6 +119,7 @@ CheckAI/
 │   ├── ocr.py              # Конвейер распознавания чека
 │   ├── preprocess.py       # Подготовка фото перед OCR
 │   ├── agent_parser.py     # Разбор чека через Qwen (Ollama)
+│   ├── service_lines.py, receipt_totals.py, receipt_items.py  # Проверка и чистка ответа Qwen по тексту OCR
 │   ├── parser.py           # Запасной парсер на регулярных выражениях
 │   ├── categorize.py       # Категории позиций
 │   ├── advisor.py, llm.py  # ИИ-рекомендации, клиенты Gemini и Ollama
@@ -681,7 +682,10 @@ app/main.py — FastAPI
 | [app/uploads.py](app/uploads.py) | Фото чеков: сохранение загрузки, проверка `image_path`, удаление, очистка несохранённых. Фото профиля: проверка, перекодирование в JPEG, удаление |
 | [app/parser.py](app/parser.py) | Старая копия запасного парсера, сервер её не использует (актуальная — [ml/parser.py](ml/parser.py)) |
 | [ml/ocr.py](ml/ocr.py) | Конвейер распознавания: предобработка, PaddleOCR, выбор парсера, валюта, категории, уверенность, реквизиты |
-| [ml/agent_parser.py](ml/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы, разбор длинных чеков |
+| [ml/agent_parser.py](ml/agent_parser.py) | Промпты и вызов Qwen, самокоррекция суммы, разбор длинных чеков по частям |
+| [ml/service_lines.py](ml/service_lines.py) | Служебные строки чека (итого, НДС, оплата, реквизиты): распознать и убрать из позиций |
+| [ml/receipt_totals.py](ml/receipt_totals.py) | Итог чека из текста OCR, сумма позиций, подтверждение цен позиций текстом чека |
+| [ml/receipt_items.py](ml/receipt_items.py) | Правка позиций после Qwen: количества, служебные строки, выдуманные товары, оператор фискальных данных вместо магазина |
 | [ml/categorize.py](ml/categorize.py) | Раскладка позиций по категориям: кэш, словарь, ключевые слова, Qwen |
 | [ml/advisor.py](ml/advisor.py), [ml/llm.py](ml/llm.py) | Детекторы фактов о расходах, промпт и проверка советов; клиенты Gemini и Ollama |
 | [migrations/](migrations/) | Миграции Alembic |
