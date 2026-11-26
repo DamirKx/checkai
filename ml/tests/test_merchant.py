@@ -1,8 +1,8 @@
 """Каноническое имя магазина."""
 import pytest
 
-from app.merchant import canonical_merchant
-from app.parser import parse_receipt
+from ml.merchant import canonical_merchant
+from ml.parser import parse_receipt
 
 
 @pytest.mark.parametrize("store", ["MAGNUM", "Magnum Cash&Carry", 'ТОО "Magnum"', "МАГНУМ", "МAГHУМ", "magnum №12"])

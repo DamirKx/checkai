@@ -96,7 +96,7 @@ class Receipt(_CategoryName, Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     store = Column(String(255), nullable=True)
-    # Каноническое имя сети («Magnum» для «ТОО "MAGNUM CASH&CARRY"»), см. ml/app/merchant.py
+    # Каноническое имя сети («Magnum» для «ТОО "MAGNUM CASH&CARRY"»), см. ml/merchant.py
     merchant = Column(String(255), nullable=True, index=True)
     # Дата покупки в формате YYYY-MM-DD (см. app/dates.py)
     date = Column(String(20), nullable=True, index=True)

@@ -2,8 +2,8 @@
 «ключевые слова первыми» (CATEGORIZE_FAST_FIRST=1, как в Docker) и «Qwen первым».
 
 Нужна запущенная Ollama. Запуск из папки ml:
-    python -m evaluation.categorize_eval
-    OLLAMA_CATEGORIZE_MODEL=qwen2.5:3b python -m evaluation.categorize_eval   # сравнить с другой моделью
+    python -m ml.evaluation.categorize_eval
+    OLLAMA_CATEGORIZE_MODEL=qwen2.5:3b python -m ml.evaluation.categorize_eval   # сравнить с другой моделью
 """
 import importlib
 import json
@@ -37,7 +37,7 @@ def load_cases():
 
 def run_mode(cases, fast_first: bool):
     os.environ["CATEGORIZE_FAST_FIRST"] = "1" if fast_first else "0"
-    import app.categorize as cz
+    import ml.categorize as cz
     importlib.reload(cz)  # сбросить кэш и перечитать настройки
     # Чек — один магазин: позиции с одинаковым store идут одним вызовом, как в analyze_receipt
     groups = defaultdict(list)
@@ -56,7 +56,7 @@ def run_mode(cases, fast_first: bool):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     cases = load_cases()
-    import app.categorize as cz
+    import ml.categorize as cz
     print(f"Модель категорий: {cz.CATEGORIZE_MODEL}, позиций: {len(cases)}\n")
     results = {}
     for label, fast in (("ключевые слова первыми", True), ("Qwen первым", False)):

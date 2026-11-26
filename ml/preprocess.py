@@ -9,7 +9,7 @@
 - Контраст выравнивается локально (CLAHE), если включён OCR_CLAHE=1.
 
 OCR_PREPROCESS=0 выключает всё (OCR получает файл как есть).
-Без PaddleOCR: модуль импортируют и ML (app.preprocess), и бэкенд (ml.app.preprocess).
+Без PaddleOCR: модуль импортируют и ML, и бэкенд.
 """
 import logging
 import os

@@ -142,7 +142,7 @@ class TestCategorize(AppTestCase):
                                 headers=self.headers_a if headers is None else headers)
 
     def test_one_item_per_name_in_order(self):
-        with patch("ml.app.categorize.categorize_items", fake_categorize):
+        with patch("ml.categorize.categorize_items", fake_categorize):
             r = self.categorize(["кофе американо", "абвгд", "Мыло детское", ""])
         self.assertEqual(r.status_code, 200, r.text)
         items = r.json()["items"]
@@ -163,7 +163,7 @@ class TestCategorize(AppTestCase):
             seen.extend(i["name"] for i in items)
             fake_categorize(items, categories)
 
-        with patch("ml.app.categorize.categorize_items", spy):
+        with patch("ml.categorize.categorize_items", spy):
             items = self.categorize(["Яндекс Go", "кофе"]).json()["items"]
         self.assertEqual(items[0]["category_id"], transport.id)
         self.assertEqual(items[0]["category_source"], "rule")
@@ -175,14 +175,14 @@ class TestCategorize(AppTestCase):
             items[0]["category_id"] = 999  # успела проставить мусор и упала
             raise ConnectionError("ollama down")
 
-        with patch("ml.app.categorize.categorize_items", broken):
+        with patch("ml.categorize.categorize_items", broken):
             r = self.categorize(["кофе"])
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["items"], [{"name": "кофе", "category_id": None, "category": None, "category_source": None}])
 
     def test_uses_own_categories(self):
         own = self.category("Кафе", self.user_b)
-        with patch("ml.app.categorize.categorize_items", fake_categorize):
+        with patch("ml.categorize.categorize_items", fake_categorize):
             items = self.categorize(["кофе"], headers=self.headers_b).json()["items"]
         self.assertEqual(items[0]["category_id"], own.id)
 
@@ -190,7 +190,7 @@ class TestCategorize(AppTestCase):
         self.assertEqual(self.categorize(["кофе"], headers={}).status_code, 401)
         self.assertEqual(self.categorize([]).status_code, 422)
         self.assertEqual(self.categorize(["x"] * 51).status_code, 422)
-        with patch("ml.app.categorize.categorize_items", fake_categorize):
+        with patch("ml.categorize.categorize_items", fake_categorize):
             codes = [self.categorize(["кофе"]).status_code for _ in range(31)]
             self.assertEqual(codes[:30], [200] * 30)
             self.assertEqual(codes[30], 429)

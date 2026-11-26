@@ -1,6 +1,6 @@
 """Тесты извлечения реквизитов фискального чека."""
 import pytest
-from app.fiscal import extract_fiscal_info, clean_digits
+from ml.fiscal import extract_fiscal_info, clean_digits
 
 
 def test_clean_digits_ocr_confusion():

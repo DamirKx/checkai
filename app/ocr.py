@@ -1,7 +1,7 @@
-"""Тонкая обёртка для сервера: единая реализация OCR живёт в ml/app/ocr.py."""
+"""Тонкая обёртка для сервера: единая реализация OCR живёт в ml/ocr.py."""
 import sys
 
-from ml.app.ocr import (  # noqa: F401
+from ml.ocr import (  # noqa: F401
     analyze_receipt,
     init_ocr,
     logger,

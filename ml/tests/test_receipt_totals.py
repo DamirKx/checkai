@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.agent_parser import extract_total_from_ocr
+from ml.agent_parser import extract_total_from_ocr
 
 BASE = Path(__file__).resolve().parents[1]
 CACHE = json.loads(

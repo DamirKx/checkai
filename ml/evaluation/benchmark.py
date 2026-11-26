@@ -5,9 +5,9 @@
 флаг обрезки ответа llm_truncated.
 
 Запуск из папки ml:
-    python -m evaluation.benchmark --tag baseline
-    python -m evaluation.benchmark --tag after --reuse-ocr baseline
-    python -m evaluation.benchmark --compare baseline after
+    python -m ml.evaluation.benchmark --tag baseline
+    python -m ml.evaluation.benchmark --tag after --reuse-ocr baseline
+    python -m ml.evaluation.benchmark --compare baseline after
 """
 import argparse
 import difflib
@@ -20,8 +20,8 @@ import time
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
-from app.categorize import categorize_items
-from evaluation import evaluate
+from ml.categorize import categorize_items
+from ml.evaluation import evaluate
 
 RESULTS_DIR = evaluate.BASE_DIR / "benchmark_results"
 # Задача 2.3: receipt_015 убран из SKIP — чек должен разбираться или честно откатываться по таймауту
@@ -75,9 +75,9 @@ def _classify_fallback_reason(error: Exception) -> str:
 
 
 def run(tag: str, reuse_ocr: Optional[str] = None, limit: Optional[int] = None) -> None:
-    import app.agent_parser as agent
-    from app.ocr import init_ocr, ocr_image, resolve_currency
-    from app.parser import parse_receipt as parse_receipt_regex
+    import ml.agent_parser as agent
+    from ml.ocr import init_ocr, ocr_image, resolve_currency
+    from ml.parser import parse_receipt as parse_receipt_regex
 
     os.environ.setdefault("USE_AI_PARSER", "1")
     RESULTS_DIR.mkdir(exist_ok=True)

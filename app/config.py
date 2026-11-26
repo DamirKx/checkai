@@ -70,7 +70,7 @@ if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR"):
 AI_PROVIDER = (os.getenv("AI_PROVIDER", "").strip().lower() or "gemini")
 if AI_PROVIDER not in ("gemini", "ollama", "off"):
     raise RuntimeError(f"AI_PROVIDER должен быть gemini, ollama или off, получено: {AI_PROVIDER!r}")
-# Ключ только на сервере: во фронт и в логи не попадает. Читает ML (ml/app/llm.py)
+# Ключ только на сервере: во фронт и в логи не попадает. Читает ML (ml/llm.py)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
 # Не чаще одного нового анализа на пользователя (на каждом языке) за столько минут; 0 — без ограничения.

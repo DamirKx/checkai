@@ -112,9 +112,15 @@ CheckAI/
 │   ├── tasks.py            # Фоновые очереди распознавания и анализа
 │   ├── rate_limit.py       # Ограничение частоты запросов
 │   ├── dates.py            # Разбор дат и времени
-│   └── ocr.py              # Обёртка над ml/app/ocr.py для сервера
-├── ml/                     # Распознавание и ИИ
-│   ├── app/                # OCR, парсеры, категории, рекомендации
+│   └── ocr.py              # Обёртка над ml/ocr.py для сервера
+├── ml/                     # Распознавание и ИИ (пакет ml: from ml.ocr import ...)
+│   ├── ocr.py              # Конвейер распознавания чека
+│   ├── preprocess.py       # Подготовка фото перед OCR
+│   ├── agent_parser.py     # Разбор чека через Qwen (Ollama)
+│   ├── parser.py           # Запасной парсер на регулярных выражениях
+│   ├── categorize.py       # Категории позиций
+│   ├── advisor.py, llm.py  # ИИ-рекомендации, клиенты Gemini и Ollama
+│   ├── confidence.py, currency.py, fiscal.py, merchant.py, textfix.py
 │   ├── evaluation/         # Эталонные чеки, бенчмарк, оценка качества
 │   └── tests/              # Тесты ML
 ├── frontend/
@@ -128,6 +134,7 @@ CheckAI/
 ├── Dockerfile
 ├── docker-compose.yml      # web + (по профилю) PostgreSQL и Ollama
 ├── requirements.txt
+├── pyproject.toml          # Настройки pytest: тесты запускаются из корня
 └── .env.example            # Шаблон настроек с пояснениями
 ```
 
@@ -148,7 +155,7 @@ git pull
 
 | Роль | Команда | Что поднимается | RAM |
 |---|---|---|---|
-| Бэкенд, фронтенд | `uvicorn server:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `ml/app/parser.py`, Ollama не нужна | ~0,5 ГБ |
+| Бэкенд, фронтенд | `uvicorn server:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `ml/parser.py`, Ollama не нужна | ~0,5 ГБ |
 | ML | `docker compose --profile full up -d` или без Docker с установленной Ollama | Сайт + Ollama (Qwen 2.5:3b) | ~4–5 ГБ |
 | Ollama уже стоит на компьютере | `docker compose up -d --build` + `DOCKER_OLLAMA_HOST` в `.env` (см. [вариант А2](#вариант-а2-docker--ollama-на-компьютере)) | Сайт в Docker, Qwen — из вашей Ollama. Модель не скачивается второй раз | ~4–5 ГБ |
 | QA, демонстрация | `docker compose --profile full up -d --build` | Всё, как у пользователя | ~4–5 ГБ |
@@ -234,18 +241,13 @@ uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 
 ### Тесты
 
-Тесты бэкенда — из корня проекта. Они сами работают на временной базе и во временных папках: рабочая `data/checkai.db` не трогается, `DATABASE_URL` из `.env` игнорируется.
+Все тесты запускаются из корня проекта (~3 минуты). Тесты бэкенда сами работают на временной базе и во временных папках: рабочая `data/checkai.db` не трогается, `DATABASE_URL` из `.env` игнорируется. Тестам ML Ollama не нужна.
 
 ```powershell
 .venv\Scripts\activate
-python -m pytest tests -q
-```
-
-Тесты ML — из папки `ml`, в том же `.venv`; Ollama не нужна:
-
-```powershell
-cd ml
-python -m pytest tests -q
+python -m pytest -q             # все тесты
+python -m pytest tests -q       # только бэкенд
+python -m pytest ml/tests -q    # только ML
 ```
 
 Проверка переводов интерфейса — `node scripts/check_i18n.js`.
@@ -577,7 +579,7 @@ Access-токен живёт 60 минут, refresh-токен — 30 дней. 
 
 ### Переменные окружения
 
-Читаются в [app/config.py](app/config.py) (и в модулях `ml/app/`) из окружения и из `.env`. Полный список настроек распознавания с пояснениями — в [.env.example](.env.example).
+Читаются в [app/config.py](app/config.py) (и в модулях `ml/`) из окружения и из `.env`. Полный список настроек распознавания с пояснениями — в [.env.example](.env.example).
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
@@ -601,7 +603,7 @@ Access-токен живёт 60 минут, refresh-токен — 30 дней. 
 | `GEMINI_MODEL` | — | Название модели Gemini — не зашивается в код, бесплатные модели меняются |
 | `INSIGHTS_REFRESH_MINUTES` | `1` | Не чаще одного нового анализа расходов на пользователя (на каждом языке) за столько минут (иначе `429`). `0` — без ограничения |
 
-Подбирать настройки распознавания — бенчмарком: `cd ml && python -m evaluation.benchmark --tag <имя>`, сравнение — `--compare <тег1> <тег2>`.
+Подбирать настройки распознавания — бенчмарком: `python -m ml.evaluation.benchmark --tag <имя>` (из корня проекта), сравнение — `--compare <тег1> <тег2>`.
 
 ### Осторожно: что сервер делает с данными сам
 
@@ -633,7 +635,7 @@ server.py — FastAPI
    │     ├─ app/schemas.py   Pydantic: проверка входа и формат ответа
    │     ├─ app/crud.py      все запросы к БД
    │     │     └─ app/models.py → app/database.py → SQLite / PostgreSQL
-   │     └─ app/ocr.py → ml/app/ocr.py   распознавание (под общей блокировкой)
+   │     └─ app/ocr.py → ml/ocr.py   распознавание (под общей блокировкой)
    │           ├─ preprocess → PaddleOCR → строки текста
    │           ├─ agent_parser.py   Qwen через Ollama (если доступна)
    │           ├─ parser.py         запасной парсер на regex
@@ -649,7 +651,7 @@ server.py — FastAPI
 - **Одна модель OCR на процесс.** `get_ocr()` создаёт её лениво (или при старте, если `OCR_WARMUP=1`). PaddleOCR не потокобезопасен, поэтому распознавание идёт под `_ocr_run_lock` — строго по одному.
 - **Бизнес-логика запросов к БД — только в `crud.py`.** Эндпоинт проверяет права и вызывает функцию из `crud`.
 - **Фронт получает данные только через API**, к базе не обращается.
-- **Папка `ml/` — зона ML-разработчика.** Бэкенд вызывает из неё `ml.app.ocr` (через `app/ocr.py`), `ml.app.categorize`, `ml.app.advisor` и `ml.app.merchant`.
+- **Папка `ml/` — зона ML-разработчика.** Бэкенд вызывает из неё `ml.ocr` (через `app/ocr.py`), `ml.categorize`, `ml.advisor` и `ml.merchant`.
 
 ### Карта файлов
 
@@ -666,17 +668,17 @@ server.py — FastAPI
 | [app/currencies.py](app/currencies.py) | Справочник валют, нормализация и проверка кода |
 | [app/rates.py](app/rates.py) | Получение и кеширование официальных курсов Нацбанка РК к тенге, кросс-курсы, пересчёт после смены основной валюты |
 | [app/duplicates.py](app/duplicates.py) | Правило «тот же чек по содержимому» — копия `findDuplicate` из `app.js`. Общие с фронтом примеры — [tests/fixtures/duplicates.json](tests/fixtures/duplicates.json) |
-| [app/insights.py](app/insights.py) | ИИ-рекомендации: вызов `ml.app.advisor.generate_insights`, проверка ответа по контракту `InsightsOut`, шаблонные советы (`model: "rules"`), если ИИ недоступен |
+| [app/insights.py](app/insights.py) | ИИ-рекомендации: вызов `ml.advisor.generate_insights`, проверка ответа по контракту `InsightsOut`, шаблонные советы (`model: "rules"`), если ИИ недоступен |
 | [app/i18n.py](app/i18n.py) | Язык запроса из `Accept-Language`, тексты ошибок API на ru / kk / en, `AppError` |
 | [app/tasks.py](app/tasks.py) | Очереди фоновых задач в памяти процесса: распознавание для `/api/analyze/async` (один поток) и ИИ-анализ для `/api/insights` (своя очередь, чтобы не ждать OCR) |
 | [app/rate_limit.py](app/rate_limit.py) | Ограничитель частоты запросов в памяти процесса, определение IP |
 | [app/dates.py](app/dates.py) | Разбор дат вида `29.07.2025 16:36`, `13.05.19`, `2025-07-29` → `YYYY-MM-DD` и `HH:MM` |
-| [app/ocr.py](app/ocr.py) | Обёртка: реэкспорт `init_ocr` и `analyze_receipt` из [ml/app/ocr.py](ml/app/ocr.py) |
-| [app/parser.py](app/parser.py) | Старая копия запасного парсера, сервер её не использует (актуальная — [ml/app/parser.py](ml/app/parser.py)) |
-| [ml/app/ocr.py](ml/app/ocr.py) | Конвейер распознавания: предобработка, PaddleOCR, выбор парсера, валюта, категории, уверенность, реквизиты |
-| [ml/app/agent_parser.py](ml/app/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы, разбор длинных чеков |
-| [ml/app/categorize.py](ml/app/categorize.py) | Раскладка позиций по категориям: кэш, словарь, ключевые слова, Qwen |
-| [ml/app/advisor.py](ml/app/advisor.py), [ml/app/llm.py](ml/app/llm.py) | Детекторы фактов о расходах, промпт и проверка советов; клиенты Gemini и Ollama |
+| [app/ocr.py](app/ocr.py) | Обёртка: реэкспорт `init_ocr` и `analyze_receipt` из [ml/ocr.py](ml/ocr.py) |
+| [app/parser.py](app/parser.py) | Старая копия запасного парсера, сервер её не использует (актуальная — [ml/parser.py](ml/parser.py)) |
+| [ml/ocr.py](ml/ocr.py) | Конвейер распознавания: предобработка, PaddleOCR, выбор парсера, валюта, категории, уверенность, реквизиты |
+| [ml/agent_parser.py](ml/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы, разбор длинных чеков |
+| [ml/categorize.py](ml/categorize.py) | Раскладка позиций по категориям: кэш, словарь, ключевые слова, Qwen |
+| [ml/advisor.py](ml/advisor.py), [ml/llm.py](ml/llm.py) | Детекторы фактов о расходах, промпт и проверка советов; клиенты Gemini и Ollama |
 | [migrations/](migrations/) | Миграции Alembic |
 | [tests/](tests/), [ml/tests/](ml/tests/) | Автотесты API и ML |
 | [scripts/i18n_source.py](scripts/i18n_source.py) | Исходник переводов интерфейса: из него генерируются `frontend/static/js/locales/{kk,en}.js` |

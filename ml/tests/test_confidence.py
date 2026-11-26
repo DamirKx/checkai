@@ -1,6 +1,6 @@
 """Тесты расчёта уверенности распознавания."""
 import pytest
-from app.confidence import compute_confidence
+from ml.confidence import compute_confidence
 
 
 def test_perfect_ocr_and_math():
