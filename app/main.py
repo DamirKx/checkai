@@ -33,6 +33,8 @@ def _setup_logging() -> None:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         logger.addHandler(handler)
+    # paddle вешает свой обработчик на корневой логгер — без этого каждая строка checkai.* выводилась дважды
+    logger.propagate = False
 
 
 _setup_logging()
