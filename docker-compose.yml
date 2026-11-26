@@ -8,11 +8,10 @@ services:
       - ./data:/app/data
       # Прокидываем frontend, чтобы можно было редактировать HTML без пересборки контейнера
       - ./frontend:/app/frontend
-      # Прокидываем app и server.py для удобной разработки
+      # Прокидываем код бэкенда (app/) для удобной разработки
       - ./app:/app/app
       # ml тоже прокидываем — иначе после git pull в контейнере остаётся старый парсер Qwen
       - ./ml:/app/ml
-      - ./server.py:/app/server.py
       - ./migrations:/app/migrations
       - ./alembic.ini:/app/alembic.ini
       # Модели распознавания PaddleOCR (~100 МБ): скачиваются один раз и переживают --build и down/up

@@ -10,7 +10,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
 from sqlalchemy import create_engine, text
 

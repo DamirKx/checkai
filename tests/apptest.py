@@ -13,10 +13,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy.orm import Session
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
-import server
-from server import app
+from app import uploads
+from app.main import app
 from app import auth, config, database, models, rates
 from app.categories import create_default_categories
 from app.rate_limit import limiter
@@ -37,7 +37,7 @@ def put_upload(content: bytes, ext: str = ".jpg") -> str:
     filename = f"{uuid.uuid4().hex}{ext}"
     with open(os.path.join(config.UPLOADS_DIR, filename), "wb") as f:
         f.write(content)
-    return f"{server.RECEIPTS_URL_PREFIX}/{filename}"
+    return f"{uploads.RECEIPTS_URL_PREFIX}/{filename}"
 
 
 class AppTestCase(unittest.TestCase):

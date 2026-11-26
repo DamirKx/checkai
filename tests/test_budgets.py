@@ -4,10 +4,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 # Устанавливаем тестовый SECRET_KEY до импорта приложения, если его нет
-import testenv  # noqa: F401,E402 — временная база и папки, до импорта server
+import testenv  # noqa: F401,E402 — временная база и папки, до импорта app.main
 os.environ.setdefault("SECRET_KEY", "test_secret_key_1234567890_antigravity_safe_key_32chars")
 
-from server import app
+from app.main import app
 from app import database, models, auth
 from app.categories import create_default_categories
 

@@ -4,9 +4,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
-import server
+from app import ocr as ocr_service
 from apptest import AppTestCase, image_bytes, put_upload
 from app import duplicates, models
 
@@ -132,8 +132,8 @@ def fake_analyze(fiscal=None, store="MAGNUM", total=4500.0):
 
 class TestAnalyze(AppTestCase):
     def analyze(self, content, headers=None, fiscal=None, store="MAGNUM", total=4500.0):
-        with patch.object(server, "analyze_receipt", fake_analyze(fiscal, store, total)), \
-                patch.object(server, "get_ocr", lambda: None):
+        with patch.object(ocr_service, "analyze_receipt", fake_analyze(fiscal, store, total)), \
+                patch.object(ocr_service, "get_ocr", lambda: None):
             r = self.client.post("/api/analyze", files={"file": ("r.jpg", content, "image/jpeg")},
                                  headers=headers or {})
         self.assertEqual(r.status_code, 200, r.text)

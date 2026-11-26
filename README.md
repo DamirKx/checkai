@@ -95,8 +95,9 @@
 
 ```
 CheckAI/
-├── server.py               # Точка входа FastAPI: middleware, все маршруты, загрузки, очистка фото
 ├── app/                    # Бэкенд
+│   ├── main.py             # Точка входа FastAPI: middleware, обработчики ошибок, статика, подключение роутеров
+│   ├── routers/            # Маршруты API по разделам: auth, profile, analyze, receipts, budgets, categories, insights, system
 │   ├── config.py           # Настройки из окружения и .env
 │   ├── database.py         # Подключение к БД, сессии, миграции при старте
 │   ├── models.py           # ORM-модели (SQLAlchemy)
@@ -112,7 +113,8 @@ CheckAI/
 │   ├── tasks.py            # Фоновые очереди распознавания и анализа
 │   ├── rate_limit.py       # Ограничение частоты запросов
 │   ├── dates.py            # Разбор дат и времени
-│   └── ocr.py              # Обёртка над ml/ocr.py для сервера
+│   ├── ocr.py              # Распознавание на сервере: модель OCR, очередь, формат ответа, дубликаты
+│   └── uploads.py          # Фото чеков и профиля на диске: загрузка, проверка пути, удаление, очистка
 ├── ml/                     # Распознавание и ИИ (пакет ml: from ml.ocr import ...)
 │   ├── ocr.py              # Конвейер распознавания чека
 │   ├── preprocess.py       # Подготовка фото перед OCR
@@ -155,7 +157,7 @@ git pull
 
 | Роль | Команда | Что поднимается | RAM |
 |---|---|---|---|
-| Бэкенд, фронтенд | `uvicorn server:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `ml/parser.py`, Ollama не нужна | ~0,5 ГБ |
+| Бэкенд, фронтенд | `uvicorn app.main:app --reload` или `docker compose up -d` | Только сайт и API. Чеки распознаются запасным парсером `ml/parser.py`, Ollama не нужна | ~0,5 ГБ |
 | ML | `docker compose --profile full up -d` или без Docker с установленной Ollama | Сайт + Ollama (Qwen 2.5:3b) | ~4–5 ГБ |
 | Ollama уже стоит на компьютере | `docker compose up -d --build` + `DOCKER_OLLAMA_HOST` в `.env` (см. [вариант А2](#вариант-а2-docker--ollama-на-компьютере)) | Сайт в Docker, Qwen — из вашей Ollama. Модель не скачивается второй раз | ~4–5 ГБ |
 | QA, демонстрация | `docker compose --profile full up -d --build` | Всё, как у пользователя | ~4–5 ГБ |
@@ -186,7 +188,7 @@ docker compose exec ollama ollama pull qwen2.5:3b
 Откройте `http://localhost:8000`. Остановить — `docker compose --profile full down`.
 
 - Без `--profile full` Ollama не запускается — поднимается только сайт.
-- Папки `app/`, `ml/`, `frontend/`, `migrations/` и `server.py` подключены к контейнеру напрямую: правки фронтенда видны после `F5`, правки Python — после `docker compose restart web` (`--reload` в контейнере не включён). `--build` нужен, когда меняются `requirements.txt` или `Dockerfile`; после `git pull` проще всегда запускать с `--build` — без изменений сборка занимает секунды.
+- Папки `app/`, `ml/`, `frontend/` и `migrations/` подключены к контейнеру напрямую: правки фронтенда видны после `F5`, правки Python — после `docker compose restart web` (`--reload` в контейнере не включён). `--build` нужен, когда меняются `requirements.txt` или `Dockerfile`; после `git pull` проще всегда запускать с `--build` — без изменений сборка занимает секунды.
 - Миграции базы применяются сами при старте сервера.
 - Модель распознавания загружается сразу при старте контейнера, а не при первом чеке (`OCR_WARMUP=1`). Файлы моделей PaddleOCR хранятся в volume `paddlex_models` и скачиваются только при самом первом запуске.
 
@@ -224,7 +226,7 @@ pip install -r requirements.txt
 
 ```powershell
 .venv\Scripts\activate
-uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Откройте `http://localhost:8000`, Swagger (все эндпоинты, можно вызывать прямо из браузера) — `http://localhost:8000/docs`. Остановить — `Ctrl+C`. Ollama на Windows работает в фоне (значок в трее); если её нет — запустите из меню «Пуск».
@@ -607,19 +609,19 @@ Access-токен живёт 60 минут, refresh-токен — 30 дней. 
 
 ### Осторожно: что сервер делает с данными сам
 
-**Очистка фото.** При старте и затем раз в `ORPHAN_CLEANUP_HOURS` часов сервер удаляет из `UPLOADS_DIR` все изображения старше суток, на которые не ссылается ни один чек **в текущей базе** (`cleanup_orphan_images` в [server.py](server.py)). Если подключить другую или пустую базу к той же папке — фото чеков из вашей основной базы будут удалены. Поэтому:
+**Очистка фото.** При старте и затем раз в `ORPHAN_CLEANUP_HOURS` часов сервер удаляет из `UPLOADS_DIR` все изображения старше суток, на которые не ссылается ни один чек **в текущей базе** (`cleanup_orphan_images` в [app/uploads.py](app/uploads.py)). Если подключить другую или пустую базу к той же папке — фото чеков из вашей основной базы будут удалены. Поэтому:
 
 > Экспериментируете с другой базой — всегда задавайте вместе с `DATABASE_URL` и свой `UPLOADS_DIR`.
 
 ```powershell
 $env:DATABASE_URL = "sqlite:///data/sandbox.db"
 $env:UPLOADS_DIR  = "data/sandbox_receipts"
-python -m uvicorn server:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 Всё внутри `data/` игнорируется git, кроме `.gitkeep`.
 
-**Миграции.** При импорте `server.py` вызывается `database.init_db()`, который доводит базу до последней миграции. Это происходит и при запуске тестов, и при запуске `uvicorn`. Старую базу без истории Alembic он сначала «усыновляет» (помечает ревизией `0001_baseline`).
+**Миграции.** При импорте `app/main.py` вызывается `database.init_db()`, который доводит базу до последней миграции. Это происходит и при запуске тестов, и при запуске `uvicorn`. Старую базу без истории Alembic он сначала «усыновляет» (помечает ревизией `0001_baseline`).
 
 ### Устройство сервера
 
@@ -627,14 +629,15 @@ python -m uvicorn server:app --reload
 Браузер (frontend/, без сборки)
    │  fetch /api/*  + Authorization: Bearer <access>
    ▼
-server.py — FastAPI
+app/main.py — FastAPI
    ├─ middleware: лимит запросов, отсечение больших загрузок, nosniff
    ├─ обработчики ошибок: 422 без «Value error,», AppError/CategoryError → {detail, code}
-   ├─ эндпоинты (def, выполняются в пуле потоков)
+   ├─ app/routers/*  эндпоинты по разделам (def, выполняются в пуле потоков)
    │     ├─ app/auth.py      JWT, пароли, текущий пользователь
    │     ├─ app/schemas.py   Pydantic: проверка входа и формат ответа
    │     ├─ app/crud.py      все запросы к БД
    │     │     └─ app/models.py → app/database.py → SQLite / PostgreSQL
+   │     ├─ app/uploads.py   фото чеков и профиля на диске
    │     └─ app/ocr.py → ml/ocr.py   распознавание (под общей блокировкой)
    │           ├─ preprocess → PaddleOCR → строки текста
    │           ├─ agent_parser.py   Qwen через Ollama (если доступна)
@@ -648,7 +651,7 @@ server.py — FastAPI
 Главные решения:
 
 - **Эндпоинты объявлены через `def`, а не `async def`.** FastAPI выполняет их в пуле потоков, поэтому долгий OCR не блокирует остальные запросы. Не делайте эндпоинты `async`, если внутри синхронная работа с БД или OCR.
-- **Одна модель OCR на процесс.** `get_ocr()` создаёт её лениво (или при старте, если `OCR_WARMUP=1`). PaddleOCR не потокобезопасен, поэтому распознавание идёт под `_ocr_run_lock` — строго по одному.
+- **Одна модель OCR на процесс.** `app.ocr.get_ocr()` создаёт её лениво (или при старте, если `OCR_WARMUP=1`). PaddleOCR не потокобезопасен, поэтому распознавание идёт под `_ocr_run_lock` — строго по одному.
 - **Бизнес-логика запросов к БД — только в `crud.py`.** Эндпоинт проверяет права и вызывает функцию из `crud`.
 - **Фронт получает данные только через API**, к базе не обращается.
 - **Папка `ml/` — зона ML-разработчика.** Бэкенд вызывает из неё `ml.ocr` (через `app/ocr.py`), `ml.categorize`, `ml.advisor` и `ml.merchant`.
@@ -657,7 +660,8 @@ server.py — FastAPI
 
 | Файл | Что внутри |
 |---|---|
-| [server.py](server.py) | Приложение FastAPI: middleware, все маршруты, сохранение загрузок, проверка пути к фото, очистка фото, блокировка OCR |
+| [app/main.py](app/main.py) | Приложение FastAPI: логи, миграции при старте, статика, middleware (лимиты, размер загрузок), обработчики ошибок, подключение роутеров, фоновые задачи при старте |
+| [app/routers/](app/routers/) | Эндпоинты по разделам: `system` (health, валюты, страница, PWA), `auth`, `profile` (фото, сводка), `analyze` (распознавание, статус задач), `receipts` (чеки, аналитика), `budgets`, `categories` (категории, правила, автокатегория), `insights` |
 | [app/config.py](app/config.py) | Настройки из окружения |
 | [app/database.py](app/database.py) | Engine и сессии SQLAlchemy, `get_db()`, `init_db()` с Alembic. Для SQLite включает внешние ключи и подменяет `lower()` на версию, понимающую кириллицу (иначе `ilike` не найдёт «магнум» в «Магнум»). Адрес `postgresql://…` переводит на драйвер `psycopg2` |
 | [app/models.py](app/models.py) | Таблицы: `User`, `Category`, `CategoryRule`, `Receipt`, `ReceiptItem`, `Budget`, `ExchangeRate`, `Insight` |
@@ -671,9 +675,10 @@ server.py — FastAPI
 | [app/insights.py](app/insights.py) | ИИ-рекомендации: вызов `ml.advisor.generate_insights`, проверка ответа по контракту `InsightsOut`, шаблонные советы (`model: "rules"`), если ИИ недоступен |
 | [app/i18n.py](app/i18n.py) | Язык запроса из `Accept-Language`, тексты ошибок API на ru / kk / en, `AppError` |
 | [app/tasks.py](app/tasks.py) | Очереди фоновых задач в памяти процесса: распознавание для `/api/analyze/async` (один поток) и ИИ-анализ для `/api/insights` (своя очередь, чтобы не ждать OCR) |
-| [app/rate_limit.py](app/rate_limit.py) | Ограничитель частоты запросов в памяти процесса, определение IP |
+| [app/rate_limit.py](app/rate_limit.py) | Ограничитель частоты запросов в памяти процесса, определение IP, таблицы лимитов `RATE_LIMIT_RULES` / `RATE_LIMIT_METHOD_RULES` |
 | [app/dates.py](app/dates.py) | Разбор дат вида `29.07.2025 16:36`, `13.05.19`, `2025-07-29` → `YYYY-MM-DD` и `HH:MM` |
-| [app/ocr.py](app/ocr.py) | Обёртка: реэкспорт `init_ocr` и `analyze_receipt` из [ml/ocr.py](ml/ocr.py) |
+| [app/ocr.py](app/ocr.py) | Распознавание на сервере вокруг [ml/ocr.py](ml/ocr.py): одна модель на процесс и прогрев, блокировка `_ocr_run_lock`, приведение ответа к формату API, правила пользователя, `duplicate_of`, фискальные номера несохранённых чеков |
+| [app/uploads.py](app/uploads.py) | Фото чеков: сохранение загрузки, проверка `image_path`, удаление, очистка несохранённых. Фото профиля: проверка, перекодирование в JPEG, удаление |
 | [app/parser.py](app/parser.py) | Старая копия запасного парсера, сервер её не использует (актуальная — [ml/parser.py](ml/parser.py)) |
 | [ml/ocr.py](ml/ocr.py) | Конвейер распознавания: предобработка, PaddleOCR, выбор парсера, валюта, категории, уверенность, реквизиты |
 | [ml/agent_parser.py](ml/agent_parser.py) | Промпт и вызов Qwen, очистка служебных строк, самокоррекция суммы, разбор длинных чеков |
@@ -740,12 +745,12 @@ exchange_rates (курсы валют к тенге на даты покупок
 **Ошибки**
 
 - Тексты ошибок — для пользователя: фронт показывает `detail` как есть. Технические подробности — только в лог (`logger.exception`).
-- Ошибки, которые нужно перевести, бросайте как `AppError(статус, код)` с текстами в [app/i18n.py](app/i18n.py) — ответ будет `{"detail": текст на языке запроса, "code": код}`. В валидаторах схем — `raise ValueError("Понятный текст")`; приставка `Value error,` убирается обработчиком в `server.py`.
+- Ошибки, которые нужно перевести, бросайте как `AppError(статус, код)` с текстами в [app/i18n.py](app/i18n.py) — ответ будет `{"detail": текст на языке запроса, "code": код}`. В валидаторах схем — `raise ValueError("Понятный текст")`; приставка `Value error,` убирается обработчиком в `app/main.py`.
 - Коды: `400` — неверные данные, которые нельзя проверить схемой (неверный пароль, занятый email); `401` — нет или истёк токен; `403` — нет согласия; `404` — нет объекта или он чужой; `409` — дубликат; `413` — файл больше лимита; `415` — не изображение; `422` — не прошла валидация; `429` — лимит запросов.
 
 **Код**
 
-- Запросы к БД — в `crud.py`, эндпоинты — в `server.py`, схемы — в `schemas.py`.
+- Запросы к БД — в `crud.py`, эндпоинты — в `app/routers/<раздел>.py`, схемы — в `schemas.py`. Новый раздел — новый файл в `app/routers/` и строка в списке роутеров в `app/main.py`.
 - Схемы ответа указывайте в `response_model` — так в ответ не попадут лишние поля (например, `hashed_password`).
 - Новые настройки — в `app/config.py` через `os.getenv` с разумным значением по умолчанию, плюс строка в `.env.example` и в `docker-compose.yml`.
 - Новые тексты интерфейса — в `scripts/i18n_source.py` (перевод на kk и en), затем `python scripts/i18n_source.py` и `node scripts/check_i18n.js`.
@@ -770,9 +775,9 @@ exchange_rates (курсы валют к тенге на даты покупок
        db.refresh(receipt)
        return receipt
    ```
-4. **Маршрут в** [server.py](server.py) — в блок с соседними эндпоинтами:
+4. **Маршрут в** роутере раздела — здесь [app/routers/receipts.py](app/routers/receipts.py):
    ```python
-   @app.patch("/api/receipts/{receipt_id}/note", response_model=schemas.ReceiptOut, tags=["Receipts"])
+   @router.patch("/api/receipts/{receipt_id}/note", response_model=schemas.ReceiptOut, tags=["Receipts"])
    def update_receipt_note(
        receipt_id: int,
        data: schemas.ReceiptNoteUpdate,
@@ -782,10 +787,10 @@ exchange_rates (курсы валют к тенге на даты покупок
        """Заметка к своему чеку."""
        receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
        if receipt is None:
-           raise HTTPException(status_code=404, detail="Чек не найден")
+           raise AppError(404, "receipt_not_found")
        return crud.set_receipt_note(db, receipt, data.note)
    ```
-5. **Лимит частоты** — если эндпоинт тяжёлый или его можно использовать для перебора: строка в `RATE_LIMIT_RULES` в `server.py`.
+5. **Лимит частоты** — если эндпоинт тяжёлый или его можно использовать для перебора: строка в `RATE_LIMIT_RULES` в [app/rate_limit.py](app/rate_limit.py).
 6. **Тест** в `tests/`: успех, `401` без токена, `404` для чужого чека, `422` для неверных данных.
 7. **Документация** — раздел «Спецификация API» в этом README, в том же PR. Если эндпоинт нужен фронту — договоритесь о формате до реализации.
 
@@ -821,7 +826,7 @@ alembic downgrade -1      # откатить последнюю
 
 Тесты — `unittest` + `fastapi.testclient.TestClient`, запускаются через `pytest` (команды — в разделе [Тесты](#тесты)). Временную базу и папки настраивает [tests/testenv.py](tests/testenv.py).
 
-- Первой строкой импортируйте `testenv`, **до** `from server import app`: настройки читаются при импорте.
+- Первой строкой импортируйте `testenv`, **до** `from app.main import app`: настройки читаются при импорте.
 - `TestClient(app)` без `with` не запускает фоновую очистку фото — так и нужно в тестах.
 - Пользователей создавайте прямо через `models.User` и `auth.issue_tokens(user)`, как в [tests/test_budgets.py](tests/test_budgets.py), — быстрее, чем регистрация через API. Такой пользователь создаётся без категорий: если они нужны, вызовите `create_default_categories(db, user)` до `commit`. Готовый базовый класс с двумя пользователями — [tests/apptest.py](tests/apptest.py).
 - На каждый эндпоинт: успешный сценарий, `401` без токена, изоляция пользователей (пользователь B получает `404` на объекты A), ошибки валидации (`422`).

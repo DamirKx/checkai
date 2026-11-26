@@ -15,7 +15,7 @@ from pathlib import Path
 
 CASES_FILE = Path(__file__).resolve().parent / "categorize_cases.json"
 
-# Стандартные категории в том виде, в каком их передаёт сервер (server._categories_for)
+# Стандартные категории в том виде, в каком их передаёт сервер (app.ocr.categories_for)
 CATEGORIES = [
     {"id": 1, "name": "Продукты", "default_key": "groceries",
      "description": "Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости"},

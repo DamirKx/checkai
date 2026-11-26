@@ -1,7 +1,7 @@
 'use strict';
 
 // --- Справочники ---
-// Должно совпадать с MAX_UPLOAD_MB и ALLOWED_EXTENSIONS на сервере (server.py)
+// Должно совпадать с MAX_UPLOAD_MB и ALLOWED_EXTENSIONS на сервере (app/config.py, app/uploads.py)
 const MAX_UPLOAD_MB = 10;
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff'];
 const ALLOWED_EXT = /\.(jpe?g|png|webp|bmp|tiff?)$/i;

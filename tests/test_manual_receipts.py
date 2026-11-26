@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
 from apptest import AppTestCase, image_bytes, put_upload
 from app import models

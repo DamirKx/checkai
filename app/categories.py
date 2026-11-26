@@ -37,7 +37,7 @@ DEFAULT_CATEGORIES: List[Dict[str, str]] = [
 
 
 class CategoryError(AppError):
-    """Ошибка операции с категориями: server.py превращает её в ответ {"detail": ..., "code": ...}.
+    """Ошибка операции с категориями: обработчик в app/main.py превращает её в ответ {"detail": ..., "code": ...}.
 
     code — ключ app.i18n.MESSAGES, params — подстановки в текст.
     """

@@ -8,7 +8,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
 from apptest import AppTestCase, PASSWORD
 from app import config, crud, insights, models
