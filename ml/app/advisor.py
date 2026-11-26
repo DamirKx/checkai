@@ -1,4 +1,4 @@
-"""ИИ-рекомендации по расходам: детекторы фактов, генерация и проверка советов (NEXT_WEEK_TASKS.md, B.1).
+"""ИИ-рекомендации по расходам: детекторы фактов, генерация и проверка советов.
 
 Цифры считает код на Python, языковая модель только объясняет их и предлагает действия.
 Если модель недоступна или её ответ не проходит валидацию, используются шаблонные советы.
@@ -29,7 +29,7 @@ MIN_ITEMS_FROM_AI = 2
 MAX_ITEMS = 6
 
 
-# --- 1. Детекторы фактов на чистом Python (B.1.1) ---
+# --- 1. Детекторы фактов на чистом Python ---
 
 def detect_facts(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Находит в сводке факты: перерасход, прогноз лимита, рост категории, частые покупки и т.д."""
@@ -453,7 +453,7 @@ def build_rule_insights(
     }
 
 
-# --- 3. Валидация ответа нейросети на выдуманные числа (B.1.4) ---
+# --- 3. Валидация ответа нейросети на выдуманные числа ---
 
 def _collect_fact_numbers(facts: List[Dict[str, Any]]) -> Set[float]:
     """Извлекает все допустимые числовые значения из фактов (с допусками)."""
@@ -636,7 +636,7 @@ def _validate_ai_response(
     }
 
 
-# --- 4. Промпт для LLM (B.1.2) ---
+# --- 4. Промпт для LLM ---
 
 _LANGUAGE_INSTRUCTIONS: Dict[str, str] = {
     "ru": "",
@@ -709,7 +709,7 @@ def _build_prompt(snapshot: Dict[str, Any], facts: List[Dict[str, Any]], languag
 """
 
 
-# --- 5. Публичная точка входа (B.1) ---
+# --- 5. Публичная точка входа ---
 
 def generate_insights(
     snapshot: Dict[str, Any],
@@ -719,7 +719,7 @@ def generate_insights(
     """Главная функция модуля рекомендаций.
 
     Принимает сводку расходов snapshot и код языка (ru | kk | en).
-    Возвращает dict по схеме InsightsOut (NEXT_WEEK_TASKS.md).
+    Возвращает dict по схеме InsightsOut.
     """
     lang = normalize_language(language if language is not None else snapshot.get("language", "ru"))
     facts = detect_facts(snapshot)

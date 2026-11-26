@@ -101,5 +101,5 @@ class TaskManager:
 
 
 task_manager = TaskManager(max_workers=1)
-# ИИ-рекомендации (NEXT_WEEK_TASKS.md, B.2.4): своя очередь, чтобы анализ не ждал распознавания чеков и наоборот
+# ИИ-рекомендации: своя очередь, чтобы анализ не ждал распознавания чеков и наоборот
 insights_task_manager = TaskManager(max_workers=2, name="insights", first_step="ai")

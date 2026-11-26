@@ -152,19 +152,19 @@ def _build_items(db: Session, user_id: int, items: List[schemas.ItemIn]) -> List
         category_id = resolve_category_id(db, user_id, item_data.category_id, item_data.category)
         built.append(models.ReceiptItem(
             name=item_data.name,
-            # Количество уже проверено схемой (> 0): 0 — это 422, а не «молча 1» (A.2.2)
+            # Количество уже проверено схемой (> 0): 0 — это 422, а не «молча 1»
             quantity=item_data.quantity,
             price_per_unit=item_data.price_per_unit or 0.0,
             total_price=item_data.total_price or 0.0,
             category_id=category_id,
-            # Нет категории — нет и источника (PROFILE_TASKS.md, п. 2.1)
+            # Нет категории — нет и источника
             category_source=item_data.category_source if category_id is not None else None,
         ))
     return built
 
 
 def _merchant(merchant: Optional[str], store: Optional[str]) -> Optional[str]:
-    """Имя сети из запроса, а если его нет — вычисленное из store (п. 2.2)."""
+    """Имя сети из запроса, а если его нет — вычисленное из store."""
     merchant = (merchant or "").strip()
     return merchant[:255] if merchant else canonical_merchant(store)
 
@@ -204,7 +204,7 @@ def create_receipt(
         currency=cur,
         rate_to_kzt=rate,
         image_path=image_path,
-        # Без фото чек всегда введён вручную, что бы ни прислал клиент (A.2.1)
+        # Без фото чек всегда введён вручную, что бы ни прислал клиент
         source=data.source if image_path else "manual",
         image_hash=image_hash if image_path else None,
         fiscal_id=fiscal_id,
@@ -226,10 +226,10 @@ def find_duplicate(
     exclude_id: Optional[int] = None,
     by_content: bool = True,
 ) -> Optional[models.Receipt]:
-    """Уже сохранённый чек пользователя, который совпадает с data, или None (NEXT_WEEK_TASKS.md, C.2.3).
+    """Уже сохранённый чек пользователя, который совпадает с data, или None.
 
     По убыванию надёжности: тот же файл фото, тот же фискальный номер, то же содержимое
-    (правило C.0, app/duplicates.py). data — ReceiptCreate / ReceiptUpdate или словарь распознавания.
+    (правило — app/duplicates.py). data — ReceiptCreate / ReceiptUpdate или словарь распознавания.
     by_content=False — только фото и фискальный номер (так проверяется ответ распознавания).
     """
     base = db.query(models.Receipt).filter(models.Receipt.user_id == user_id)
@@ -351,7 +351,7 @@ def update_receipt(
     receipt: models.Receipt,
     data: schemas.ReceiptUpdate,
 ) -> models.Receipt:
-    # source не меняется: он определён при создании чека (A.2.1)
+    # source не меняется: он определён при создании чека
     items = _build_items(db, receipt.user_id, data.items)
     category_id = _receipt_category_id(db, receipt.user_id, items, data.category_id)
 
@@ -542,7 +542,7 @@ def get_analytics(db: Session, user_id: int, base_currency: Optional[str] = None
     }
 
 
-# --- Сводка профиля (PROFILE_TASKS.md, п. 1.3) ---
+# --- Сводка профиля ---
 
 ACTIVITY_DAYS = 182  # 26 недель
 
@@ -847,7 +847,7 @@ def create_category(db: Session, user_id: int, data: schemas.CategoryCreate) -> 
 def update_category(db: Session, category: models.Category, data: schemas.CategoryUpdate) -> models.Category:
     """Меняет только поля, пришедшие в запросе. Позиции ссылаются по id — новое название видно сразу везде."""
     fields = data.model_fields_set
-    # Новое название или описание — категория больше не стандартная, перевода у неё нет (п. 3.2).
+    # Новое название или описание — категория больше не стандартная, перевода у неё нет.
     # Иконка и порядок, а также то же самое значение ключ не сбрасывают
     if "name" in fields and data.name != category.name:
         category.default_key = None
@@ -866,7 +866,7 @@ def update_category(db: Session, category: models.Category, data: schemas.Catego
 
 
 def _recalc_receipt_categories(receipts: List[models.Receipt]) -> None:
-    """Категория чека после переноса позиций (п. 0.5). У чека без позиций она не меняется."""
+    """Категория чека после переноса позиций. У чека без позиций она не меняется."""
     for receipt in receipts:
         if receipt.items:
             receipt.category_id = main_category_id(receipt.items)
@@ -1025,7 +1025,7 @@ def delete_rule(db: Session, user_id: int, rule_id: int) -> bool:
     db.commit()
     return deleted > 0
 
-# --- Сводка для ИИ-рекомендаций (NEXT_WEEK_TASKS.md, B.2.2) ---
+# --- Сводка для ИИ-рекомендаций ---
 
 SNAPSHOT_MONTHS = 6
 # С каким числом прошлых месяцев сравнивается текущий
@@ -1056,7 +1056,7 @@ def build_finance_snapshot(
 
     Пересчёт валют — attach_base_rates, как в get_analytics; чеки без курса только перечисляются в unconverted.
     С lang в сводке есть language, а у категорий — display_name: название на этом языке, им ML
-    пишет текст (I18N_TASKS.md, п. 3.5). name остаётся русским, как в базе.
+    пишет текст. name остаётся русским, как в базе.
     """
     base = user.base_currency or DEFAULT_CURRENCY
     today = today or datetime.now(timezone.utc).date()
@@ -1162,7 +1162,7 @@ def build_finance_snapshot(
 
 
 def snapshot_hash(snapshot: Dict[str, Any]) -> str:
-    """Хеш сводки без точного дня: в пределах месяца те же данные — тот же анализ (B.2.4).
+    """Хеш сводки без точного дня: в пределах месяца те же данные — тот же анализ.
 
     Язык в хеш не входит: анализ сравнивается только с анализом на том же языке (get_latest_insight).
     display_name входит, только если отличается от name, — поэтому у русских анализов хеш тот же,
@@ -1178,13 +1178,13 @@ def snapshot_hash(snapshot: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-# --- Сохранённые анализы (B.2.3) ---
+# --- Сохранённые анализы ---
 
 INSIGHTS_KEEP = 3
 
 
 def get_latest_insight(db: Session, user_id: int, language: str = "ru") -> Optional[models.Insight]:
-    """Последний анализ на языке language (I18N_TASKS.md, п. 3.5)."""
+    """Последний анализ на языке language."""
     return (
         db.query(models.Insight)
         .filter(models.Insight.user_id == user_id, models.Insight.language == language)

@@ -1106,7 +1106,7 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
   .edit-nums label:last-child { grid-column: 1 / -1; }
   .edit-foot { grid-template-columns: 1fr; }
 }
-/* --- Ручной ввод чека (NEXT_WEEK_TASKS.md, A.1) --- */
+/* --- Ручной ввод чека --- */
 .manual-or { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
 .pill-manual { display: inline-block; margin-left: 6px; padding: 2px 9px; border-color: color-mix(in srgb, var(--aqua) 40%, transparent); background: color-mix(in srgb, var(--aqua) 12%, transparent); color: var(--aqua); font: 600 11.5px/1.4 var(--mono); letter-spacing: .04em; vertical-align: middle; }
 .receipt-row h3 .pill-manual { font-size: 11px; }
@@ -1117,14 +1117,14 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
 .result-close { width: 36px; height: 36px; border-radius: 50%; }
 .result-close:hover { transform: rotate(90deg); }
 
-/* --- Проверка на дубликат (NEXT_WEEK_TASKS.md, задача C) --- */
+/* --- Проверка на дубликат --- */
 .dup-hint { margin: 0 0 14px; }
 .dup-card { display: grid; gap: 3px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--soft-bg); }
 .dup-card b { overflow-wrap: anywhere; color: var(--cream); font-size: 16px; }
 .dup-card span, .dup-card small { color: var(--muted); font-size: 13.5px; }
 .dup-card strong { margin-top: 4px; color: var(--cream); font-size: 24px; font-weight: 800; letter-spacing: -.03em; }
 
-/* --- Рекомендации ИИ (NEXT_WEEK_TASKS.md, B.3): цвет — из текущего акцента (--aqua) --- */
+/* --- Рекомендации ИИ: цвет — из текущего акцента (--aqua) --- */
 .insights { display: grid; gap: 16px; margin-bottom: 24px; padding: clamp(18px, 2.6vw, 28px); }
 #insightsBody { display: grid; gap: 14px; }
 .ins-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
@@ -1182,7 +1182,7 @@ html[data-auth="guest"] .layout { width: min(1440px, 100%); padding-top: 26px; }
   .count { --total: 4820; }
   .scan-beam, .grain { display: none; }
 }
-/* --- Язык интерфейса (I18N_TASKS.md, п. 2.6) --- */
+/* --- Язык интерфейса --- */
 /* Пока i18n.js не перевёл страницу, её не видно (класс ставит скрипт в <head>, снимает i18n.js или таймер) */
 .i18n-pending body { visibility: hidden; }
 .lang-select { flex: none; height: 42px; padding: 0 28px 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft-bg); color: var(--cream); font: 600 13px/1 var(--mono); letter-spacing: .04em; cursor: pointer; appearance: none; -webkit-appearance: none;

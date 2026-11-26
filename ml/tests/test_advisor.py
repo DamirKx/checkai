@@ -1,4 +1,4 @@
-"""Тесты ИИ-рекомендаций по расходам (NEXT_WEEK_TASKS.md, B.1)."""
+"""Тесты ИИ-рекомендаций по расходам."""
 from unittest.mock import patch, MagicMock
 import pytest
 

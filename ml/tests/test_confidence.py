@@ -1,4 +1,4 @@
-"""Тесты расчёта уверенности распознавания (PROFILE_TASKS.md, п. 2.3)."""
+"""Тесты расчёта уверенности распознавания."""
 import pytest
 from app.confidence import compute_confidence
 

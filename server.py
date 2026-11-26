@@ -141,7 +141,7 @@ RATE_LIMIT_METHOD_RULES = {
 async def upload_limit_and_headers(request: Request, call_next):
     # Ограничение частоты запросов
     rule = RATE_LIMIT_RULES.get(request.url.path) or RATE_LIMIT_METHOD_RULES.get((request.method, request.url.path))
-    # Зависимости FastAPI здесь ещё не работают — язык прямо из заголовка (I18N_TASKS.md, п. 3.4.3)
+    # Зависимости FastAPI здесь ещё не работают — язык прямо из заголовка
     lang = parse_accept_language(request.headers.get("accept-language"))
     if rule:
         max_requests, window_seconds = rule
@@ -178,7 +178,7 @@ async def upload_limit_and_headers(request: Request, call_next):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Отдаёт ошибки валидации без технической приставки 'Value error, ' / 'Assertion failed, '.
 
-    msg — на языке запроса (I18N_TASKS.md, п. 3.4.5). Ошибка своего валидатора (app.i18n.validation_error)
+    msg — на языке запроса. Ошибка своего валидатора (app.i18n.validation_error)
     отдаётся как раньше — type "value_error", ctx {"error": {}}, — плюс поле code с её кодом.
     Встроенные ошибки Pydantic для ru — с прежним текстом Pydantic, для kk и en — с переводом.
     """
@@ -216,7 +216,7 @@ def _json_safe(value):
 
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError):
-    """Ошибки по коду (AppError, CategoryError) → {"detail": текст на языке запроса, "code": код} (п. 3.4)."""
+    """Ошибки по коду (AppError, CategoryError) → {"detail": текст на языке запроса, "code": код}."""
     return JSONResponse(status_code=exc.status_code, content=exc.body(get_lang(request)), headers=exc.headers)
 
 
@@ -273,10 +273,10 @@ def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
         data["currency_source"] = "default"
     else:
         data["currency_source"] = data.get("currency_source") or "default"
-    # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id} (PROFILE_TASKS.md, п. 2.1, 2.2, 2.3)
+    # Ключи есть всегда, в том числе в асинхронном пути /api/tasks/{id}
     data.setdefault("merchant", None)
     data.setdefault("confidence", None)
-    # Реквизиты фискального чека от ML (NEXT_WEEK_TASKS.md, C.3) или null
+    # Реквизиты фискального чека от ML или null
     data.setdefault("fiscal", None)
     for item in data.get("items") or []:
         for key in ("category_id", "category", "category_source"):
@@ -294,7 +294,7 @@ def _analyze(db: Session, image_path: str, user: Optional[models.User], image_ha
 
 
 def _mark_duplicate(db: Session, user_id: Optional[int], data: dict, image_hash: Optional[str]) -> None:
-    """duplicate_of в ответе распознавания (C.2.2): у пользователя уже есть чек с тем же фото
+    """duplicate_of в ответе распознавания: у пользователя уже есть чек с тем же фото
     или фискальным номером. По содержимому здесь не ищем — это делает фронт, а при сохранении сервер.
     У гостя и без совпадений — null. Распознавание не прерывается."""
     data["duplicate_of"] = None
@@ -365,7 +365,7 @@ def _save_upload(file: UploadFile) -> Tuple[str, str, str]:
     filename = f"{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOADS_DIR, filename)
     size = 0
-    # Хеш считается, пока файл пишется на диск: по нему ищется тот же чек (C.2.2)
+    # Хеш считается, пока файл пишется на диск: по нему ищется тот же чек
     digest = hashlib.sha256()
     try:
         with open(file_path, "wb") as buffer:
@@ -539,7 +539,7 @@ def health_check(db: Session = Depends(database.get_db)):
 
 @app.get("/api/currencies", response_model=List[schemas.CurrencyOut], tags=["Currencies"])
 def get_currencies(lang: str = Lang):
-    """Список поддерживаемых валют (без авторизации). name — на языке запроса (I18N_TASKS.md, п. 3.6)."""
+    """Список поддерживаемых валют (без авторизации). name — на языке запроса."""
     return currencies.get_currencies_list(lang)
 
 
@@ -660,7 +660,7 @@ def update_me(
     if base_changed:
         current_user.base_currency = user_data.base_currency
 
-    # Тема и акцент — не данные входа, текущий пароль для них не нужен (PROFILE_TASKS.md, п. 1.2)
+    # Тема и акцент — не данные входа, текущий пароль для них не нужен
     if "preferences" in user_data.model_fields_set:
         if user_data.preferences is None:
             current_user.preferences = {}
@@ -672,7 +672,7 @@ def update_me(
                 {k: v for k, v in merged.items() if v is not None}
             ).model_dump()
 
-    # Согласие на ИИ-анализ (B.2.5) — то же поле preferences.ai_insights, пароль не нужен
+    # Согласие на ИИ-анализ — то же поле preferences.ai_insights, пароль не нужен
     if user_data.ai_insights_consent is not None:
         prefs = schemas.Preferences.from_stored(current_user.preferences).model_dump()
         current_user.preferences = {**prefs, "ai_insights": user_data.ai_insights_consent}
@@ -680,7 +680,7 @@ def update_me(
     db.commit()
     if base_changed:
         # Курсы на дни старых чеков докачиваются в фоне; пока их нет, чеки уходят в unconverted,
-        # а UserOut.rates_pending = true (п. 1.6)
+        # а UserOut.rates_pending = true
         rates.run_user_backfill(crud.backfill_user_rates, current_user.id)
     db.refresh(current_user)
 
@@ -706,7 +706,7 @@ def delete_me(
     return {"success": True}
 
 
-# --- Фото профиля (PROFILE_TASKS.md, п. 1.1) ---
+# --- Фото профиля ---
 
 def _avatar_file(avatar_path: Optional[str]) -> Optional[str]:
     """Путь на диске по avatar_path или None, если путь не наш."""
@@ -803,7 +803,7 @@ def get_profile_stats(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    """Цифры, тепловая карта и привычки профиля одним запросом (PROFILE_TASKS.md, п. 1.3)."""
+    """Цифры, тепловая карта и привычки профиля одним запросом."""
     try:
         zone = ZoneInfo(tz.strip()) if tz and tz.strip() else timezone.utc
     except (ZoneInfoNotFoundError, ValueError):
@@ -958,7 +958,7 @@ def get_task_status(
 ):
     """Статус фоновой задачи: распознавание чека или ИИ-анализ расходов.
 
-    ИИ-анализ и распознавание у гостя — без авторизации (в result анализа ничего личного нет, B.2.4).
+    ИИ-анализ и распознавание у гостя — без авторизации (в result анализа ничего личного нет).
     Распознавание у вошедшего пользователя — только с его токеном: в result его чек и duplicate_of.
     Без токена или с истёкшим — 401 (фронт обновит токен и повторит), с чужим — 404, как у чеков."""
     task = task_manager.get_task(task_id) or insights_task_manager.get_task(task_id)
@@ -981,7 +981,7 @@ def get_task_status(
 # --- Сохранение, просмотр и аналитика чеков (только для авторизованных) ---
 
 # Проверка на дубликат и запись чека — под одной блокировкой на пользователя: иначе двойной клик
-# или повтор после обрыва сети проходят проверку оба (C.2.6). Хватает одного процесса uvicorn;
+# или повтор после обрыва сети проходят проверку оба. Хватает одного процесса uvicorn;
 # с несколькими воркерами или Postgres нужна блокировка в базе (SELECT … FOR UPDATE / advisory lock)
 _receipt_locks: dict = {}
 _receipt_locks_guard = threading.Lock()
@@ -993,7 +993,7 @@ def _receipt_lock(user_id: int) -> threading.Lock:
 
 
 def _duplicate_response(db: Session, user: models.User, duplicate: models.Receipt, lang: str) -> JSONResponse:
-    """409 с найденным чеком на верхнем уровне тела, а не внутри detail (C.2.4)."""
+    """409 с найденным чеком на верхнем уровне тела, а не внутри detail."""
     out = schemas.ReceiptOut.model_validate(crud.attach_base_rates(db, duplicate, user.base_currency))
     return JSONResponse(status_code=409, content={
         **AppError(409, "duplicate_receipt").body(lang),
@@ -1093,7 +1093,7 @@ def update_receipt(
 ):
     """Редактирование сохранённого чека (магазин, дата, время, категория, позиции).
 
-    Правка сделала чек копией другого — 409, как при сохранении (C.2.5). Фото и фискальный номер
+    Правка сделала чек копией другого — 409, как при сохранении. Фото и фискальный номер
     правкой не меняются, поэтому проверяется только содержимое.
     """
     receipt = crud.get_receipt_by_id(db, receipt_id=receipt_id, user_id=current_user.id)
@@ -1272,7 +1272,7 @@ def delete_category_rule(
 
 
 
-# --- Автокатегория для товаров, вписанных руками (NEXT_WEEK_TASKS.md, A.2.3) ---
+# --- Автокатегория для товаров, вписанных руками ---
 
 CATEGORIZE_RATE = (30, 60)  # запросов на пользователя за столько секунд
 
@@ -1314,7 +1314,7 @@ def categorize(
     return {"items": items}
 
 
-# --- ИИ-рекомендации по расходам (NEXT_WEEK_TASKS.md, B.2) ---
+# --- ИИ-рекомендации по расходам ---
 
 # (пользователь, язык) → id задачи анализа, пока она идёт: повторный POST не запускает вторую
 _insights_running: dict = {}
@@ -1356,7 +1356,7 @@ def get_insights(
     lang: str = Lang,
 ):
     """Последний анализ на языке запроса ({insights, created_at, model, stale}) или {"insights": null},
-    если на этом языке его ещё нет (I18N_TASKS.md, п. 3.5)."""
+    если на этом языке его ещё нет."""
     insight = crud.get_latest_insight(db, current_user.id, lang)
     if insight is None:
         return {"insights": None}
@@ -1378,7 +1378,7 @@ def start_insights(
 
     Данные не изменились с прошлого анализа на этом языке — сразу 200 с прежним анализом, без запроса к ИИ.
     Не чаще одного нового анализа за INSIGHTS_REFRESH_MINUTES минут на каждом языке — иначе 429:
-    первый анализ на kk разрешён, даже если час назад был ru (п. 3.5.5).
+    первый анализ на kk разрешён, даже если час назад был ru.
     """
     if not current_user.ai_insights_consent:
         raise AppError(403, "insights_consent_required")

@@ -1,4 +1,4 @@
-"""Правило «тот же чек по содержимому» (NEXT_WEEK_TASKS.md, C.0).
+"""Правило «тот же чек по содержимому».
 
 Повторяет findDuplicate / normText / itemsSimilarity из frontend/static/js/app.js. Пороги и нормализацию
 менять только вместе с фронтом, иначе пользователь увидит окно дубликата дважды или не увидит вовсе.
@@ -129,7 +129,7 @@ def match_score(draft: Any, other: Any) -> Optional[float]:
 
 
 def fiscal_id_from(fiscal: Any) -> Optional[str]:
-    """«РНМ:номер:ФП» из реквизитов от ML (C.3). Нужны хотя бы РНМ/ФН и номер чека, иначе None:
+    """«РНМ:номер:ФП» из реквизитов от ML. Нужны хотя бы РНМ/ФН и номер чека, иначе None:
     лучше не найти дубликат, чем склеить два разных чека."""
     if not isinstance(fiscal, dict):
         return None

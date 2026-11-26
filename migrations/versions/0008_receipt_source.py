@@ -1,4 +1,4 @@
-"""Источник чека: фото или ручной ввод (NEXT_WEEK_TASKS.md, A.2.1)
+"""Источник чека: фото или ручной ввод
 
 Revision ID: 0008_receipt_source
 Revises: 0007_item_source_merchant

@@ -1,4 +1,4 @@
-"""Каноническое имя магазина (PROFILE_TASKS.md, п. 2.2)."""
+"""Каноническое имя магазина."""
 import pytest
 
 from app.merchant import canonical_merchant

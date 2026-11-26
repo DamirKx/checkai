@@ -21,7 +21,7 @@ EMAILS = ["test_categories_a@example.com", "test_categories_b@example.com", "tes
 
 class TestNormalizeItemName(unittest.TestCase):
     def test_examples(self):
-        """Проверочные примеры из CATEGORIES_TASKS.md, п. 0.6."""
+        """Проверочные примеры нормализации названий для правил."""
         cases = {
             "Крем NIVEA 50мл": "крем nivea",
             "Крем Nivea 100 мл": "крем nivea",
@@ -109,7 +109,7 @@ class TestCategoriesAPI(unittest.TestCase):
         r = self.client.get("/api/categories/defaults")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(r.json()), 8)
-        # default_key — добавление контракта I18N_TASKS.md, п. 3.2.6
+        # default_key — ключ перевода стандартной категории
         self.assertEqual(set(r.json()[0]), {"name", "description", "icon", "default_key"})
 
     def test_requires_token(self):

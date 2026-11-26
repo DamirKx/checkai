@@ -2,7 +2,7 @@
 
 Путь тот же, что у сервера: OCR → Qwen (parse_receipt_with_correction) → категоризация.
 Метрики — evaluate.evaluate_parser + группы short/long, p50/p95 времени, доля откатов на regex,
-флаг обрезки ответа llm_truncated (ML_TASKS.md, 2.2, 2.3).
+флаг обрезки ответа llm_truncated.
 
 Запуск из папки ml:
     python -m evaluation.benchmark --tag baseline

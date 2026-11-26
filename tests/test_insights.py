@@ -1,4 +1,4 @@
-"""ИИ-рекомендации: сводка, согласие, генерация в фоне, кеш, 429, stale (NEXT_WEEK_TASKS.md, B.2).
+"""ИИ-рекомендации: сводка, согласие, генерация в фоне, кеш, 429, stale.
 
 ИИ подменяется заглушкой (insights._advisor): в тестах наружу ничего не уходит.
 """
@@ -123,7 +123,7 @@ class TestConsent(InsightsCase):
     def test_without_consent_403(self):
         r = self.client.post("/api/insights", headers=self.headers_a)
         self.assertEqual(r.status_code, 403)
-        # code — добавление контракта I18N_TASKS.md, п. 3.4.3; detail прежний
+        # code — машинный код ошибки для перевода на фронте; detail прежний
         self.assertEqual(r.json(), {"detail": "Нужно согласие на анализ", "code": "insights_consent_required"})
 
     def test_consent_saved_without_password(self):
@@ -297,7 +297,7 @@ def insights_keep():
 
 
 class TestRules(unittest.TestCase):
-    """Шаблонные советы — пока ML (B.1) не готов или ИИ недоступен."""
+    """Шаблонные советы — пока ML не готов или ИИ недоступен."""
 
     def snapshot(self, **changes):
         today = date(2026, 11, 12)

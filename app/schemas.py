@@ -26,12 +26,12 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_BYTES = 72
 
 
-# Кто выбрал категорию позиции (PROFILE_TASKS.md, п. 2.1). None — категории нет
+# Кто выбрал категорию позиции. None — категории нет
 CategorySource = Literal["ai", "keywords", "rule", "user"]
-# photo — распознан с фото, manual — введён руками (NEXT_WEEK_TASKS.md, A.2.1)
+# photo — распознан с фото, manual — введён руками
 ReceiptSource = Literal["photo", "manual"]
 
-# Пределы чисел в чеке (A.2.2). Те же константы — MAX_AMOUNT / MAX_QUANTITY во frontend/static/js/app.js
+# Пределы чисел в чеке. Те же константы — MAX_AMOUNT / MAX_QUANTITY во frontend/static/js/app.js
 MAX_AMOUNT = 1e9
 MAX_QUANTITY = 100000
 
@@ -60,7 +60,7 @@ def items_total(items: List["ItemIn"]) -> float:
 
 
 class ItemIn(BaseModel):
-    # Без extra="forbid": новые поля фронта не должны давать 422 (A.2, п. 1)
+    # Без extra="forbid": новые поля фронта не должны давать 422
     name: str = Field(max_length=500)
     quantity: Optional[float] = 1.0
     price_per_unit: Optional[float] = 0.0
@@ -112,7 +112,7 @@ class _ReceiptIn(BaseModel):
 
     @model_validator(mode="after")
     def _total_from_items(self):
-        # Итог не пришёл или 0, а позиции есть — итог = сумма позиций (A.2.2)
+        # Итог не пришёл или 0, а позиции есть — итог = сумма позиций
         if not self.total and self.items:
             self.total = items_total(self.items)
         return self
@@ -144,9 +144,9 @@ class ReceiptCreate(_ReceiptIn):
     currency: str = DEFAULT_CURRENCY
     # Путь, который вернул /api/analyze, например /data/receipts/<uuid>.jpg
     image_path: Optional[str] = Field(default=None, max_length=500)
-    # Без image_path сервер всегда ставит manual (A.2.1)
+    # Без image_path сервер всегда ставит manual
     source: ReceiptSource = "photo"
-    # «Всё равно сохранить» после окна дубликата (C.2.4). В базу не сохраняется
+    # «Всё равно сохранить» после окна дубликата. В базу не сохраняется
     allow_duplicate: bool = False
     items: List[ItemIn] = []
 
@@ -173,7 +173,7 @@ class ReceiptUpdate(_ReceiptIn):
     currency: Optional[str] = None
     # Фронт шлёт тот же payload, что при создании. Источник задаётся при создании чека и не меняется
     source: Optional[ReceiptSource] = None
-    # Правка сделала чек копией другого — «Всё равно сохранить» (C.2.5)
+    # Правка сделала чек копией другого — «Всё равно сохранить»
     allow_duplicate: bool = False
     items: List[ItemIn] = []
 
@@ -239,13 +239,13 @@ LanguageName = Literal["ru", "kk", "en"]
 
 
 class Preferences(BaseModel):
-    """Настройки оформления (PROFILE_TASKS.md, п. 1.2). Неизвестное значение — 422."""
+    """Настройки оформления. Неизвестное значение — 422."""
     theme: ThemeName = "system"
     accent: AccentName = "violet"
-    # Согласие на ИИ-анализ расходов (NEXT_WEEK_TASKS.md, B.2.5)
+    # Согласие на ИИ-анализ расходов
     ai_insights: bool = False
-    # Язык интерфейса (I18N_TASKS.md, п. 3.1). None — пользователь язык не выбирал: ключа нет в ответе,
-    # и фронт оставляет язык устройства (п. 1.1), а не переключает вошедшего на русский
+    # Язык интерфейса. None — пользователь язык не выбирал: ключа нет в ответе,
+    # и фронт оставляет язык устройства, а не переключает вошедшего на русский
     language: Optional[LanguageName] = Field(default=None, exclude_if=lambda v: v is None)
 
     @classmethod
@@ -308,7 +308,7 @@ class UserUpdate(BaseModel):
     base_currency: Optional[str] = None
     # {"accent": "red"} не сбрасывает тему; "preferences": null — вернуть всё по умолчанию
     preferences: Optional[PreferencesUpdate] = None
-    # То же, что preferences.ai_insights (B.2.5): фронт шлёт оба поля. Текущий пароль не нужен
+    # То же, что preferences.ai_insights: фронт шлёт оба поля. Текущий пароль не нужен
     ai_insights_consent: Optional[bool] = None
 
     @field_validator("base_currency", mode="before")
@@ -359,12 +359,12 @@ class UserOut(BaseModel):
     base_currency: str = DEFAULT_CURRENCY
     created_at: datetime
     last_login_at: Optional[datetime] = None
-    # "/avatars/<uuid>.jpg" или null (PROFILE_TASKS.md, п. 1.1)
+    # "/avatars/<uuid>.jpg" или null
     avatar_url: Optional[str] = None
     # false — кода восстановления нет, сбросить забытый пароль не получится: стоит предложить создать
     has_recovery_code: bool = False
     preferences: Preferences = Preferences()
-    # Копия preferences.ai_insights (B.2.5)
+    # Копия preferences.ai_insights
     ai_insights_consent: bool = False
 
     @field_validator("preferences", mode="before")
@@ -375,7 +375,7 @@ class UserOut(BaseModel):
     @computed_field
     @property
     def rates_pending(self) -> bool:
-        """True, пока после смены основной валюты докачиваются курсы: суммы временно неполные (п. 1.6)."""
+        """True, пока после смены основной валюты докачиваются курсы: суммы временно неполные."""
         return rates.user_rates_pending(self.id)
 
 
@@ -435,7 +435,7 @@ class BiggestReceipt(BaseModel):
 
 
 class ProfileStatsOut(BaseModel):
-    """GET /api/profile/stats (PROFILE_TASKS.md, п. 1.3). Все суммы — в основной валюте."""
+    """GET /api/profile/stats. Все суммы — в основной валюте."""
     base_currency: str
     receipts_count: int
     items_count: int
@@ -572,7 +572,7 @@ class CurrencyOut(BaseModel):
     digits: int
 
 
-# --- Категории (ограничения — CATEGORIES_TASKS.md, п. 0.4) ---
+# --- Категории ---
 
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -583,7 +583,7 @@ class CategoryOut(BaseModel):
     icon: str
     position: int
     # Ключ стандартной категории (groceries … other) — по нему фронт показывает перевод.
-    # null — категория своя или переименованная (I18N_TASKS.md, п. 3.2)
+    # null — категория своя или переименованная
     default_key: Optional[str] = None
 
 
@@ -666,7 +666,7 @@ class CategoryRuleOut(BaseModel):
 
 
 
-# --- Автокатегория для названий без фото (NEXT_WEEK_TASKS.md, A.2.3) ---
+# --- Автокатегория для названий без фото ---
 
 CATEGORIZE_MAX_ITEMS = 50
 

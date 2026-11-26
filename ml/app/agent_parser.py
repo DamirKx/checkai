@@ -1529,9 +1529,9 @@ def parse_receipt_with_correction(
     fix_item_names(data.get("items"))
     data = drop_fiscal_operator_store(ocr_text, data)
 
-    # store — как напечатано на чеке, merchant — каноническое имя сети (PROFILE_TASKS.md, п. 2.2)
+    # store — как напечатано на чеке, merchant — каноническое имя сети
     data["merchant"] = canonical_merchant(data.get("store"))
-    # Фискальные реквизиты (NEXT_WEEK_TASKS.md, C.3)
+    # Фискальные реквизиты
     data["fiscal"] = extract_fiscal_info(ocr_text)
     data.setdefault("parser_used", "qwen")
     if warnings:

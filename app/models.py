@@ -17,9 +17,9 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     base_currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
     created_at = Column(DateTime, default=utcnow)
-    # Фото профиля: "/avatars/<uuid>.jpg" (PROFILE_TASKS.md, п. 1.1)
+    # Фото профиля: "/avatars/<uuid>.jpg"
     avatar_path = Column(String(500), nullable=True)
-    # Тема и акцентный цвет: {"theme": ..., "accent": ...} (п. 1.2, значения — schemas.Preferences)
+    # Тема и акцентный цвет: {"theme": ..., "accent": ...} (значения — schemas.Preferences)
     preferences = Column(JSON, nullable=False, default=dict, server_default="{}")
     last_login_at = Column(DateTime, nullable=True)
     # bcrypt-хеш кода восстановления (сброс пароля без почты). NULL — код ещё не создан
@@ -27,12 +27,12 @@ class User(Base):
     receipts = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     categories = relationship("Category", cascade="all, delete-orphan", order_by="Category.position")
-    # ИИ-рекомендации (NEXT_WEEK_TASKS.md, B.2.3) удаляются вместе с аккаунтом
+    # ИИ-рекомендации удаляются вместе с аккаунтом
     insights = relationship("Insight", cascade="all, delete-orphan", passive_deletes=True)
 
     @property
     def ai_insights_consent(self) -> bool:
-        """Согласие на ИИ-анализ расходов хранится в preferences.ai_insights (B.2.5)."""
+        """Согласие на ИИ-анализ расходов хранится в preferences.ai_insights."""
         prefs = self.preferences if isinstance(self.preferences, dict) else {}
         return prefs.get("ai_insights") is True
 
@@ -57,7 +57,7 @@ class Category(Base):
     icon = Column(String(8), nullable=False, default="◌")
     position = Column(Integer, nullable=False, default=0)
     # groceries … other у нетронутой стандартной категории, NULL — своя или переименованная
-    # (I18N_TASKS.md, п. 3.2). Название в базе всегда русское, перевод — на фронте по этому ключу
+    # Название в базе всегда русское, перевод — на фронте по этому ключу
     default_key = Column(String(32), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
@@ -87,7 +87,7 @@ class _CategoryName:
 
 class Receipt(_CategoryName, Base):
     __tablename__ = "receipts"
-    # Поиск дубликатов по фото и фискальному номеру (NEXT_WEEK_TASKS.md, C.2). Не уникальные:
+    # Поиск дубликатов по фото и фискальному номеру. Не уникальные:
     # «Всё равно сохранить» должно работать
     __table_args__ = (
         Index("ix_receipts_user_image_hash", "user_id", "image_hash"),
@@ -108,11 +108,11 @@ class Receipt(_CategoryName, Base):
     currency = Column(String(3), nullable=False, default="KZT", server_default="KZT")
     rate_to_kzt = Column(Float, nullable=True)
     image_path = Column(String(500), nullable=True)
-    # photo | manual: чек распознан с фото или введён руками (NEXT_WEEK_TASKS.md, A.2.1)
+    # photo | manual: чек распознан с фото или введён руками
     source = Column(String(10), nullable=False, default="photo", server_default="photo")
-    # SHA-256 файла фото — считает сервер, с фронта не принимается (C.2.2)
+    # SHA-256 файла фото — считает сервер, с фронта не принимается
     image_hash = Column(String(64), nullable=True)
-    # «РНМ:номер:ФП» из реквизитов фискального чека (C.3), NULL — реквизиты не распознаны
+    # «РНМ:номер:ФП» из реквизитов фискального чека, NULL — реквизиты не распознаны
     fiscal_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
@@ -130,7 +130,7 @@ class ReceiptItem(_CategoryName, Base):
     price_per_unit = Column(Float, nullable=True, default=0.0)
     total_price = Column(Float, nullable=True, default=0.0)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
-    # Кто выбрал категорию: ai | keywords | rule | user, NULL — категории нет (п. 2.1)
+    # Кто выбрал категорию: ai | keywords | rule | user, NULL — категории нет
     category_source = Column(String(16), nullable=True)
     receipt = relationship("Receipt", back_populates="items")
     category_rel = relationship("Category")
@@ -166,7 +166,7 @@ class ExchangeRate(Base):
 
 
 class Insight(Base):
-    """Сохранённый ИИ-анализ расходов (NEXT_WEEK_TASKS.md, B.2.3). Показывается последний."""
+    """Сохранённый ИИ-анализ расходов. Показывается последний."""
     __tablename__ = "insights"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -177,5 +177,5 @@ class Insight(Base):
     data = Column(JSON, nullable=False)
     # Хеш сводки (crud.snapshot_hash): данные не изменились — повторно не генерируем
     snapshot_hash = Column(String(64), nullable=False)
-    # Язык текста анализа: ru | kk | en (I18N_TASKS.md, п. 3.5). На каждом языке — свой последний анализ
+    # Язык текста анализа: ru | kk | en. На каждом языке — свой последний анализ
     language = Column(String(2), nullable=False, default="ru", server_default="ru")

@@ -262,7 +262,7 @@ def parse_receipt(raw_lines: List[str]) -> Dict[str, Any]:
     fix_item_names(items)
     return {
         'store': store,
-        # Каноническое имя сети: по нему группируются «любимый магазин» и поиск (PROFILE_TASKS.md, п. 2.2)
+        # Каноническое имя сети: по нему группируются «любимый магазин» и поиск
         'merchant': canonical_merchant(store),
         'date': date,
         'time': time,
@@ -270,7 +270,7 @@ def parse_receipt(raw_lines: List[str]) -> Dict[str, Any]:
         'total': total,
         'currency': '₸',
         'items_count': len(items),
-        # Фискальные реквизиты для защиты от дубликатов (NEXT_WEEK_TASKS.md, C.3)
+        # Фискальные реквизиты для защиты от дубликатов
         'fiscal': extract_fiscal_info(lines),
     }
 
