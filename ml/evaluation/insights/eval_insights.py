@@ -16,12 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Добавляем корень проекта и ml в sys.path
+# Запуск файлом (python ml/evaluation/insights/eval_insights.py): нужен корень проекта в sys.path
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_DIR))
-sys.path.insert(0, str(PROJECT_DIR / "ml"))
 
-from ml.app.advisor import (
+from ml.advisor import (
     _collect_fact_numbers,
     _has_hallucinated_numbers,
     _response_matches_language,

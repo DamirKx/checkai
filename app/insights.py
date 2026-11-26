@@ -1,6 +1,6 @@
 """ИИ-рекомендации по расходам: генерация и проверка ответа.
 
-Цифры считает бэкенд (crud.build_finance_snapshot), текст пишет ML — ml.app.advisor.generate_insights.
+Цифры считает бэкенд (crud.build_finance_snapshot), текст пишет ML — ml.advisor.generate_insights.
 Пока модуля ML нет, он упал или AI_PROVIDER=off, работают шаблонные советы по фактам (model = "rules"):
 сервер работает и без ML. Ответ ML всё равно проверяется здесь: фронт показывает его как есть.
 """
@@ -46,7 +46,7 @@ MONTHS_RU = list(MONTHS_IN["ru"])
 
 def _advisor() -> Optional[Callable[..., Dict[str, Any]]]:
     try:
-        from ml.app.advisor import generate_insights
+        from ml.advisor import generate_insights
     except ImportError:
         return None
     return generate_insights

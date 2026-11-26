@@ -2,7 +2,7 @@
 
 «MAGNUM», «Magnum Cash&Carry», «ТОО "Magnum"», «МАГНУМ» → «Magnum».
 
-Без зависимостей: модуль импортируют и ML (ml/app), и бэкенд (ml.app.merchant).
+Без зависимостей: модуль импортируют и ML, и бэкенд.
 """
 import re
 from typing import Optional

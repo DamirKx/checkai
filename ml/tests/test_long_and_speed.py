@@ -1,5 +1,5 @@
 """Тесты длинных чеков и ускорения распознавания:
-- единая реализация OCR (app.ocr -> ml.app.ocr)
+- единая реализация OCR (app.ocr -> ml.ocr)
 - масштабирование по ширине OCR_TARGET_WIDTH и нарезка длинных фото полосами
 - быстрая категоризация (rules -> cache -> keywords -> Qwen + батчинг)
 - склейка фрагментов OCR в строки по координатам с компенсацией наклона
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from app.agent_parser import (
+from ml.agent_parser import (
     LLMTruncatedError,
     _compute_llm_params,
     _normalize_compact_items,
@@ -22,15 +22,15 @@ from app.agent_parser import (
     parse_long_receipt,
     parse_receipt_with_correction,
 )
-from app.categorize import categorize_items, clear_category_cache
-from app.confidence import attach_item_confidences, compute_item_confidence
-from app.ocr import (
+from ml.categorize import categorize_items, clear_category_cache
+from ml.confidence import attach_item_confidences, compute_item_confidence
+from ml.ocr import (
     _deduplicate_overlap_fragments,
     merge_ocr_fragments,
     merge_pages,
     receipt_size,
 )
-from app.preprocess import prepare, slice_long_image
+from ml.preprocess import prepare, slice_long_image
 
 
 def test_receipt_size_short_and_long():
@@ -134,7 +134,7 @@ def test_llm_params_and_truncated_fallback_to_chunks():
             raise LLMTruncatedError("truncated")
         return {"items": [["Молоко 3.2%", 1, 450.0, 450.0], ["Хлеб", 1, 200.0, 200.0]]}
 
-    with patch("app.agent_parser._call_llm", side_effect=fake_call_llm):
+    with patch("ml.agent_parser._call_llm", side_effect=fake_call_llm):
         res = parse_receipt_with_correction(sample_ocr)
 
     assert res["parser_used"] == "qwen_chunks"
@@ -156,7 +156,7 @@ def test_parse_long_receipt_deduplicates_chunk_boundary():
         {"items": [["Товар_2", 1, 100.0, 100.0], ["Товар_3", 1, 100.0, 100.0]]},
     ]
 
-    with patch("app.agent_parser._call_llm", side_effect=chunk_responses):
+    with patch("ml.agent_parser._call_llm", side_effect=chunk_responses):
         res = parse_long_receipt(ocr_text, chunk_lines=35, overlap_lines=3)
 
     names = [it["name"] for it in res["items"]]
@@ -194,7 +194,7 @@ def test_fast_categorize_rules_cache_keywords_then_qwen():
     fake_resp.json.return_value = {"response": '{"items": [{"index": 0, "category": "Техника"}]}'}
 
     with patch.dict(os.environ, {"USE_AI_PARSER": "1", "CATEGORIZE_FAST_FIRST": "1"}), \
-            patch("app.categorize.requests.post", return_value=fake_resp) as post_mock:
+            patch("ml.categorize.requests.post", return_value=fake_resp) as post_mock:
         categorize_items(items, categories, rules=rules)
         # Qwen вызван ровно 1 раз и только для 1 неизвестного товара (Артикул ZX-9000)
         assert post_mock.call_count == 1

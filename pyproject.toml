@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+# Корень проекта в sys.path: пакеты app и ml импортируются одинаково из тестов, скриптов и сервера
+pythonpath = ["."]
+testpaths = ["tests", "ml/tests"]

@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from app.categorize import categorize_items, normalize_item_name
-from app.currency import detect_currency, SUPPORTED
+from ml.categorize import categorize_items, normalize_item_name
+from ml.currency import detect_currency, SUPPORTED
 
 # Стандартные категории для оценки качества категоризации
 EVAL_CATEGORIES = [
@@ -487,11 +487,11 @@ def main():
             print(f"\nПроверяем: {receipt_id}", flush=True)
 
             if ocr is None:
-                from app.ocr import init_ocr
+                from ml.ocr import init_ocr
                 ocr = init_ocr()
 
             try:
-                from app.ocr import analyze_receipt_comparison
+                from ml.ocr import analyze_receipt_comparison
                 result = analyze_receipt_comparison(
                     str(image_path), ocr=ocr, categories=EVAL_CATEGORIES
                 )

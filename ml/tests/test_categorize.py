@@ -1,6 +1,6 @@
 import os
 from unittest.mock import patch, MagicMock
-from app.categorize import categorize_items, normalize_item_name
+from ml.categorize import categorize_items, normalize_item_name
 
 
 def test_normalize_item_name():
@@ -73,7 +73,7 @@ def test_qwen_out_of_range_falls_back_to_keywords():
         "response": '{"items": [{"index": 0, "category": 1}, {"index": 1, "category": 99}, {"index": 2, "category": 1}, {"index": 2, "category": 2}]}'
     }
 
-    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("app.categorize.requests.post", return_value=mock_resp):
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("ml.categorize.requests.post", return_value=mock_resp):
         categorize_items(items, categories)
 
     assert items[0]["category_id"] == 10
@@ -149,7 +149,7 @@ def test_category_source_present_for_every_item():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"response": '{"items": [{"index": 0, "category": 1}]}'}
     items = fresh()
-    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("app.categorize.requests.post", return_value=mock_resp):
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("ml.categorize.requests.post", return_value=mock_resp):
         categorize_items(items, categories)
     _assert_source_invariant(items)
     assert [i["category_source"] for i in items] == ["ai", "keywords", None]
@@ -157,7 +157,7 @@ def test_category_source_present_for_every_item():
     # Ollama недоступна
     items = fresh()
     with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), \
-            patch("app.categorize.requests.post", side_effect=ConnectionError("no ollama")):
+            patch("ml.categorize.requests.post", side_effect=ConnectionError("no ollama")):
         categorize_items(items, categories)
     _assert_source_invariant(items)
 
@@ -286,7 +286,7 @@ def test_i18n_kazakh_and_english_categorization():
     fake_resp = MagicMock(status_code=200)
     fake_resp.json.return_value = {"response": '{"items": [{"index": 0, "category": "Other"}]}'}
     other_items = [{"name": "Нечто непонятное XYZ"}]
-    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("app.categorize.requests.post", return_value=fake_resp):
+    with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), patch("ml.categorize.requests.post", return_value=fake_resp):
         categorize_items(other_items, categories)
     assert other_items[0]["category"] is None
 

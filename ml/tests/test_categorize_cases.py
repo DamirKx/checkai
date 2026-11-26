@@ -7,8 +7,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import app.categorize as cz
-from app.categorize import categorize_items
+import ml.categorize as cz
+from ml.categorize import categorize_items
 
 CASES = json.loads((Path(__file__).resolve().parents[1] / "evaluation" / "categorize_cases.json").read_text("utf-8"))["cases"]
 CATEGORIES = [
@@ -80,7 +80,7 @@ def test_qwen_answer_per_item_object():
     """Ответ {"0": ..., "1": ...}: схема требует ключ на каждый товар, «Другое» → без категории."""
     items = [{"name": "ФОЛЬГА АЛЮМИН."}, {"name": "ИБУПРОФЕН"}, {"name": "НЕЧТО"}]
     with patch.dict(os.environ, {"USE_AI_PARSER": "1"}), \
-            patch("app.categorize.requests.post",
+            patch("ml.categorize.requests.post",
                   return_value=_ollama_response({"0": "Дом и быт", "1": "Здоровье", "2": "Другое"})) as post:
         result = cz.categorize_via_qwen(items, CATEGORIES, store="Magnum")
     assert result == {0: 2, 1: 5}
@@ -95,7 +95,7 @@ def test_missing_categorize_model_falls_back_to_main():
     missing = MagicMock(status_code=404)
     with patch.object(cz, "CATEGORIZE_MODEL", "no-such-model"), patch.object(cz, "_categorize_model_missing", False), \
             patch.dict(os.environ, {"USE_AI_PARSER": "1"}), \
-            patch("app.categorize.requests.post", side_effect=[missing, _ollama_response({"0": "Дом и быт"})]) as post:
+            patch("ml.categorize.requests.post", side_effect=[missing, _ollama_response({"0": "Дом и быт"})]) as post:
         assert cz.categorize_via_qwen(items, CATEGORIES) == {0: 2}
         assert [c.kwargs["json"]["model"] for c in post.call_args_list] == ["no-such-model", cz.MODEL_NAME]
         assert cz._categorize_model_missing is True

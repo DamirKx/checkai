@@ -5,9 +5,9 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from app.categorize import categorize_items
-from app.preprocess import prepare, prepare_for_ocr
-from app.textfix import fix_item_names, fix_mixed_script
+from ml.categorize import categorize_items
+from ml.preprocess import prepare, prepare_for_ocr
+from ml.textfix import fix_item_names, fix_mixed_script
 
 STANDARD = [
     {"id": 1, "name": "Продукты", "description": "Еда и напитки для дома: молочные продукты, хлеб, мясо, овощи, фрукты, крупы, сладости"},
@@ -90,7 +90,7 @@ def test_preprocess_disabled_or_broken_returns_path(tmp_path):
 
 
 def test_drop_invented_items():
-    from app.agent_parser import drop_invented_items
+    from ml.agent_parser import drop_invented_items
     ocr = "DNS 2350\nCMарTOH BQ 5565L_FEST 2/16GB\nСУMА НOC 20%\nИТОГ 4199.00\nOlay Regenerist кемп д/лица"
     data = {"items": [
         {"name": "MO447CTZ0, CYMKA"},                 # пример из промпта, в чеке его нет
@@ -113,7 +113,7 @@ KAZAKHTELECOM_RECEIPT = "\n".join([
 
 
 def test_total_without_kopecks_not_taken_from_vat():
-    from app.agent_parser import extract_total_from_ocr
+    from ml.agent_parser import extract_total_from_ocr
     assert extract_total_from_ocr(KAZAKHTELECOM_RECEIPT) == 1000.0
     assert extract_total_from_ocr("Итого\n1 000 тг\nНДС\n107.14 тг") == 1000.0
     assert extract_total_from_ocr("ИТОГО\n=20140.00") == 20140.0
@@ -121,7 +121,7 @@ def test_total_without_kopecks_not_taken_from_vat():
 
 
 def test_fiscal_operator_is_not_store():
-    from app.agent_parser import drop_fiscal_operator_store
+    from ml.agent_parser import drop_fiscal_operator_store
     assert drop_fiscal_operator_store(KAZAKHTELECOM_RECEIPT, {"store": "ООО \"Казахтелеком\""})["store"] == ""
     seller = "ТОО \"Бухта.kz\"\n" + KAZAKHTELECOM_RECEIPT
     assert drop_fiscal_operator_store(seller, {"store": "ТОО \"Бухта.kz\""})["store"] == "ТОО \"Бухта.kz\""

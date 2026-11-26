@@ -1305,7 +1305,7 @@ def categorize(
     rest = [it for it in named if it["category_source"] != "rule"]
     if rest:
         try:
-            from ml.app.categorize import categorize_items
+            from ml.categorize import categorize_items
             categorize_items(rest, _categories_for(current_user))
         except Exception as e:
             logger.warning("Автокатегория не сработала (%s): %s", type(e).__name__, e)

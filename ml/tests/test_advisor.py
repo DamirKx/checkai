@@ -2,7 +2,7 @@
 from unittest.mock import patch, MagicMock
 import pytest
 
-from app.advisor import (
+from ml.advisor import (
     detect_facts,
     build_rule_insights,
     generate_insights,
@@ -144,7 +144,7 @@ def test_validate_ai_response_drops_hallucinated_items(sample_snapshot):
 
 
 def test_generate_insights_fallback_on_error(sample_snapshot):
-    with patch("app.advisor.complete_json", side_effect=RuntimeError("API error")):
+    with patch("ml.advisor.complete_json", side_effect=RuntimeError("API error")):
         res = generate_insights(sample_snapshot, provider="gemini")
         assert res["model"] == "rules"
         assert len(res["insights"]["items"]) >= 2
@@ -157,7 +157,7 @@ def test_generate_insights_off_provider(sample_snapshot):
 
 
 def test_extract_numbers_multilocale():
-    from app.advisor import _extract_numbers_from_text, _has_hallucinated_numbers
+    from ml.advisor import _extract_numbers_from_text, _has_hallucinated_numbers
 
     assert _extract_numbers_from_text("Потрачено 12 500 ₸ и 12\xa0500,50 ₸ (35%)") == [12500.0, 12500.5, 35.0]
     assert _extract_numbers_from_text("Spent 12,500 ₸, over by ₸12,500.50 (+35%)") == [12500.0, 12500.5, 35.0]
@@ -167,7 +167,7 @@ def test_extract_numbers_multilocale():
 
 
 def test_looks_like_language():
-    from app.advisor import _looks_like_language
+    from ml.advisor import _looks_like_language
 
     assert _looks_like_language("You spent more on dining this month.", "en") is True
     assert _looks_like_language("Потрачено больше в этом месяце.", "en") is False
@@ -239,7 +239,7 @@ def test_llm_language_fallback_and_acceptance(sample_snapshot):
             },
         ],
     }
-    with patch("app.advisor.complete_json", return_value=russian_payload):
+    with patch("ml.advisor.complete_json", return_value=russian_payload):
         res = generate_insights({**sample_snapshot, "language": "en"}, provider="gemini")
         assert res["model"] == "rules"
         assert "Found " in res["insights"]["summary"]
@@ -268,7 +268,7 @@ def test_llm_language_fallback_and_acceptance(sample_snapshot):
             },
         ],
     }
-    with patch("app.advisor.complete_json", return_value=kazakh_payload):
+    with patch("ml.advisor.complete_json", return_value=kazakh_payload):
         res = generate_insights(sample_snapshot, provider="gemini", language="kk")
         assert res["model"] == "gemini"
         assert res["insights"]["items"][0]["type"] == "over_budget"

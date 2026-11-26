@@ -37,7 +37,7 @@ def _categories_signature(categories: List[dict]) -> tuple:
     )
 
 # Пытаемся импортировать единую функцию нормализации из бэкенда,
-# а при автономном запуске из папки ml/ используем точную копию контракта.
+# а если бэкенд недоступен (ML запущен отдельно от проекта), — точную копию контракта.
 try:
     from app.categories import normalize_item_name  # type: ignore
 except ImportError:

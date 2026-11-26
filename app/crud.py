@@ -19,7 +19,7 @@ from app.currencies import DEFAULT_CURRENCY
 from app.i18n import CategoryName, category_display_name
 
 try:
-    from ml.app.merchant import canonical_merchant
+    from ml.merchant import canonical_merchant
 except ImportError:  # ML-пакет не установлен: merchant берётся только из запроса
     def canonical_merchant(store: Optional[str]) -> Optional[str]:
         return None

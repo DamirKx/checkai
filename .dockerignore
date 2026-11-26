@@ -18,7 +18,6 @@ data/
 # Тесты и бенчмарк ML в рантайме не нужны
 tests/
 ml/tests/
-ml/test_ocr.py
 ml/evaluation/
 **/.pytest_cache
 *.md

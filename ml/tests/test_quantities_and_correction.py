@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.agent_parser import (
+from ml.agent_parser import (
     correct_item_quantities,
     parse_receipt_with_correction,
 )
@@ -135,7 +135,7 @@ def test_skip_self_correction_when_all_prices_confirmed_in_ocr():
         "currency": "KZT",
     }
 
-    with patch("app.agent_parser._call_llm", return_value=first_response) as mock_llm:
+    with patch("ml.agent_parser._call_llm", return_value=first_response) as mock_llm:
         result = parse_receipt_with_correction(ocr_text)
 
     assert mock_llm.call_count == 1
@@ -205,7 +205,7 @@ def test_reject_self_correction_when_confirmed_prices_corrupted():
     }
 
     with patch(
-        "app.agent_parser._call_llm",
+        "ml.agent_parser._call_llm",
         side_effect=[first_response, corrupted_second_response],
     ) as mock_llm:
         result = parse_receipt_with_correction(ocr_text)
@@ -266,7 +266,7 @@ def test_accept_self_correction_when_missing_item_added():
     }
 
     with patch(
-        "app.agent_parser._call_llm",
+        "ml.agent_parser._call_llm",
         side_effect=[first_response, second_response],
     ) as mock_llm:
         result = parse_receipt_with_correction(ocr_text)
