@@ -35,11 +35,18 @@ services:
       - USE_AI_PARSER=${USE_AI_PARSER:-auto}
       # ИИ-рекомендации: не чаще одного нового анализа на пользователя за столько минут (0 — без ограничения)
       - INSIGHTS_REFRESH_MINUTES=${INSIGHTS_REFRESH_MINUTES:-1}
-      # Отключаем багнутые фичи PaddlePaddle 3.0 на Intel/AMD процессорах
+      # Отключаем багнутые фичи PaddlePaddle 3.0 на Intel/AMD процессорах.
+      # FLAGS_use_onednn здесь не задаём: им управляет OCR_ENABLE_MKLDNN (ml/app/ocr.py), иначе флаг перебил бы настройку
       - FLAGS_enable_pir_api=0
-      - FLAGS_use_onednn=0
       - FLAGS_enable_pir_in_executor=0
       - FLAGS_pir_apply_inplace_pass=0
+      # Ускорение OCR библиотекой OneDNN: чтение текста ~в 5 раз быстрее при той же точности
+      # (бенчмарк на 15 эталонных чеках: 9,8 → 1,9 с). 0 — выключить, если OCR падает на этом процессоре
+      - OCR_ENABLE_MKLDNN=${OCR_ENABLE_MKLDNN:-1}
+      # Категории: сначала правила, кэш и ключевые слова, Qwen — только для незнакомых товаров (2,8 → 1,1 с)
+      - CATEGORIZE_FAST_FIRST=${CATEGORIZE_FAST_FIRST:-1}
+      # Отдельная модель Ollama для категорий (пусто — основная). Сравнить модели: ml/evaluation/categorize_eval.py
+      - OLLAMA_CATEGORIZE_MODEL=${OLLAMA_CATEGORIZE_MODEL:-}
       # Не проверять связь с серверами моделей при каждом старте: модели уже лежат в paddlex_models
       - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
       # Загружать модель распознавания при старте, а не при первом чеке (0 — выключить)

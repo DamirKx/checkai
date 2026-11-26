@@ -249,9 +249,12 @@ def _warm_up_ocr() -> None:
 
 def _categories_for(user: Optional[models.User]) -> List[dict]:
     """Категории, по которым ML раскладывает товары: свои у пользователя, стандартные у гостя (id = None)."""
+    # default_key — чтобы встроенный словарь ключевых слов работал и после переименования стандартной категории
     if user is not None:
-        return [{"id": c.id, "name": c.name, "description": c.description} for c in user.categories]
-    return [{"id": None, "name": d["name"], "description": d["description"]} for d in DEFAULT_CATEGORIES]
+        return [{"id": c.id, "name": c.name, "description": c.description, "default_key": c.default_key}
+                for c in user.categories]
+    return [{"id": None, "name": d["name"], "description": d["description"], "default_key": d["key"]}
+            for d in DEFAULT_CATEGORIES]
 
 
 def _run_ocr(image_path: str, categories: Optional[List[dict]] = None) -> dict:
