@@ -29,6 +29,9 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 DATA_DIR = os.path.join(BASE_DIR, "data")
+# Интерфейс: шаблон страницы и статика (CSS, JS, PWA)
+FRONTEND_TEMPLATES_DIR = os.path.join(BASE_DIR, "frontend", "templates")
+FRONTEND_STATIC_DIR = os.path.join(BASE_DIR, "frontend", "static")
 # Папка с фото чеков. Если база вынесена в другое место (например, в тестах), фото стоит вынести рядом:
 # очистка «осиротевших» фото сверяет файлы именно с этой базой.
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "").strip() or os.path.join(DATA_DIR, "receipts")

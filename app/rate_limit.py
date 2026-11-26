@@ -55,3 +55,21 @@ def get_client_ip(request: Request) -> str:
         if forwarded:
             return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "127.0.0.1"
+
+
+# Лимиты по пути (макс. запросов, секунд в окне) — проверяет middleware в app/main.py
+RATE_LIMIT_RULES = {
+    "/api/auth/login": (10, 60),            # защита от перебора паролей
+    "/api/auth/register": (10, 60),         # защита от спама регистраций
+    "/api/auth/reset-password": (5, 60),    # защита от перебора кодов восстановления
+    "/api/auth/recovery-code": (5, 60),     # защита от перебора пароля
+    "/api/analyze": (15, 60),               # защита от перегрузки OCR
+    "/api/analyze/async": (15, 60),         # защита от перегрузки OCR
+}
+# Лимиты, которые зависят и от метода (GET того же пути не ограничиваем)
+RATE_LIMIT_METHOD_RULES = {
+    ("POST", "/api/categories"): (30, 60),  # защита от спама категориями
+    ("POST", "/api/auth/me/avatar"): (20, 60),  # перекодирование картинки — не бесплатное
+}
+# POST /api/categorize: запросов на пользователя за столько секунд (проверяет сам эндпоинт)
+CATEGORIZE_RATE = (30, 60)

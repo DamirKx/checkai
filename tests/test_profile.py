@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy.orm import Session
 
-import testenv  # noqa: F401,E402 — временная база и папки, до импорта server
+import testenv  # noqa: F401,E402 — временная база и папки, до импорта app.main
 os.environ.setdefault("SECRET_KEY", "test_secret_key_1234567890_antigravity_safe_key_32chars")
 
-import server
-from server import app
+from app import ocr as ocr_service, uploads
+from app.main import app
 from app import auth, config, database, models, rates
 from app.categories import create_default_categories
 from app.rate_limit import limiter
@@ -69,7 +69,7 @@ class ProfileTestCase(unittest.TestCase):
         for email in EMAILS:
             user = self.db.query(models.User).filter(models.User.email == email).first()
             if user:
-                server._delete_avatar_file(user.avatar_path)
+                uploads.delete_avatar_file(user.avatar_path)
                 self.db.delete(user)
         self.db.commit()
 
@@ -134,7 +134,7 @@ class TestAvatar(ProfileTestCase):
         r = self.upload(image_bytes(size=(2000, 1000)))
         self.assertEqual(r.status_code, 200, r.text)
         with Image.open(self.avatar_file(r.json()["avatar_url"])) as img:
-            self.assertLessEqual(max(img.size), server.AVATAR_MAX_SIDE)
+            self.assertLessEqual(max(img.size), uploads.AVATAR_MAX_SIDE)
 
     def test_too_big_file(self):
         r = self.upload(b"\xff" * (config.MAX_AVATAR_BYTES + 10))
@@ -479,11 +479,11 @@ class TestCategorySourceAndMerchant(ProfileTestCase):
             return {"raw_lines": ["MAGNUM"], "store": "MAGNUM", "merchant": "Magnum", "total": 1,
                     "items": [{"name": "Хлеб", "total_price": 1}]}
 
-        with patch.object(server, "analyze_receipt", fake_analyze), patch.object(server, "get_ocr", lambda: None):
+        with patch.object(ocr_service, "analyze_receipt", fake_analyze), patch.object(ocr_service, "get_ocr", lambda: None):
             r = self.client.post("/api/analyze", files={"file": ("r.jpg", image_bytes(), "image/jpeg")})
         self.assertEqual(r.status_code, 200, r.text)
         data = r.json()["data"]
-        server._delete_image_file(data["image_path"])
+        uploads.delete_image_file(data["image_path"])
         self.assertEqual(data["merchant"], "Magnum")
         self.assertIn("category_source", data["items"][0])
 

@@ -562,7 +562,7 @@ def category_display_name(default_key: Optional[str], name: str, lang: Optional[
 
 
 def validation_error(code: str, **params: Any) -> PydanticCustomError:
-    """Ошибка своего валидатора: type = code, msg — русский текст. Перевод — в обработчике 422 (server.py)."""
+    """Ошибка своего валидатора: type = code, msg — русский текст. Перевод — в обработчике 422 (app/main.py)."""
     return PydanticCustomError(code, MESSAGES[code][DEFAULT_LANG], params or None)
 
 
@@ -570,7 +570,7 @@ class AppError(HTTPException):
     """Ошибка API по коду: ответ {"detail": текст на языке запроса, "code": code}.
 
     detail исключения — текст на языке lang (по умолчанию русский): его видят фоновые задачи
-    (app/tasks.py), где запроса уже нет. Обработчик в server.py переводит по Accept-Language.
+    (app/tasks.py), где запроса уже нет. Обработчик в app/main.py переводит по Accept-Language.
     """
 
     def __init__(self, status_code: int, code: str, *, headers: Optional[Dict[str, str]] = None,

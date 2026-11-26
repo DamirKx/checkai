@@ -5,9 +5,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-import testenv  # noqa: F401 — временная база и папки, до импорта server
+import testenv  # noqa: F401 — временная база и папки, до импорта app.main
 
-import server
+from app import uploads
+from app.tasks import task_manager
 from apptest import AppTestCase, image_bytes
 from app.i18n import tr
 
@@ -60,7 +61,7 @@ class TestAnalyzeTaskOwner(AppTestCase):
     """Фронт распознаёт через /api/analyze/async: результат задачи (чек, duplicate_of) видит только владелец."""
 
     def run_task(self, headers=None, analyze=fake_analyze):
-        with patch("server.get_ocr", return_value=None), patch("server.analyze_receipt", side_effect=analyze):
+        with patch("app.ocr.get_ocr", return_value=None), patch("app.ocr.analyze_receipt", side_effect=analyze):
             r = self.client.post("/api/analyze/async", files={"file": ("check.jpg", image_bytes(), "image/jpeg")},
                                  headers=headers or {})
             self.assertEqual(r.status_code, 202, r.text)
@@ -78,7 +79,7 @@ class TestAnalyzeTaskOwner(AppTestCase):
         task_id, status = self.run_task(self.headers_a)
         self.assertEqual(status["status"], "completed")
         self.assertEqual(status["result"]["store"], "Magnum")
-        self.assertTrue(status["result"]["image_path"].startswith(server.RECEIPTS_URL_PREFIX))
+        self.assertTrue(status["result"]["image_path"].startswith(uploads.RECEIPTS_URL_PREFIX))
         self.assertIn("duplicate_of", status["result"])
 
     def test_other_user_and_anonymous_cannot_read(self):
@@ -101,13 +102,13 @@ class TestAnalyzeTaskOwner(AppTestCase):
         self.assertEqual(status["status"], "failed")
         self.assertEqual(status["error"], tr("ocr_failed"))
         self.assertNotIn("внутренняя деталь", status["error"])
-        self.assertFalse(os.path.exists(server.task_manager.get_task(task_id).file_path))
+        self.assertFalse(os.path.exists(task_manager.get_task(task_id).file_path))
 
     def test_no_text_error_in_request_language(self):
         def empty(image_path, ocr=None, categories=None):
             return {"raw_lines": [], "items": []}
 
-        with patch("server.get_ocr", return_value=None), patch("server.analyze_receipt", side_effect=empty):
+        with patch("app.ocr.get_ocr", return_value=None), patch("app.ocr.analyze_receipt", side_effect=empty):
             headers = {**self.headers_a, "Accept-Language": "en"}
             r = self.client.post("/api/analyze/async", files={"file": ("check.jpg", image_bytes(), "image/jpeg")},
                                  headers=headers)

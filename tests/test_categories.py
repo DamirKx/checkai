@@ -7,11 +7,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-import testenv  # noqa: F401,E402 — временная база и папки, до импорта server
+import testenv  # noqa: F401,E402 — временная база и папки, до импорта app.main
 os.environ.setdefault("SECRET_KEY", "test_secret_key_1234567890_antigravity_safe_key_32chars")
 
-import server
-from server import app
+from app import rate_limit
+from app.main import app
 from app import database, models, auth
 from app.rate_limit import limiter
 from app.categories import DEFAULT_CATEGORIES, create_default_categories, normalize_item_name
@@ -138,7 +138,7 @@ class TestCategoriesAPI(unittest.TestCase):
         r_empty = self.create("Пустые поля", icon="", description="  ")
         self.assertEqual((r_empty.json()["icon"], r_empty.json()["description"]), ("◌", None))
 
-        with patch.dict(server.RATE_LIMIT_METHOD_RULES, {("POST", "/api/categories"): (1000, 60)}):
+        with patch.dict(rate_limit.RATE_LIMIT_METHOD_RULES, {("POST", "/api/categories"): (1000, 60)}):
             for i in range(40):  # 8 стандартных + 2 созданных + 40 = 50
                 self.assertEqual(self.create(f"Категория {i}").status_code, 201)
             r_limit = self.create("Пятьдесят первая")
@@ -318,7 +318,7 @@ class TestCategoriesAPI(unittest.TestCase):
             return {"store": "Magnum", "raw_lines": ["Крем Nivea 50мл 1890"], "currency": "KZT",
                     "items": [{"name": "Крем Nivea 50мл", "total_price": 1890}, {"name": "Хлеб", "total_price": 300}]}
 
-        with patch("server.get_ocr", return_value=None), patch("server.analyze_receipt", side_effect=fake_analyze):
+        with patch("app.ocr.get_ocr", return_value=None), patch("app.ocr.analyze_receipt", side_effect=fake_analyze):
             files = {"file": ("check.jpg", b"fake-image", "image/jpeg")}
             r = self.client.post("/api/analyze", files=files, headers=self.headers_a)
             self.assertEqual(r.status_code, 200, r.text)
